@@ -12,6 +12,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
+from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
@@ -38,14 +39,16 @@ _TEXT = "#d4d4d4"
 _DIM = "#666666"
 _MUTED = "#808080"
 _ACCENT = "#8abeb7"
-_BORDER = "#5f87ff"
-_BORDER_ACTIVE = "#00d7ff"
+_BORDER_MUTED = "#505050"
 _ERROR = "#cc6666"
 _WARNING = "#ffff00"
 _USER_BG = "#343541"
+_INPUT_BG = "#26262e"
 _TOOL_BG = "#282832"
 _TOOL_OK_BG = "#283228"
 _TOOL_ERR_BG = "#3c2828"
+
+_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 def format_tokens(count: int) -> str:
@@ -57,6 +60,8 @@ def format_tokens(count: int) -> str:
 
 
 class UserMessageWidget(Static):
+    """User text on a full-width background block with vertical padding."""
+
     def __init__(self, text: str) -> None:
         super().__init__(Text(text.strip(), style=_TEXT), classes="user")
 
@@ -77,9 +82,7 @@ class AssistantMessageWidget(Vertical):
         yield self._body
         yield self._error
 
-    def set_content(
-        self, thinking: str, text: str, *, error: str | None = None
-    ) -> None:
+    def set_content(self, thinking: str, text: str, *, error: str | None = None) -> None:
         if thinking.strip():
             self._thinking.update(Text(thinking.strip(), style=f"italic {_MUTED}"))
             self._thinking.display = True
@@ -99,34 +102,33 @@ class AssistantMessageWidget(Vertical):
             self._error.display = False
 
 
-class ToolWidget(Static):
+class ToolWidget(Vertical):
+    """Tool call: a title line, then the output on a coloured background block."""
+
     def __init__(self, name: str, arguments: dict) -> None:
-        super().__init__(Text(""), classes="tool")
-        self._name = name
-        self._title = Text.assemble(
-            ("> ", _WARNING),
-            (name, f"bold {_TEXT}"),
-            (" ", ""),
-            (json.dumps(arguments, ensure_ascii=False), _MUTED),
+        super().__init__(classes="tool")
+        self._title = Static(
+            Text.assemble(
+                (name, f"bold {_TEXT}"),
+                (" ", ""),
+                (json.dumps(arguments, ensure_ascii=False), _MUTED),
+            ),
+            classes="tool-title",
         )
-        self._output = ""
-        self._is_error = False
-        self._render_content()
+        self._body = Static(Text(""), classes="tool-body")
+        self._body.display = False
+
+    def compose(self) -> ComposeResult:
+        yield self._title
+        yield self._body
 
     def set_result(self, output: str, is_error: bool) -> None:
-        self._output = output
-        self._is_error = is_error
         self.set_class(True, "error" if is_error else "success")
-        self._render_content()
-
-    def _render_content(self) -> None:
-        content = self._title.copy()
-        if self._output.strip():
-            content.append("\n")
-            content.append(
-                self._output.rstrip(), style=_ERROR if self._is_error else _MUTED
+        if output.strip():
+            self._body.update(
+                Text(output.rstrip(), style=_ERROR if is_error else _MUTED)
             )
-        self.update(content)
+            self._body.display = True
 
 
 class SystemNote(Static):
@@ -228,19 +230,20 @@ class DeferredApprover:
 
 class TMPromptApp(App[None]):
     CSS = f"""
-    #header {{ height: 1; padding: 0 1; }}
-    #messages {{ height: 1fr; padding: 0 1; }}
-    .user {{ background: {_USER_BG}; color: {_TEXT}; width: 1fr; padding: 0 1; margin-bottom: 1; }}
-    .assistant {{ width: 1fr; height: auto; margin-bottom: 1; }}
+    .user {{ background: {_USER_BG}; color: {_TEXT}; width: 1fr; padding: 1 1; margin-bottom: 1; }}
+    .assistant {{ width: 1fr; height: auto; padding: 0 1; margin-bottom: 1; }}
     .assistant .thinking {{ color: {_MUTED}; text-style: italic; width: 1fr; }}
     .assistant .body {{ color: {_TEXT}; width: 1fr; }}
     .assistant .error {{ color: {_ERROR}; width: 1fr; }}
-    .tool {{ background: {_TOOL_BG}; width: 1fr; padding: 0 1; margin-bottom: 1; }}
-    .tool.success {{ background: {_TOOL_OK_BG}; }}
-    .tool.error {{ background: {_TOOL_ERR_BG}; }}
+    .tool {{ width: 1fr; height: auto; padding: 0 1; margin-bottom: 1; }}
+    .tool .tool-title {{ width: 1fr; }}
+    .tool .tool-body {{ width: 1fr; background: {_TOOL_BG}; padding: 0 1; }}
+    .tool.success .tool-body {{ background: {_TOOL_OK_BG}; }}
+    .tool.error .tool-body {{ background: {_TOOL_ERR_BG}; }}
     .system {{ color: {_DIM}; width: 1fr; margin-bottom: 1; }}
-    #prompt {{ border: round {_BORDER}; }}
-    #prompt.working {{ border: round {_BORDER_ACTIVE}; }}
+    #messages {{ height: 1fr; }}
+    #editor-status {{ height: 1; }}
+    #prompt {{ border: none; background: {_INPUT_BG}; }}
     #footer {{ height: 2; padding: 0 1; }}
     #perm-box {{ width: 60%; height: auto; padding: 1 2; background: $panel; border: round {_WARNING}; }}
     #perm-title {{ text-style: bold; padding-bottom: 1; }}
@@ -252,16 +255,19 @@ class TMPromptApp(App[None]):
     """
     BINDINGS = [Binding("ctrl+q", "quit", "Quit")]
 
-    def __init__(self, agent: Agent, model: Model) -> None:
+    def __init__(self, agent: Agent, model: Model, *, banner: str | None = None) -> None:
         super().__init__()
         self._agent = agent
         self._model = model
+        self._banner = banner
         self.command_handler: Callable[[str], Awaitable[str | None]] | None = None
         self.resume_on_start = False
         self._status = "idle"
         self._current: AssistantMessageWidget | None = None
         self._current_mounted = False
         self._tools: dict[str, ToolWidget] = {}
+        self._spin_index = 0
+        self._spinner_timer: Timer | None = None
 
     # -- small public API used by commands / tests ------------------------
     def write_line(self, text: str, style: str = _DIM) -> None:
@@ -272,17 +278,18 @@ class TMPromptApp(App[None]):
 
     # -- layout -----------------------------------------------------------
     def compose(self) -> ComposeResult:
-        yield Static("", id="header")
         yield VerticalScroll(id="messages")
+        yield Static("", id="editor-status")
         yield Input(placeholder="Ask TM to do something, then Enter.", id="prompt")
         yield Static("", id="footer")
 
     def on_mount(self) -> None:
         self._agent.subscribe(self._on_agent_event)
-        self._update_header()
+        self._update_editor_status()
         self._update_footer()
         self.query_one("#prompt", Input).focus()
-        self.write_line("TM ready. Type a request, /help for commands, /exit to quit.")
+        if self._banner:
+            self.run_worker(self._mount(SystemNote(self._banner)), exit_on_error=False)
         if self.resume_on_start:
             self.run_worker(self._resume_startup(), exclusive=True)
 
@@ -295,34 +302,54 @@ class TMPromptApp(App[None]):
         if self.command_handler is not None:
             await self.command_handler("resume")
 
-    # -- status / footer --------------------------------------------------
+    # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
         self._status = status
         self.sub_title = status
-        self._update_header()
-        prompt = self.query_one("#prompt", Input)
-        prompt.set_class(status != "idle", "working")
+        if status == "idle":
+            if self._spinner_timer is not None:
+                self._spinner_timer.stop()
+                self._spinner_timer = None
+        elif self._spinner_timer is None:
+            self._spinner_timer = self.set_interval(0.1, self._tick_spinner)
+        self._update_editor_status()
 
-    def _update_header(self) -> None:
-        working = self._status != "idle"
-        status_style = _BORDER_ACTIVE if working else _DIM
-        self.query_one("#header", Static).update(
-            Text.assemble(
-                ("TM ", f"bold {_ACCENT}"),
-                (f"{self._model.provider}/{self._model.id}", _TEXT),
-                ("   ", ""),
-                (self._status, f"italic {status_style}"),
-                ("   /help  /exit  ctrl+q quit", _DIM),
-            )
-        )
+    def _tick_spinner(self) -> None:
+        self._spin_index = (self._spin_index + 1) % len(_SPINNER)
+        self._update_editor_status()
+
+    def _update_editor_status(self) -> None:
+        width = max(self.size.width, 20)
+        line = Text()
+        if self._status == "idle":
+            line.append("─" * width, style=_BORDER_MUTED)
+        else:
+            label = f"{_SPINNER[self._spin_index]} {self._status}"
+            head = f"── {label} "
+            tail = "─" * max(0, width - len(head))
+            line.append(head, style=_BORDER_MUTED)
+            line.append(label, style=_TEXT)
+            line.append(tail, style=_BORDER_MUTED)
+        self.query_one("#editor-status", Static).update(line)
+
+    def _git_branch(self) -> str | None:
+        head = Path.cwd() / ".git" / "HEAD"
+        try:
+            text = head.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if text.startswith("ref: refs/heads/"):
+            return text[len("ref: refs/heads/") :]
+        return None
 
     def _update_footer(self) -> None:
-        cwd = Path.cwd()
-        home = Path.home()
-        cwd_text = str(cwd)
-        with_home = str(cwd)
-        if cwd_text.startswith(str(home)):
-            with_home = "~" + cwd_text[len(str(home)) :]
+        cwd = str(Path.cwd())
+        home = str(Path.home())
+        if cwd.startswith(home):
+            cwd = "~" + cwd[len(home) :]
+        branch = self._git_branch()
+        if branch:
+            cwd = f"{cwd} ({branch})"
 
         total_in = total_out = cache_read = 0
         for message in self._agent.messages:
@@ -337,7 +364,7 @@ class TMPromptApp(App[None]):
         if cache_read:
             stats += f" R{format_tokens(cache_read)}"
         if window:
-            stats += f"  {used * 100 // window}%/{format_tokens(window)}"
+            stats += f"  {used * 100 // window}%/{format_tokens(window)} (auto)"
 
         right = f"({self._model.provider}) {self._model.id}"
         if self._model.reasoning:
@@ -345,7 +372,7 @@ class TMPromptApp(App[None]):
         width = max(self.size.width - 2, 20)
         pad = max(1, width - len(stats) - len(right))
         self.query_one("#footer", Static).update(
-            Text(f"{with_home}\n{stats}{' ' * pad}{right}", style=_DIM)
+            Text(f"{cwd}\n{stats}{' ' * pad}{right}", style=_DIM)
         )
 
     # -- agent events -----------------------------------------------------
@@ -391,7 +418,7 @@ class TMPromptApp(App[None]):
                 self._current_mounted = False
             self._update_footer()
         elif isinstance(event, ToolExecutionStartEvent):
-            self._set_status(f"tool: {event.tool_name}")
+            self._set_status(f"{event.tool_name}")
             widget = ToolWidget(event.tool_name, event.arguments)
             self._tools[event.tool_call_id] = widget
             await self._mount(widget)
@@ -432,4 +459,10 @@ class TMPromptApp(App[None]):
             self.query_one("#prompt", Input).focus()
 
 
-__all__ = ["DeferredApprover", "PermissionScreen", "SessionScreen", "TMPromptApp", "TextualApprover"]
+__all__ = [
+    "DeferredApprover",
+    "PermissionScreen",
+    "SessionScreen",
+    "TMPromptApp",
+    "TextualApprover",
+]

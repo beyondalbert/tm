@@ -283,6 +283,34 @@ async def _console_picker(infos: list[SessionInfo]) -> SessionInfo | None:
     return await asyncio.to_thread(_pick_session_console, infos, console)
 
 
+def _startup_banner(model: Model, resources: Resources, no_context_files: bool) -> str:
+    cwd = Path.cwd()
+    lines = [
+        f"TM v{__version__}",
+        "escape to interrupt  ·  / for commands  ·  ! to run a shell command  ·  ctrl+q to quit",
+        "Ask TM to explain its features, or type /help.",
+    ]
+    if not no_context_files:
+        files = load_context_files(cwd, config_dir())
+        if files:
+            lines.append("")
+            lines.append("[Context]")
+            lines.extend(f"  {path}" for path, _ in files)
+    if resources.skills:
+        lines.append("")
+        lines.append("[Skills]")
+        lines.extend(f"  {skill.name}" for skill in resources.skills)
+    if resources.templates:
+        lines.append("")
+        lines.append("[Prompts]")
+        lines.extend(f"  /{name}" for name in sorted(resources.templates))
+    if resources.extensions.sources:
+        lines.append("")
+        lines.append("[Extensions]")
+        lines.extend(f"  {path}" for path in resources.extensions.sources)
+    return "\n".join(lines)
+
+
 def _run_tui(
     provider: Provider,
     model: Model,
@@ -309,7 +337,9 @@ def _run_tui(
         no_context_files=no_context_files,
         no_auto_compact=no_auto_compact,
     )
-    prompt_app = TMPromptApp(agent, model)
+    prompt_app = TMPromptApp(
+        agent, model, banner=_startup_banner(model, resources, no_context_files)
+    )
     prompt_app.resume_on_start = resume_on_start
     commands = _command_context(
         agent,
