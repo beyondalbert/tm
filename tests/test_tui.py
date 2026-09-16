@@ -12,6 +12,7 @@ from tm.ai.event_stream import EventStream  # noqa: E402
 from tm.ai.types import (  # noqa: E402
     AssistantMessage,
     DoneEvent,
+    ErrorEvent,
     Model,
     StartEvent,
     TextContent,
@@ -210,6 +211,16 @@ def scripted(messages: list[AssistantMessage]):
     return stream_fn
 
 
+def failing_stream_fn(model, context, options) -> EventStream:
+    """Provider that fails before any start event (e.g. a 401)."""
+
+    message = AssistantMessage(model="fake", stop_reason="error", error_message="boom")
+    stream: EventStream = EventStream()
+    stream.push(ErrorEvent(error="boom", message=message, partial=message))
+    stream.end(message)
+    return stream
+
+
 async def test_tui_does_not_render_empty_assistant_block() -> None:
     tool_turn = AssistantMessage(
         tool_calls=[ToolCall(id="t1", name="echo", arguments={"text": "hi"})],
@@ -231,6 +242,23 @@ async def test_tui_does_not_render_empty_assistant_block() -> None:
         assert len(app.query(".user")) == 1
         assert len(app.query(".tool")) == 1
         assert len(app.query(".assistant")) == 1
+
+
+async def test_tui_renders_provider_error_without_start_event() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=failing_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "go"
+        await pilot.pause()
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        errors = app.query(".assistant .error")
+        assert len(errors) == 1
+        assert "Error: boom" in str(errors.first().render())
 
 
 def test_tool_title_formats() -> None:

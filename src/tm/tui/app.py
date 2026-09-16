@@ -483,6 +483,11 @@ class TMPromptApp(App[None]):
                 error = "Operation aborted"
             thinking = message.thinking()
             text = message.text()
+            # A provider may fail before emitting a start event, in which case no
+            # widget was created yet (e.g. authentication errors).
+            if self._current is None and (thinking.strip() or text.strip() or error):
+                self._current = AssistantMessageWidget()
+                self._current_mounted = False
             if self._current is not None:
                 if thinking.strip() or text.strip() or error:
                     if not self._current_mounted:
