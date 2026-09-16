@@ -301,13 +301,49 @@ def setup(api):
 
 ## 开发
 
+一次性初始化（以可编辑模式安装，改源码无需重装）：
+
 ```bash
-python -m uv sync --all-extras   # install dev + provider extras
-python -m uv run pytest -q       # tests
-python -m uv run ruff check .    # lint
-python -m uv run mypy            # types
-python -m uv build               # wheel + sdist
+python -m uv sync --all-extras
 ```
+
+从源码运行：
+
+```bash
+python -m uv run tm                  # TUI
+python -m uv run tm --no-tui         # 控制台 REPL
+python -m uv run tm "prompt"         # 一次性执行
+python -m uv run tm --json "prompt"  # 以 JSON 输出 agent 事件（调试利器）
+python -m uv run tm --login deepseek # 保存 API Key
+```
+
+Windows 下可用 `start.bat`（cmd）或 `run.ps1`（PowerShell），首次运行会自动安装依赖：
+
+```powershell
+.\start.bat            # 或：.\run.ps1
+.\start.bat --no-tui   # 控制台 REPL
+.\start.bat "prompt"   # 一次性执行
+```
+
+测试与质量门（与 CI 一致）：
+
+```bash
+python -m uv run pytest -q                         # 全量
+python -m uv run pytest tests/test_tui.py -q       # 单文件
+python -m uv run pytest -q -k tool                 # 按名称
+python -m uv run ruff check .                      # lint
+python -m uv run mypy                              # 类型
+python -m uv build                                 # wheel + sdist
+```
+
+说明：
+
+- 需设置 `DEEPSEEK_API_KEY` 才会跑联网用例；`scripts/smoke_deepseek.py` 是独立的联网冒烟脚本。
+- TUI 用 Textual 的 `run_test` 做无头测试（见 `tests/test_tui.py`）：设置 `#prompt` 值、
+  回车、等待 worker 完成，再断言 `app.query(".assistant")` 等。
+- 开发时**不要**用 `uv tool install`：它复制代码（改动不生效），且 `tm` 运行时可能因文件
+  被占用而失败。要测真实安装，用临时目录：
+  `UV_TOOL_DIR=$env:TEMP\tm-tool uv tool install ".[all]"`。
 
 `uv.lock` 已提交。CI（`.github/workflows/ci.yml`）在 Linux 上运行 ruff 与 mypy，并在
 Linux、Windows、macOS 上以 Python 3.11 与 3.12 运行测试。发布到 PyPI 见

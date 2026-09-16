@@ -312,13 +312,54 @@ def setup(api):
 
 ## Development
 
+Set up once (installs the project editable, so source edits take effect with no
+reinstall):
+
 ```bash
-python -m uv sync --all-extras   # install dev + provider extras
-python -m uv run pytest -q       # tests
-python -m uv run ruff check .    # lint
-python -m uv run mypy            # types
-python -m uv build               # wheel + sdist
+python -m uv sync --all-extras
 ```
+
+Run the app from source:
+
+```bash
+python -m uv run tm                # TUI
+python -m uv run tm --no-tui       # console REPL
+python -m uv run tm "prompt"       # one-shot agent run
+python -m uv run tm --json "prompt"  # stream agent events as JSON (great for debugging)
+python -m uv run tm --login deepseek # store an API key
+```
+
+On Windows, `start.bat` (cmd) and `run.ps1` (PowerShell) wrap the above and set
+up dependencies on first run:
+
+```powershell
+.\start.bat            # or: .\run.ps1
+.\start.bat --no-tui   # console REPL
+.\start.bat "prompt"   # one-shot
+```
+
+Tests and quality gates (same as CI):
+
+```bash
+python -m uv run pytest -q                         # full suite
+python -m uv run pytest tests/test_tui.py -q       # one file
+python -m uv run pytest -q -k tool                 # by name
+python -m uv run ruff check .                      # lint
+python -m uv run mypy                              # types
+python -m uv build                                 # wheel + sdist
+```
+
+Notes:
+
+- The live DeepSeek test only runs when `DEEPSEEK_API_KEY` is set;
+  `scripts/smoke_deepseek.py` is a standalone live smoke test.
+- TUI behavior is tested headlessly with Textual's `run_test` (see
+  `tests/test_tui.py`): set the `#prompt` value, press enter, wait for workers,
+  then assert on `app.query(".assistant")` etc.
+- Do **not** use `uv tool install` while developing: it copies the code (edits
+  won't show) and can fail with a file lock if `tm` is running. To test a real
+  install, use a throwaway tool dir:
+  `UV_TOOL_DIR=$env:TEMP\tm-tool uv tool install ".[all]"`.
 
 `uv.lock` is committed. CI (`.github/workflows/ci.yml`) runs ruff and mypy on
 Linux, and the test suite on Linux, Windows, and macOS for Python 3.11 and 3.12.
