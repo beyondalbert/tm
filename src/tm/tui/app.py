@@ -1,21 +1,25 @@
-"""Textual terminal UI for TM."""
+"""Textual terminal UI for TM, styled to match pi's interactive mode."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
+from rich.markdown import Markdown
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, Label, OptionList, RichLog, Static
+from textual.widget import Widget
+from textual.widgets import Button, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from tm.ai.types import AssistantMessage, Model
 from tm.cli.commands import ExitSignal
 from tm.core.agent import Agent
+from tm.core.compaction import estimate_tokens
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
@@ -28,6 +32,106 @@ from tm.core.events import (
 )
 from tm.core.session import SessionInfo
 from tm.permissions import ApprovalOutcome
+
+# pi dark theme palette
+_TEXT = "#d4d4d4"
+_DIM = "#666666"
+_MUTED = "#808080"
+_ACCENT = "#8abeb7"
+_BORDER = "#5f87ff"
+_BORDER_ACTIVE = "#00d7ff"
+_ERROR = "#cc6666"
+_WARNING = "#ffff00"
+_USER_BG = "#343541"
+_TOOL_BG = "#282832"
+_TOOL_OK_BG = "#283228"
+_TOOL_ERR_BG = "#3c2828"
+
+
+def format_tokens(count: int) -> str:
+    if count < 1000:
+        return str(count)
+    if count < 1_000_000:
+        return f"{count / 1000:.1f}k"
+    return f"{count / 1_000_000:.1f}M"
+
+
+class UserMessageWidget(Static):
+    def __init__(self, text: str) -> None:
+        super().__init__(Text(text.strip(), style=_TEXT), classes="user")
+
+
+class AssistantMessageWidget(Vertical):
+    """Assistant text with an optional dim/italic thinking block and error line."""
+
+    def __init__(self) -> None:
+        super().__init__(classes="assistant")
+        self._thinking = Static(Text(""), classes="thinking")
+        self._body = Static(Text(""), classes="body")
+        self._error = Static(Text(""), classes="error")
+        for widget in (self._thinking, self._body, self._error):
+            widget.display = False
+
+    def compose(self) -> ComposeResult:
+        yield self._thinking
+        yield self._body
+        yield self._error
+
+    def set_content(
+        self, thinking: str, text: str, *, error: str | None = None
+    ) -> None:
+        if thinking.strip():
+            self._thinking.update(Text(thinking.strip(), style=f"italic {_MUTED}"))
+            self._thinking.display = True
+        else:
+            self._thinking.display = False
+
+        if text.strip():
+            self._body.update(Markdown(text.strip()))
+            self._body.display = True
+        else:
+            self._body.display = False
+
+        if error:
+            self._error.update(Text(error, style=_ERROR))
+            self._error.display = True
+        else:
+            self._error.display = False
+
+
+class ToolWidget(Static):
+    def __init__(self, name: str, arguments: dict) -> None:
+        super().__init__(Text(""), classes="tool")
+        self._name = name
+        self._title = Text.assemble(
+            ("> ", _WARNING),
+            (name, f"bold {_TEXT}"),
+            (" ", ""),
+            (json.dumps(arguments, ensure_ascii=False), _MUTED),
+        )
+        self._output = ""
+        self._is_error = False
+        self._render_content()
+
+    def set_result(self, output: str, is_error: bool) -> None:
+        self._output = output
+        self._is_error = is_error
+        self.set_class(True, "error" if is_error else "success")
+        self._render_content()
+
+    def _render_content(self) -> None:
+        content = self._title.copy()
+        if self._output.strip():
+            content.append("\n")
+            content.append(
+                self._output.rstrip(), style=_ERROR if self._is_error else _MUTED
+            )
+        self.update(content)
+
+
+class SystemNote(Static):
+    def __init__(self, text: str, style: str = _DIM) -> None:
+        super().__init__(Text(text, style=style), classes="system")
 
 
 class PermissionScreen(ModalScreen[ApprovalOutcome]):
@@ -123,17 +227,28 @@ class DeferredApprover:
 
 
 class TMPromptApp(App[None]):
-    CSS = """
-    #log { height: 1fr; border: round $accent; }
-    #stream { height: auto; max-height: 6; padding: 0 1; }
-    #prompt { dock: bottom; }
-    #perm-box { width: 60%; height: auto; padding: 1 2; background: $panel; border: round $warning; }
-    #perm-title { text-style: bold; padding-bottom: 1; }
-    #perm-body { padding-bottom: 1; }
-    #perm-buttons { height: auto; align-horizontal: right; }
-    #session-box { width: 70%; height: auto; max-height: 70%; padding: 1 2; background: $panel; border: round $accent; }
-    #session-title { text-style: bold; padding-bottom: 1; }
-    #session-list { height: auto; max-height: 20; }
+    CSS = f"""
+    #header {{ height: 1; padding: 0 1; }}
+    #messages {{ height: 1fr; padding: 0 1; }}
+    .user {{ background: {_USER_BG}; color: {_TEXT}; width: 1fr; padding: 0 1; margin-bottom: 1; }}
+    .assistant {{ width: 1fr; height: auto; margin-bottom: 1; }}
+    .assistant .thinking {{ color: {_MUTED}; text-style: italic; width: 1fr; }}
+    .assistant .body {{ color: {_TEXT}; width: 1fr; }}
+    .assistant .error {{ color: {_ERROR}; width: 1fr; }}
+    .tool {{ background: {_TOOL_BG}; width: 1fr; padding: 0 1; margin-bottom: 1; }}
+    .tool.success {{ background: {_TOOL_OK_BG}; }}
+    .tool.error {{ background: {_TOOL_ERR_BG}; }}
+    .system {{ color: {_DIM}; width: 1fr; margin-bottom: 1; }}
+    #prompt {{ border: round {_BORDER}; }}
+    #prompt.working {{ border: round {_BORDER_ACTIVE}; }}
+    #footer {{ height: 2; padding: 0 1; }}
+    #perm-box {{ width: 60%; height: auto; padding: 1 2; background: $panel; border: round {_WARNING}; }}
+    #perm-title {{ text-style: bold; padding-bottom: 1; }}
+    #perm-body {{ padding-bottom: 1; }}
+    #perm-buttons {{ height: auto; align-horizontal: right; }}
+    #session-box {{ width: 70%; height: auto; max-height: 70%; padding: 1 2; background: $panel; border: round {_ACCENT}; }}
+    #session-title {{ text-style: bold; padding-bottom: 1; }}
+    #session-list {{ height: auto; max-height: 20; }}
     """
     BINDINGS = [Binding("ctrl+q", "quit", "Quit")]
 
@@ -143,78 +258,157 @@ class TMPromptApp(App[None]):
         self._model = model
         self.command_handler: Callable[[str], Awaitable[str | None]] | None = None
         self.resume_on_start = False
+        self._status = "idle"
+        self._current: AssistantMessageWidget | None = None
+        self._current_mounted = False
+        self._tools: dict[str, ToolWidget] = {}
 
-    def write_line(self, text: str, style: str = "") -> None:
-        self.query_one("#log", RichLog).write(Text(text, style=style))
+    # -- small public API used by commands / tests ------------------------
+    def write_line(self, text: str, style: str = _DIM) -> None:
+        self.run_worker(self._mount(SystemNote(text, style)), exit_on_error=False)
 
     async def pick_session(self, infos: list[SessionInfo]) -> SessionInfo | None:
         return await self.push_screen_wait(SessionScreen(infos))
 
+    # -- layout -----------------------------------------------------------
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield RichLog(id="log", wrap=True, markup=False, highlight=False)
-        yield Static("", id="stream")
+        yield Static("", id="header")
+        yield VerticalScroll(id="messages")
         yield Input(placeholder="Ask TM to do something, then Enter.", id="prompt")
-        yield Footer()
+        yield Static("", id="footer")
 
     def on_mount(self) -> None:
-        self.title = f"TM - {self._model.provider}/{self._model.id}"
-        self.sub_title = "idle"
         self._agent.subscribe(self._on_agent_event)
+        self._update_header()
+        self._update_footer()
         self.query_one("#prompt", Input).focus()
-        self.query_one("#log", RichLog).write(
-            Text("TM ready. Type a request, /help for commands, /exit to quit.", style="dim")
-        )
+        self.write_line("TM ready. Type a request, /help for commands, /exit to quit.")
         if self.resume_on_start:
             self.run_worker(self._resume_startup(), exclusive=True)
+
+    async def _mount(self, widget: Widget) -> None:
+        container = self.query_one("#messages", VerticalScroll)
+        await container.mount(widget)
+        container.scroll_end(animate=False)
 
     async def _resume_startup(self) -> None:
         if self.command_handler is not None:
             await self.command_handler("resume")
 
+    # -- status / footer --------------------------------------------------
+    def _set_status(self, status: str) -> None:
+        self._status = status
+        self.sub_title = status
+        self._update_header()
+        prompt = self.query_one("#prompt", Input)
+        prompt.set_class(status != "idle", "working")
+
+    def _update_header(self) -> None:
+        working = self._status != "idle"
+        status_style = _BORDER_ACTIVE if working else _DIM
+        self.query_one("#header", Static).update(
+            Text.assemble(
+                ("TM ", f"bold {_ACCENT}"),
+                (f"{self._model.provider}/{self._model.id}", _TEXT),
+                ("   ", ""),
+                (self._status, f"italic {status_style}"),
+                ("   /help  /exit  ctrl+q quit", _DIM),
+            )
+        )
+
+    def _update_footer(self) -> None:
+        cwd = Path.cwd()
+        home = Path.home()
+        cwd_text = str(cwd)
+        with_home = str(cwd)
+        if cwd_text.startswith(str(home)):
+            with_home = "~" + cwd_text[len(str(home)) :]
+
+        total_in = total_out = cache_read = 0
+        for message in self._agent.messages:
+            if isinstance(message, AssistantMessage) and message.usage:
+                total_in += message.usage.input
+                total_out += message.usage.output
+                cache_read += message.usage.cache_read
+        used = estimate_tokens(self._agent.messages, self._agent.system_prompt)
+        window = self._model.context_window or 0
+
+        stats = f"↑{format_tokens(total_in)} ↓{format_tokens(total_out)}"
+        if cache_read:
+            stats += f" R{format_tokens(cache_read)}"
+        if window:
+            stats += f"  {used * 100 // window}%/{format_tokens(window)}"
+
+        right = f"({self._model.provider}) {self._model.id}"
+        if self._model.reasoning:
+            right += " • thinking"
+        width = max(self.size.width - 2, 20)
+        pad = max(1, width - len(stats) - len(right))
+        self.query_one("#footer", Static).update(
+            Text(f"{with_home}\n{stats}{' ' * pad}{right}", style=_DIM)
+        )
+
+    # -- agent events -----------------------------------------------------
     async def _on_agent_event(self, event: AgentEvent) -> None:
-        log = self.query_one("#log", RichLog)
-        stream = self.query_one("#stream", Static)
         if isinstance(event, AgentStartEvent):
-            self.sub_title = "working"
+            self._set_status("working")
         elif isinstance(event, AgentEndEvent):
-            self.sub_title = "idle"
+            self._set_status("idle")
+            self._update_footer()
         elif isinstance(event, MessageStartEvent) and isinstance(
             event.message, AssistantMessage
         ):
-            stream.update("")
+            self._current = AssistantMessageWidget()
+            self._current_mounted = False
         elif isinstance(event, MessageUpdateEvent):
-            text = event.message.text()
-            if text:
-                stream.update(Text(text))
-            else:
+            if self._current is not None:
                 thinking = event.message.thinking()
-                if thinking:
-                    stream.update(Text(thinking, style="dim italic"))
+                text = event.message.text()
+                if (thinking.strip() or text.strip()) and not self._current_mounted:
+                    await self._mount(self._current)
+                    self._current_mounted = True
+                if self._current_mounted:
+                    self._current.set_content(thinking, text)
+                    self.query_one("#messages", VerticalScroll).scroll_end(animate=False)
         elif isinstance(event, MessageEndEvent) and isinstance(
             event.message, AssistantMessage
         ):
-            text = event.message.text()
-            if text:
-                log.write(Text(text))
-            usage = event.message.usage
-            if usage and (usage.input or usage.output):
-                log.write(Text(f"tokens: in={usage.input} out={usage.output}", style="dim"))
-            stream.update("")
+            message = event.message
+            error = None
+            if message.stop_reason == "error":
+                error = f"Error: {message.error_message or 'unknown error'}"
+            elif message.stop_reason == "aborted":
+                error = "Operation aborted"
+            thinking = message.thinking()
+            text = message.text()
+            if self._current is not None:
+                if thinking.strip() or text.strip() or error:
+                    if not self._current_mounted:
+                        await self._mount(self._current)
+                        self._current_mounted = True
+                    self._current.set_content(thinking, text, error=error)
+                self._current = None
+                self._current_mounted = False
+            self._update_footer()
         elif isinstance(event, ToolExecutionStartEvent):
-            self.sub_title = f"tool: {event.tool_name}"
-            arguments = json.dumps(event.arguments, ensure_ascii=False)
-            log.write(Text(f"> {event.tool_name} {arguments}", style="yellow"))
+            self._set_status(f"tool: {event.tool_name}")
+            widget = ToolWidget(event.tool_name, event.arguments)
+            self._tools[event.tool_call_id] = widget
+            await self._mount(widget)
         elif isinstance(event, ToolExecutionEndEvent):
-            style = "red" if event.is_error else "dim"
-            log.write(Text(event.output, style=style))
+            finished = self._tools.get(event.tool_call_id)
+            if finished is not None:
+                del self._tools[event.tool_call_id]
+                finished.set_result(event.output, event.is_error)
+            self.query_one("#messages", VerticalScroll).scroll_end(animate=False)
 
+    # -- input ------------------------------------------------------------
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         event.input.value = ""
         if not text:
             return
-        self.query_one("#log", RichLog).write(Text(f"you> {text}", style="bold cyan"))
+        await self._mount(UserMessageWidget(text))
         if text.startswith("/"):
             if self.command_handler is None:
                 return
@@ -233,9 +427,9 @@ class TMPromptApp(App[None]):
         try:
             await self._agent.prompt(text)
         except Exception as exc:  # noqa: BLE001 - surface failures in the UI
-            self.query_one("#log", RichLog).write(Text(f"error: {exc}", style="bold red"))
+            await self._mount(SystemNote(f"error: {exc}", _ERROR))
         finally:
             self.query_one("#prompt", Input).focus()
 
 
-__all__ = ["DeferredApprover", "PermissionScreen", "TMPromptApp", "TextualApprover"]
+__all__ = ["DeferredApprover", "PermissionScreen", "SessionScreen", "TMPromptApp", "TextualApprover"]

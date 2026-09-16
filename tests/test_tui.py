@@ -4,6 +4,7 @@ import pytest
 
 pytest.importorskip("textual")
 
+from pydantic import BaseModel  # noqa: E402
 from textual.app import App  # noqa: E402
 from textual.widgets import Input  # noqa: E402
 
@@ -15,14 +16,29 @@ from tm.ai.types import (  # noqa: E402
     StartEvent,
     TextContent,
     TextDeltaEvent,
+    ToolCall,
     UserMessage,
 )
 from tm.core.agent import Agent  # noqa: E402
 from tm.core.session import SessionInfo  # noqa: E402
 from tm.permissions import ApprovalOutcome  # noqa: E402
+from tm.tools.base import Tool, ToolContext, ToolResult, text_result  # noqa: E402
 from tm.tui.app import PermissionScreen, SessionScreen, TMPromptApp  # noqa: E402
 
 FAKE_MODEL = Model(id="fake", provider="fake")
+
+
+class EchoParams(BaseModel):
+    text: str
+
+
+class EchoTool(Tool[EchoParams]):
+    name = "echo"
+    description = "Echo text."
+    parameters_model = EchoParams
+
+    async def execute(self, call_id: str, args: EchoParams, ctx: ToolContext) -> ToolResult:
+        return text_result(args.text)
 
 
 def fake_stream_fn(model, context, options) -> EventStream:
@@ -163,3 +179,42 @@ async def test_session_screen_escape_cancels(tmp_path) -> None:
         await pilot.pause()
 
     assert results == [None]
+
+
+def scripted(messages: list[AssistantMessage]):
+    iterator = iter(messages)
+
+    def stream_fn(model, context, options) -> EventStream:
+        message = next(iterator)
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        if message.text():
+            stream.push(TextDeltaEvent(partial=message, delta=message.text()))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    return stream_fn
+
+
+async def test_tui_does_not_render_empty_assistant_block() -> None:
+    tool_turn = AssistantMessage(
+        tool_calls=[ToolCall(id="t1", name="echo", arguments={"text": "hi"})],
+        stop_reason="tool_use",
+    )
+    final = AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+    agent = Agent(FAKE_MODEL, stream_fn=scripted([tool_turn, final]), tools=[EchoTool()])
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "go"
+        await pilot.pause()
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        # one user message, one tool block, one assistant block (the tool-only turn adds none)
+        assert len(app.query(".user")) == 1
+        assert len(app.query(".tool")) == 1
+        assert len(app.query(".assistant")) == 1
