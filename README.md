@@ -153,9 +153,10 @@ List models: `tm --list-models`.
 
 | Command | Behavior |
 |---|---|
-| `tm` | Interactive agent REPL with tools and permissions |
+| `tm` | Interactive TUI (Textual) with tools and permissions |
 | `tm "prompt"` | One-shot agent run |
-| `tm --tui` | Textual TUI with approval modals |
+| `tm --no-tui` | Plain console REPL instead of the TUI |
+| `tm --tui` | Force the TUI (default when interactive) |
 | `tm --read-only` | Only read/grep/find/ls tools |
 | `tm --no-tools` | Plain chat, no machine control |
 | `tm --yolo` | Auto-approve every action |
@@ -168,6 +169,9 @@ List models: `tm --list-models`.
 
 Context files (`AGENTS.md` / `CLAUDE.md`, walking up from cwd, plus the global
 config dir) are appended to the system prompt. Disable with `--no-context-files`.
+
+When stdout is not a terminal (piped or redirected) or `textual` is not
+installed, `tm` falls back to the console REPL automatically.
 
 ## Permissions
 

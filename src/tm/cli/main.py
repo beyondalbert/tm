@@ -311,6 +311,29 @@ def _startup_banner(model: Model, resources: Resources, no_context_files: bool) 
     return "\n".join(lines)
 
 
+def _textual_available() -> bool:
+    try:
+        import textual  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _use_tui(
+    *,
+    tui: bool,
+    no_tui: bool,
+    tools: list,
+    text: str | None,
+    json_output: bool,
+) -> bool:
+    if not tools or json_output or no_tui:
+        return False
+    if tui:
+        return True
+    return text is None and sys.stdout.isatty() and _textual_available()
+
+
 def _run_tui(
     provider: Provider,
     model: Model,
@@ -440,7 +463,10 @@ def main(
     no_tools: bool = typer.Option(False, "--no-tools", "-nt", help="Disable tools."),
     read_only: bool = typer.Option(False, "--read-only", help="Only read-only tools."),
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve all actions."),
-    tui: bool = typer.Option(False, "--tui", help="Launch the Textual TUI."),
+    tui: bool = typer.Option(False, "--tui", help="Force the Textual TUI."),
+    no_tui: bool = typer.Option(
+        False, "--no-tui", help="Use the plain console REPL instead of the TUI."
+    ),
     print_mode: bool = typer.Option(False, "--print", help="One-shot; read stdin if no prompt."),
     json_output: bool = typer.Option(False, "--json", help="Emit agent events as JSON lines."),
     continue_session: bool = typer.Option(
@@ -520,49 +546,60 @@ def main(
         console.print("[red]--json requires a prompt or piped stdin[/red]")
         raise typer.Exit(code=1)
 
+    use_tui = _use_tui(
+        tui=tui, no_tui=no_tui, tools=tools, text=text, json_output=json_output
+    )
+    if tui and not _textual_available():
+        console.print("[red]TUI requested but 'textual' is not installed. Install with: pip install 'the-machine[tui]'[/red]")
+        raise typer.Exit(code=1)
+
     session, session_manager, resume_on_start = _resolve_session(
         tools,
         continue_session=continue_session,
         resume=resume,
         session_path=session_path,
         no_session=no_session,
-        tui=tui,
+        tui=use_tui,
         all_sessions=all_sessions,
     )
 
     async def run() -> None:
-        if tools:
-            agent = _build_agent(
-                selected_provider,
-                selected_model,
-                settings,
-                tools,
-                _make_approver(yolo),
-                session,
-                resources,
-                no_context_files=no_context_files,
-                no_auto_compact=no_auto_compact,
-                json_output=json_output,
-            )
-            if text:
-                await agent.prompt(text)
-                if not json_output:
-                    console.print()
-            else:
-                await _agent_repl(
-                    agent, selected_model, registry, session_manager, resources, session
+        try:
+            if tools:
+                agent = _build_agent(
+                    selected_provider,
+                    selected_model,
+                    settings,
+                    tools,
+                    _make_approver(yolo),
+                    session,
+                    resources,
+                    no_context_files=no_context_files,
+                    no_auto_compact=no_auto_compact,
+                    json_output=json_output,
                 )
-        elif text:
-            await _chat_once(
-                selected_provider, selected_model, text, settings.system_prompt, settings
-            )
-        else:
-            await _chat_repl(
-                selected_provider, selected_model, settings.system_prompt, settings
-            )
+                if text:
+                    await agent.prompt(text)
+                    if not json_output:
+                        console.print()
+                else:
+                    await _agent_repl(
+                        agent, selected_model, registry, session_manager, resources, session
+                    )
+            elif text:
+                await _chat_once(
+                    selected_provider, selected_model, text, settings.system_prompt, settings
+                )
+            else:
+                await _chat_repl(
+                    selected_provider, selected_model, settings.system_prompt, settings
+                )
+        finally:
+            # Close providers inside the same event loop that created their clients.
+            await registry.aclose()
 
     try:
-        if tools and tui and not json_output:
+        if use_tui:
             _run_tui(
                 selected_provider,
                 selected_model,
@@ -579,8 +616,6 @@ def main(
             asyncio.run(run())
     except (KeyboardInterrupt, EOFError):
         console.print()
-    finally:
-        asyncio.run(registry.aclose())
 
 
 if __name__ == "__main__":

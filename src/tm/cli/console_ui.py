@@ -40,6 +40,12 @@ class ConsoleAgentUI:
                 self._render_assistant(message)
                 if self._text_started or self._thinking_printed:
                     self.console.print()
+                if message.stop_reason == "error":
+                    self.console.print(
+                        f"[red]error: {message.error_message or 'unknown error'}[/red]"
+                    )
+                elif message.stop_reason == "aborted":
+                    self.console.print("[yellow]aborted[/yellow]")
                 if message.usage and (message.usage.input or message.usage.output):
                     self.console.print(
                         f"[dim]tokens: in={message.usage.input} out={message.usage.output}[/dim]"

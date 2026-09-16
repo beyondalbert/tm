@@ -149,9 +149,10 @@ Anthropic 与 Google 使用官方 SDK；其余使用 OpenAI 兼容适配器。`o
 
 | 命令 | 行为 |
 |---|---|
-| `tm` | 带工具与权限的交互式 Agent REPL |
+| `tm` | 交互式 TUI（Textual），带工具与权限 |
 | `tm "prompt"` | 一次性执行 |
-| `tm --tui` | Textual TUI，含审批弹窗 |
+| `tm --no-tui` | 使用普通控制台 REPL（不用 TUI） |
+| `tm --tui` | 强制使用 TUI（交互时默认） |
 | `tm --read-only` | 仅启用 read/grep/find/ls 工具 |
 | `tm --no-tools` | 纯对话，不控制本机 |
 | `tm --yolo` | 自动批准所有操作 |
@@ -164,6 +165,8 @@ Anthropic 与 Google 使用官方 SDK；其余使用 OpenAI 兼容适配器。`o
 
 上下文文件（`AGENTS.md` / `CLAUDE.md`，从当前目录向上查找，外加全局配置目录）会追加到
 系统提示词。用 `--no-context-files` 关闭。
+
+当 stdout 不是终端（被管道/重定向）或未安装 `textual` 时，`tm` 会自动回退为控制台 REPL。
 
 ## 权限
 

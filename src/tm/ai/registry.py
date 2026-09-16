@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Iterable
 
@@ -147,7 +148,10 @@ class Registry:
 
     async def aclose(self) -> None:
         for provider in self._providers.values():
-            await provider.aclose()
+            # Closing a client may touch an event loop that is already gone (for
+            # example when the process is shutting down); never let that mask the run.
+            with contextlib.suppress(Exception):
+                await provider.aclose()
         self._providers.clear()
 
 
