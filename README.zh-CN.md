@@ -11,12 +11,56 @@ Shell 与网络访问的**显式权限审批**重新构建。
 
 核心 Agent、多 Provider、内置工具、权限系统与 CLI 均已可用。详见文末阶段表。
 
-## 安装（开发）
+## 安装
+
+TM 尚未发布到 PyPI，需从仓库安装。需要 [uv](https://docs.astral.sh/uv/)（它也能顺带
+帮你安装 Python）。
+
+先安装 uv（仅一次）：
+
+```powershell
+# Windows (PowerShell)
+irm https://astral.sh/uv/install.ps1 | iex
+```
 
 ```bash
-python -m uv sync --all-extras
-python -m uv run tm --help
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+### 安装 `tm` 命令（推荐）
+
+```bash
+uv tool install "the-machine[all] @ git+https://github.com/beyondalbert/tm"
+uv tool update-shell   # 将工具目录加入 PATH，之后重开终端
+tm --help
+```
+
+`[all]` 会安装 Anthropic、Google 与 TUI 的可选依赖。若做最小安装可去掉它（此时仅支持
+OpenAI 兼容 Provider；`--tui` 还需额外安装 `textual`）。使用 `git+https` 源需要先装好
+`git`；若没有 `git`，可改用源码压缩包安装：
+
+```bash
+uv tool install "the-machine[all] @ https://github.com/beyondalbert/tm/archive/refs/heads/main.tar.gz"
+```
+
+### 从克隆仓库安装（开发）
+
+```bash
+git clone https://github.com/beyondalbert/tm
+cd tm
+uv sync --all-extras
+uv run tm --help
+```
+
+### 首次运行
+
+```bash
+tm --login deepseek        # 保存 API Key（隐藏输入）
+tm "list the files in this folder"
+```
+
+需要 Python 3.11+，uv 会自动安装合适的解释器。
 
 ## Provider
 

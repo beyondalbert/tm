@@ -12,12 +12,57 @@ around explicit permission approval for filesystem, shell, and network access.
 Core agent, providers, built-in tools, permissions, and CLI are working. See
 the phase table below.
 
-## Install (development)
+## Installation
+
+TM is not on PyPI yet, so install it from the repository. [uv](https://docs.astral.sh/uv/)
+is required (it can also install Python for you).
+
+Install uv (once):
+
+```powershell
+# Windows (PowerShell)
+irm https://astral.sh/uv/install.ps1 | iex
+```
 
 ```bash
-python -m uv sync --all-extras
-python -m uv run tm --help
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+### Install the `tm` command (recommended)
+
+```bash
+uv tool install "the-machine[all] @ git+https://github.com/beyondalbert/tm"
+uv tool update-shell   # add the tool bin dir to PATH; restart the terminal afterwards
+tm --help
+```
+
+`[all]` pulls in the Anthropic, Google, and TUI extras. Drop it for a minimal
+install (OpenAI-compatible providers only; `--tui` then needs `textual`).
+`git` must be installed for the `git+https` source. Without `git`, install from
+the source archive instead:
+
+```bash
+uv tool install "the-machine[all] @ https://github.com/beyondalbert/tm/archive/refs/heads/main.tar.gz"
+```
+
+### From a clone (development)
+
+```bash
+git clone https://github.com/beyondalbert/tm
+cd tm
+uv sync --all-extras
+uv run tm --help
+```
+
+### First run
+
+```bash
+tm --login deepseek        # store an API key (hidden input)
+tm "list the files in this folder"
+```
+
+Requires Python 3.11+. uv installs a suitable interpreter automatically.
 
 ## Providers
 
