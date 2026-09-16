@@ -41,6 +41,19 @@ class EchoTool(Tool[EchoParams]):
         return text_result(args.text)
 
 
+class LongParams(BaseModel):
+    pass
+
+
+class LongTool(Tool[LongParams]):
+    name = "long"
+    description = "Return many lines."
+    parameters_model = LongParams
+
+    async def execute(self, call_id: str, args: LongParams, ctx: ToolContext) -> ToolResult:
+        return text_result("\n".join(f"line {i}" for i in range(40)))
+
+
 def fake_stream_fn(model, context, options) -> EventStream:
     message = AssistantMessage(content=[TextContent(text="hello from fake")], stop_reason="stop")
     stream: EventStream = EventStream()
@@ -218,3 +231,42 @@ async def test_tui_does_not_render_empty_assistant_block() -> None:
         assert len(app.query(".user")) == 1
         assert len(app.query(".tool")) == 1
         assert len(app.query(".assistant")) == 1
+
+
+def test_tool_title_formats() -> None:
+    from tm.tui.app import tool_title
+
+    assert str(tool_title("read", {"path": "src/app.py"})) == "read src/app.py"
+    assert str(tool_title("read", {"path": "a.py", "offset": 10, "limit": 5})) == "read a.py:10-14"
+    assert str(tool_title("shell", {"command": "pytest -q"})) == "$ pytest -q"
+    assert "grep /TODO/ in src" in str(tool_title("grep", {"pattern": "TODO", "path": "src"}))
+    assert str(tool_title("ls", {"path": "src"})) == "ls src"
+
+
+async def test_tool_output_truncates_and_ctrl_o_expands() -> None:
+    tool_turn = AssistantMessage(
+        tool_calls=[ToolCall(id="t1", name="long", arguments={})],
+        stop_reason="tool_use",
+    )
+    final = AssistantMessage(content=[TextContent(text="ok")], stop_reason="stop")
+    agent = Agent(FAKE_MODEL, stream_fn=scripted([tool_turn, final]), tools=[LongTool()])
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "go"
+        await pilot.pause()
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        body = app.query_one(".tool .tool-body")
+        assert "ctrl+o to expand" in str(body.render())
+        assert "line 19" in str(body.render())
+        assert "line 20" not in str(body.render())
+
+        app.action_toggle_tools()
+        await pilot.pause()
+        body = app.query_one(".tool .tool-body")
+        assert "ctrl+o to expand" not in str(body.render())
+        assert "line 39" in str(body.render())

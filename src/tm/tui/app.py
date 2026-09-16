@@ -59,11 +59,60 @@ def format_tokens(count: int) -> str:
     return f"{count / 1_000_000:.1f}M"
 
 
+def _display_path(value: object, cwd: Path | None = None) -> str:
+    raw = str(value) if value else "."
+    base = cwd or Path.cwd()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = base / path
+    try:
+        return str(path.resolve().relative_to(base.resolve())).replace("\\", "/")
+    except ValueError:
+        return str(path)
+
+
+def tool_title(name: str, arguments: dict) -> Text:
+    """Render a tool call title the way pi does (name bold, args coloured)."""
+    text = Text()
+    if name == "read":
+        text.append("read", f"bold {_TEXT}")
+        text.append(" " + _display_path(arguments.get("path")), _ACCENT)
+        offset, limit = arguments.get("offset"), arguments.get("limit")
+        if offset is not None or limit is not None:
+            start = offset or 1
+            end = start + limit - 1 if limit is not None else None
+            text.append(f":{start}" + (f"-{end}" if end else ""), _WARNING)
+    elif name in ("write", "edit"):
+        text.append(name, f"bold {_TEXT}")
+        text.append(" " + _display_path(arguments.get("path")), _ACCENT)
+    elif name == "shell":
+        text.append("$ ", f"bold {_TEXT}")
+        text.append(str(arguments.get("command", "")), f"bold {_TEXT}")
+    elif name == "grep":
+        text.append("grep", f"bold {_TEXT}")
+        text.append(" /" + str(arguments.get("pattern", "")) + "/", _ACCENT)
+        text.append(" in " + _display_path(arguments.get("path", ".")), _MUTED)
+        if arguments.get("glob"):
+            text.append(f" ({arguments['glob']})", _MUTED)
+    elif name == "find":
+        text.append("find", f"bold {_TEXT}")
+        text.append(" " + str(arguments.get("pattern", "")), _ACCENT)
+        text.append(" in " + _display_path(arguments.get("path", ".")), _MUTED)
+    elif name == "ls":
+        text.append("ls", f"bold {_TEXT}")
+        text.append(" " + _display_path(arguments.get("path", ".")), _ACCENT)
+    else:
+        text.append(name, f"bold {_TEXT}")
+        if arguments:
+            text.append(" " + json.dumps(arguments, ensure_ascii=False), _MUTED)
+    return text
+
+
 class UserMessageWidget(Static):
     """User text on a full-width background block with vertical padding."""
 
     def __init__(self, text: str) -> None:
-        super().__init__(Text(text.strip(), style=_TEXT), classes="user")
+        super().__init__(Markdown(text.strip(), style=_TEXT), classes="user")
 
 
 class AssistantMessageWidget(Vertical):
@@ -105,30 +154,47 @@ class AssistantMessageWidget(Vertical):
 class ToolWidget(Vertical):
     """Tool call: a title line, then the output on a coloured background block."""
 
-    def __init__(self, name: str, arguments: dict) -> None:
+    MAX_LINES = 20
+
+    def __init__(self, name: str, arguments: dict, *, expanded: bool = False) -> None:
         super().__init__(classes="tool")
-        self._title = Static(
-            Text.assemble(
-                (name, f"bold {_TEXT}"),
-                (" ", ""),
-                (json.dumps(arguments, ensure_ascii=False), _MUTED),
-            ),
-            classes="tool-title",
-        )
+        self._title = Static(tool_title(name, arguments), classes="tool-title")
         self._body = Static(Text(""), classes="tool-body")
         self._body.display = False
+        self._output = ""
+        self._is_error = False
+        self._expanded = expanded
 
     def compose(self) -> ComposeResult:
         yield self._title
         yield self._body
 
     def set_result(self, output: str, is_error: bool) -> None:
+        self._output = output.rstrip()
+        self._is_error = is_error
         self.set_class(True, "error" if is_error else "success")
-        if output.strip():
-            self._body.update(
-                Text(output.rstrip(), style=_ERROR if is_error else _MUTED)
-            )
-            self._body.display = True
+        self._render_body()
+
+    def set_expanded(self, expanded: bool) -> None:
+        if expanded != self._expanded:
+            self._expanded = expanded
+            self._render_body()
+
+    def _render_body(self) -> None:
+        if not self._output:
+            self._body.display = False
+            return
+        style = _ERROR if self._is_error else _MUTED
+        lines = self._output.splitlines()
+        body = Text()
+        if not self._expanded and len(lines) > self.MAX_LINES:
+            body.append("\n".join(lines[: self.MAX_LINES]), style=style)
+            remaining = len(lines) - self.MAX_LINES
+            body.append(f"\n... ({remaining} more lines, ctrl+o to expand)", style=_MUTED)
+        else:
+            body.append(self._output, style=style)
+        self._body.update(body)
+        self._body.display = True
 
 
 class SystemNote(Static):
@@ -253,7 +319,10 @@ class TMPromptApp(App[None]):
     #session-title {{ text-style: bold; padding-bottom: 1; }}
     #session-list {{ height: auto; max-height: 20; }}
     """
-    BINDINGS = [Binding("ctrl+q", "quit", "Quit")]
+    BINDINGS = [
+        Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+o", "toggle_tools", "Expand tools"),
+    ]
 
     def __init__(self, agent: Agent, model: Model, *, banner: str | None = None) -> None:
         super().__init__()
@@ -266,6 +335,7 @@ class TMPromptApp(App[None]):
         self._current: AssistantMessageWidget | None = None
         self._current_mounted = False
         self._tools: dict[str, ToolWidget] = {}
+        self._expanded = False
         self._spin_index = 0
         self._spinner_timer: Timer | None = None
 
@@ -302,6 +372,11 @@ class TMPromptApp(App[None]):
         if self.command_handler is not None:
             await self.command_handler("resume")
 
+    def action_toggle_tools(self) -> None:
+        self._expanded = not self._expanded
+        for widget in self.query(ToolWidget):
+            widget.set_expanded(self._expanded)
+
     # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
         self._status = status
@@ -324,7 +399,7 @@ class TMPromptApp(App[None]):
         if self._status == "idle":
             line.append("─" * width, style=_BORDER_MUTED)
         else:
-            label = f"{_SPINNER[self._spin_index]} {self._status}"
+            label = f"{_SPINNER[self._spin_index]} Working"
             head = f"── {label} "
             tail = "─" * max(0, width - len(head))
             line.append(head, style=_BORDER_MUTED)
@@ -418,8 +493,8 @@ class TMPromptApp(App[None]):
                 self._current_mounted = False
             self._update_footer()
         elif isinstance(event, ToolExecutionStartEvent):
-            self._set_status(f"{event.tool_name}")
-            widget = ToolWidget(event.tool_name, event.arguments)
+            self._set_status("working")
+            widget = ToolWidget(event.tool_name, event.arguments, expanded=self._expanded)
             self._tools[event.tool_call_id] = widget
             await self._mount(widget)
         elif isinstance(event, ToolExecutionEndEvent):
