@@ -1,7 +1,7 @@
 # Releasing The Machine (TM)
 
-The distribution name is `the-machine` (the CLI command is `tm`). It is not yet
-on PyPI, but the name is currently available.
+The distribution name is `the-machine` (the CLI command is `tm`). It is published
+on PyPI at <https://pypi.org/project/the-machine/>.
 
 ## 1. Bump the version
 

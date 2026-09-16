@@ -2,6 +2,10 @@
 
 # The Machine (TM)
 
+[![PyPI](https://img.shields.io/pypi/v/the-machine.svg)](https://pypi.org/project/the-machine/)
+[![Python versions](https://img.shields.io/pypi/pyversions/the-machine.svg)](https://pypi.org/project/the-machine/)
+[![CI](https://github.com/beyondalbert/tm/actions/workflows/ci.yml/badge.svg)](https://github.com/beyondalbert/tm/actions/workflows/ci.yml)
+
 A local AI agent that can control your machine, extensible and permission-gated.
 
 TM is a Python agent harness inspired by the architecture of [pi](../pi), rebuilt
@@ -14,9 +18,8 @@ the phase table below.
 
 ## Installation
 
-TM is not on PyPI yet, so install it from the repository. [uv](https://docs.astral.sh/uv/)
-is required (it can also install Python for you). Once released, the install
-will simply be `uv tool install "the-machine[all]"`.
+`the-machine` is on [PyPI](https://pypi.org/project/the-machine/). [uv](https://docs.astral.sh/uv/)
+is recommended (it can also install Python for you).
 
 Install uv (once):
 
@@ -33,17 +36,25 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ### Install the `tm` command (recommended)
 
 ```bash
-uv tool install "the-machine[all] @ git+https://github.com/beyondalbert/tm"
+uv tool install "the-machine[all]"
 uv tool update-shell   # add the tool bin dir to PATH; restart the terminal afterwards
 tm --help
 ```
 
-`[all]` pulls in the Anthropic, Google, and TUI extras. Drop it for a minimal
-install (OpenAI-compatible providers only; `--tui` then needs `textual`).
-`git` must be installed for the `git+https` source. Without `git`, install from
-the source archive instead:
+Or with pip, inside a virtual environment:
 
 ```bash
+pip install "the-machine[all]"
+```
+
+`[all]` pulls in the Anthropic, Google, and TUI extras. Drop it for a minimal
+install (OpenAI-compatible providers only; `--tui` then needs `textual`).
+
+### From source
+
+```bash
+uv tool install "the-machine[all] @ git+https://github.com/beyondalbert/tm"
+# without git:
 uv tool install "the-machine[all] @ https://github.com/beyondalbert/tm/archive/refs/heads/main.tar.gz"
 ```
 

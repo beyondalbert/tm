@@ -2,6 +2,10 @@
 
 # The Machine (TM)
 
+[![PyPI](https://img.shields.io/pypi/v/the-machine.svg)](https://pypi.org/project/the-machine/)
+[![Python versions](https://img.shields.io/pypi/pyversions/the-machine.svg)](https://pypi.org/project/the-machine/)
+[![CI](https://github.com/beyondalbert/tm/actions/workflows/ci.yml/badge.svg)](https://github.com/beyondalbert/tm/actions/workflows/ci.yml)
+
 一个可以控制你本机、可扩展且带权限审批的本地 AI Agent。
 
 TM 是一个用 Python 编写的 Agent 框架，架构借鉴自 [pi](../pi)，并围绕文件系统、
@@ -13,8 +17,8 @@ Shell 与网络访问的**显式权限审批**重新构建。
 
 ## 安装
 
-TM 尚未发布到 PyPI，需从仓库安装。需要 [uv](https://docs.astral.sh/uv/)（它也能顺带
-帮你安装 Python）。发布之后，安装命令就是 `uv tool install "the-machine[all]"`。
+`the-machine` 已发布到 [PyPI](https://pypi.org/project/the-machine/)。推荐使用
+[uv](https://docs.astral.sh/uv/)（它也能顺带帮你安装 Python）。
 
 先安装 uv（仅一次）：
 
@@ -31,16 +35,25 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ### 安装 `tm` 命令（推荐）
 
 ```bash
-uv tool install "the-machine[all] @ git+https://github.com/beyondalbert/tm"
+uv tool install "the-machine[all]"
 uv tool update-shell   # 将工具目录加入 PATH，之后重开终端
 tm --help
 ```
 
-`[all]` 会安装 Anthropic、Google 与 TUI 的可选依赖。若做最小安装可去掉它（此时仅支持
-OpenAI 兼容 Provider；`--tui` 还需额外安装 `textual`）。使用 `git+https` 源需要先装好
-`git`；若没有 `git`，可改用源码压缩包安装：
+或在虚拟环境中用 pip：
 
 ```bash
+pip install "the-machine[all]"
+```
+
+`[all]` 会安装 Anthropic、Google 与 TUI 的可选依赖。若做最小安装可去掉它（此时仅支持
+OpenAI 兼容 Provider；`--tui` 还需额外安装 `textual`）。
+
+### 从源码安装
+
+```bash
+uv tool install "the-machine[all] @ git+https://github.com/beyondalbert/tm"
+# 没有 git 时：
 uv tool install "the-machine[all] @ https://github.com/beyondalbert/tm/archive/refs/heads/main.tar.gz"
 ```
 
