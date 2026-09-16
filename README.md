@@ -1,3 +1,5 @@
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 # The Machine (TM)
 
 A local AI agent that can control your machine, extensible and permission-gated.
@@ -279,3 +281,7 @@ Linux, and the test suite on Linux, Windows, and macOS for Python 3.11 and 3.12.
 
 All planned phases are implemented. Possible future work: more providers,
 provider-side prompt caching controls, a web UI, and multi-agent orchestration.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
