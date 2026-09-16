@@ -15,7 +15,8 @@ the phase table below.
 ## Installation
 
 TM is not on PyPI yet, so install it from the repository. [uv](https://docs.astral.sh/uv/)
-is required (it can also install Python for you).
+is required (it can also install Python for you). Once released, the install
+will simply be `uv tool install "the-machine[all]"`.
 
 Install uv (once):
 
@@ -306,6 +307,7 @@ python -m uv build               # wheel + sdist
 
 `uv.lock` is committed. CI (`.github/workflows/ci.yml`) runs ruff and mypy on
 Linux, and the test suite on Linux, Windows, and macOS for Python 3.11 and 3.12.
+See [RELEASE.md](RELEASE.md) for publishing to PyPI.
 
 ## Roadmap
 

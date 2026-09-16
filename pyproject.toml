@@ -6,6 +6,18 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "albert", email = "beyondalbert@gmail.com" }]
+keywords = ["ai", "agent", "llm", "cli", "automation", "coding-agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.7",
     "openai>=1.40",
@@ -13,6 +25,11 @@ dependencies = [
     "rich>=13.7",
     "tomli-w>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/beyondalbert/tm"
+Repository = "https://github.com/beyondalbert/tm"
+Issues = "https://github.com/beyondalbert/tm/issues"
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.39"]

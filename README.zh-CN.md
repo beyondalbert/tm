@@ -14,7 +14,7 @@ Shell 与网络访问的**显式权限审批**重新构建。
 ## 安装
 
 TM 尚未发布到 PyPI，需从仓库安装。需要 [uv](https://docs.astral.sh/uv/)（它也能顺带
-帮你安装 Python）。
+帮你安装 Python）。发布之后，安装命令就是 `uv tool install "the-machine[all]"`。
 
 先安装 uv（仅一次）：
 
@@ -294,7 +294,8 @@ python -m uv build               # wheel + sdist
 ```
 
 `uv.lock` 已提交。CI（`.github/workflows/ci.yml`）在 Linux 上运行 ruff 与 mypy，并在
-Linux、Windows、macOS 上以 Python 3.11 与 3.12 运行测试。
+Linux、Windows、macOS 上以 Python 3.11 与 3.12 运行测试。发布到 PyPI 见
+[RELEASE.md](RELEASE.md)。
 
 ## 路线图
 
