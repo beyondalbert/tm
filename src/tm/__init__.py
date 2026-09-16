@@ -1,3 +1,8 @@
 """The Machine (TM): a local AI agent that can control your machine."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("the-machine")
+except PackageNotFoundError:  # pragma: no cover - running without an install
+    __version__ = "0.0.0"
