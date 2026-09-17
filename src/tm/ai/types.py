@@ -111,6 +111,19 @@ class Model(BaseModel):
     context_window: int = 128_000
     max_tokens: int = 8_192
     reasoning: bool = False
+    # Optional pricing, USD per 1M tokens. Unset means cost is not reported.
+    input_cost: float | None = None
+    output_cost: float | None = None
+    cache_read_cost: float | None = None
+
+    def cost(self, usage: Usage) -> float | None:
+        if self.input_cost is None and self.output_cost is None and self.cache_read_cost is None:
+            return None
+        return (
+            usage.input / 1_000_000 * (self.input_cost or 0.0)
+            + usage.output / 1_000_000 * (self.output_cost or 0.0)
+            + usage.cache_read / 1_000_000 * (self.cache_read_cost or 0.0)
+        )
 
 
 class Context(BaseModel):

@@ -16,11 +16,14 @@ class PromptTemplate:
     text: str
 
 
-def prompt_roots(cwd: Path, config_dir: Path | None = None) -> list[Path]:
+def prompt_roots(
+    cwd: Path, config_dir: Path | None = None, *, include_project: bool = True
+) -> list[Path]:
     roots: list[Path] = []
     if config_dir is not None:
         roots.append(config_dir / "prompts")
-    roots.append(cwd / ".aiagent" / "prompts")
+    if include_project:
+        roots.append(cwd / ".aiagent" / "prompts")
     return roots
 
 

@@ -15,6 +15,7 @@ from tm.core.session import Session, SessionInfo, SessionManager
 from tm.extensions import ExtensionAPI
 from tm.prompts import PromptTemplate, expand_template
 from tm.skills import Skill, find_skill
+from tm.trust import TrustManager
 
 Emit = Callable[[str], None]
 SessionPicker = Callable[[list[SessionInfo]], Awaitable[SessionInfo | None]]
@@ -56,6 +57,7 @@ class CommandContext:
     templates: dict[str, PromptTemplate] | None = None
     extensions: ExtensionAPI | None = None
     picker: SessionPicker | None = None
+    trust_manager: TrustManager | None = None
 
 
 HELP = """commands:
@@ -68,6 +70,7 @@ HELP = """commands:
   /fork [n]             fork the session (at point n) into a new file
   /compact [note]       summarize older context
   /recover              reconcile interrupted durable operations
+  /trust [off]          trust (or untrust) this project for future sessions
   /skills               list available skills
   /skill:<name>         load a skill into the conversation
   /prompts              list prompt templates
@@ -127,6 +130,9 @@ class SlashCommands:
             return None
         if command == "recover":
             await self._recover()
+            return None
+        if command == "trust":
+            self._trust(argument)
             return None
 
         templates = self.ctx.templates or {}
@@ -233,17 +239,15 @@ class SlashCommands:
             self._emit("no session (session persistence disabled)")
             return
         entries = session.points()
-        messages = session.messages()
         if not argument:
             if not entries:
                 self._emit("no conversation points yet")
                 return
             lines = []
-            for index, (entry, message) in enumerate(
-                zip(entries, messages, strict=False), start=1
-            ):
+            for index, entry in enumerate(entries, start=1):
                 marker = "*" if entry.id == session.leaf_id else " "
-                lines.append(f"{marker} {index}. {_preview(message)}")
+                preview = _preview(entry.message) if entry.message is not None else ""
+                lines.append(f"{marker} {index}. {preview}")
             lines.append("use /tree <n> to branch, /fork <n> to fork into a new file")
             self._emit("\n".join(lines))
             return
@@ -336,6 +340,16 @@ class SlashCommands:
             return
         await self.ctx.agent.recover()
         self._emit(f"recovered {len(pending)} interrupted operation(s)")
+
+    def _trust(self, argument: str) -> None:
+        manager = self.ctx.trust_manager
+        if manager is None:
+            self._emit("trust is not available")
+            return
+        trusted = argument.strip().lower() not in ("off", "no", "false", "untrust")
+        manager.save(self.ctx.cwd, trusted)
+        state = "trusted" if trusted else "untrusted"
+        self._emit(f"{state} {self.ctx.cwd} (restart to apply)")
 
 
 __all__ = ["HELP", "CommandContext", "Emit", "ExitSignal", "SessionPicker", "SlashCommands"]

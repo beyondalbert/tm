@@ -83,3 +83,21 @@ def test_extra_openai_compatible_providers_present() -> None:
     for provider_id in ("siliconflow", "groq", "openrouter", "together", "xai"):
         assert provider_id in PRESETS
         assert PRESETS[provider_id].base_url
+
+
+def test_model_cost() -> None:
+    from tm.ai.types import Model, Usage
+
+    priced = Model(
+        id="m",
+        provider="p",
+        input_cost=0.5,
+        output_cost=1.5,
+        cache_read_cost=0.05,
+    )
+    usage = Usage(input=1_000_000, output=1_000_000, cache_read=1_000_000)
+    assert priced.cost(usage) is not None
+    assert abs((priced.cost(usage) or 0) - 2.05) < 1e-9
+
+    unpriced = Model(id="m", provider="p")
+    assert unpriced.cost(usage) is None

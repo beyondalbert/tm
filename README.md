@@ -171,6 +171,9 @@ default_model = "my-model"
 id = "my-model"
 context_window = 32768
 max_tokens = 4096
+input_cost = 0.5        # optional: USD per 1M tokens
+output_cost = 1.5
+cache_read_cost = 0.05
 
 # add or override models on a built-in provider
 [[providers.deepseek.models]]
@@ -202,6 +205,8 @@ Switch to a custom model with `/model my-model` or `tm --model my-model`.
 | `tm --telemetry` | Write redacted spans to `<config>/telemetry.jsonl` |
 | `tm --durable` | Persist a durable restart point per run to `<config>/state.jsonl` |
 | `tm --no-mouse` | Let the terminal handle mouse selection/copy |
+| `tm --approve` | Trust project-local files for this run (`-a`) |
+| `tm --no-approve` | Ignore project-local files for this run (`-na`) |
 
 Context files (`AGENTS.md` / `CLAUDE.md`, walking up from cwd, plus the global
 config dir) are appended to the system prompt. Disable with `--no-context-files`.
@@ -253,6 +258,15 @@ actions, the exact command/host otherwise.
 Note: shell commands are matched textually. TM cannot reliably stop a shell
 command from making network calls; use a sandbox/container when you need a hard
 network boundary.
+
+**Project trust.** Project-local resources that can run code or change the policy
+(`.aiagent/extensions`, `.aiagent/skills`, `.aiagent/prompts`, `.agents/skills`,
+`.aiagent/policy.toml`, `.aiagent/SYSTEM.md`) are loaded only after you trust the
+directory. TM asks on first use, remembers the decision in `<config>/trust.json`,
+and honors `--approve`/`--no-approve`, `/trust [off]`, and the
+`default_project_trust` setting (`ask` | `always` | `never`). Context files such
+as `AGENTS.md` are not gated. Non-interactive runs (`-p`, `--json`, `--mode rpc`)
+do not prompt and decline by default.
 
 ## Interactive commands
 
@@ -313,10 +327,19 @@ system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true      # summarize older context when nearing the limit
 compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
+default_project_trust = "ask"  # ask | always | never
+cache_retention = "short"      # short | long (provider prompt cache; TM_CACHE_RETENTION overrides)
 ```
 
 Automatic compaction runs before a prompt when the estimated context exceeds
 `context_window * compact_threshold`. Disable per run with `--no-auto-compact`.
+If a turn ends truncated or with an overflow error, TM compacts and retries once.
+Compaction is stored as a durable entry, so the summarized context survives a
+restart.
+
+Per-model pricing (`input_cost`, `output_cost`, `cache_read_cost`, USD per 1M
+tokens) can be set in `models.toml`; the footer then shows `$cost` and the cache
+hit rate (`CH%`).
 
 ## Customization
 

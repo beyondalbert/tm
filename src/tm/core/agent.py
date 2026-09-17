@@ -106,6 +106,7 @@ class Agent:
         compact_keep_recent: int = 6,
         telemetry: Telemetry | None = None,
         store: Store | None = None,
+        cache_retention: str | None = None,
     ) -> None:
         self.model = model
         self.provider = provider
@@ -121,8 +122,11 @@ class Agent:
         self.max_tokens = max_tokens
         self.before_tool_call: BeforeToolCall | None = None
         self.after_tool_call: AfterToolCall | None = None
+        self.before_compact: Callable[[list[Message]], object] | None = None
+        self.after_compact: Callable[[str], object] | None = None
         self.telemetry: Telemetry = telemetry or NoopTelemetry()
         self.store = store
+        self.cache_retention = cache_retention
         self.operation: Operation | None = None
         self._trace_id = ""
         self._operation_span_id: str | None = None
@@ -164,21 +168,45 @@ class Agent:
         self._messages = list(messages)
 
     async def compact(self, instructions: str | None = None, keep_recent: int = 6) -> bool:
-        """Summarize older messages in place. Returns True if it compacted."""
+        """Summarize older messages. Persists a compaction entry when possible."""
         from tm.core.compaction import summarize_messages
 
         if len(self._messages) <= keep_recent:
             return False
         older = self._messages[:-keep_recent]
         recent = self._messages[-keep_recent:]
+        if self.before_compact is not None:
+            await _maybe_await(self.before_compact(older))
         summary = await summarize_messages(self._stream_fn, self.model, older, instructions)
         if not summary:
             return False
-        self._messages = [
-            UserMessage(content=f"Summary of earlier conversation:\n{summary}"),
-            *recent,
-        ]
+        if self.session is not None:
+            # Durable: the summary and copied-forward tail survive a restart.
+            self.session.append_compaction(summary, recent)
+            self._messages = self.session.messages()
+        else:
+            self._messages = [
+                UserMessage(content=f"Summary of earlier conversation:\n{summary}"),
+                *recent,
+            ]
+        if self.after_compact is not None:
+            await _maybe_await(self.after_compact(summary))
         return True
+
+    def _context_overflowed(self) -> bool:
+        for message in reversed(self._messages):
+            if not isinstance(message, AssistantMessage):
+                continue
+            if message.stop_reason == "length":
+                return True
+            if message.stop_reason == "error" and message.error_message:
+                text = message.error_message.lower()
+                return any(
+                    token in text
+                    for token in ("context", "too long", "maximum", "token", "length")
+                )
+            return False
+        return False
 
     async def _maybe_auto_compact(self) -> bool:
         from tm.core.compaction import estimate_tokens
@@ -263,6 +291,7 @@ class Agent:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             signal=self._signal,
+            cache_retention=self.cache_retention,
         )
         hooks = LoopHooks(
             emit=self._emit,
@@ -297,19 +326,32 @@ class Agent:
         )
         self.operation = operation
         status = "ok"
+        recovery_attempts = 0
         try:
-            self._messages = await agent_loop(
-                messages=self._messages,
-                system_prompt=self.system_prompt,
-                tools=[tool.spec() for tool in self.tools],
-                model=self.model,
-                stream_fn=self._stream_fn,
-                options=options,
-                hooks=hooks,
-                max_turns=self.max_turns,
-                telemetry=self.telemetry,
-                context=child_context,
-            )
+            while True:
+                self._messages = await agent_loop(
+                    messages=self._messages,
+                    system_prompt=self.system_prompt,
+                    tools=[tool.spec() for tool in self.tools],
+                    model=self.model,
+                    stream_fn=self._stream_fn,
+                    options=options,
+                    hooks=hooks,
+                    max_turns=self.max_turns,
+                    telemetry=self.telemetry,
+                    context=child_context,
+                )
+                if (
+                    recovery_attempts == 0
+                    and self._context_overflowed()
+                    and len(self._messages) > self.compact_keep_recent
+                ):
+                    # Context overflowed: persist what we have, compact, retry once.
+                    self._flush_messages()
+                    recovery_attempts += 1
+                    if await self.compact(keep_recent=self.compact_keep_recent):
+                        continue
+                break
         except BaseException:
             status = "error"
             raise

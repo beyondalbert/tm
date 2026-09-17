@@ -13,6 +13,8 @@ class StreamOptions:
     max_tokens: int | None = None
     reasoning: str | None = None
     signal: AbortSignal | None = None
+    #: Provider prompt-cache retention: "short" (default) or "long".
+    cache_retention: str | None = None
 
 
 class Provider:

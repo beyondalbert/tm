@@ -23,6 +23,9 @@ id = "my-model"
 context_window = 32768
 max_tokens = 4096
 reasoning = true
+input_cost = 0.5
+output_cost = 1.5
+cache_read_cost = 0.05
 
 [[providers.myprovider.models]]
 id = "my-small"
@@ -59,6 +62,8 @@ def test_custom_provider_is_loaded(tmp_path: Path) -> None:
     assert ids == ["my-model", "my-small"]
     assert preset.models[0].context_window == 32768
     assert preset.models[0].reasoning is True
+    assert preset.models[0].input_cost == 0.5
+    assert preset.models[0].cache_read_cost == 0.05
     # defaults applied to the model without explicit values
     assert preset.models[1].context_window == 128_000
 

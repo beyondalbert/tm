@@ -301,6 +301,24 @@ async def test_footer_reflects_live_agent_model() -> None:
         assert "qwen-max" in str(app.query_one("#footer").render())
 
 
+async def test_footer_shows_cost_and_cache(tmp_path) -> None:
+    from tm.ai.types import Usage
+    from tm.core.session import SessionManager
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    session.add_usage(Usage(input=1000, output=200, cache_read=800, total=2000))
+    model = Model(id="m", provider="p", input_cost=1.0, output_cost=2.0, cache_read_cost=0.1)
+    agent = Agent(model, stream_fn=fake_stream_fn, session=session)
+    app = TMPromptApp(agent, model)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        text = str(app.query_one("#footer").render())
+        assert "CH" in text
+        assert "$" in text
+
+
 async def test_footer_refreshes_after_model_command() -> None:
     agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
     app = TMPromptApp(agent, FAKE_MODEL)

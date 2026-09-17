@@ -56,6 +56,11 @@ def _as_env(value: Any, fallback: tuple[str, ...]) -> tuple[str, ...]:
     raise UserModelError(f"api_key_env must be a string or list, got {type(value).__name__}")
 
 
+def _optional_float(raw: dict, key: str, fallback: float | None) -> float | None:
+    value = raw.get(key, fallback)
+    return None if value is None else float(value)
+
+
 def _merge_model(pid: str, raw: dict, existing: Model | None, base_url: str | None) -> Model:
     if "id" not in raw:
         raise UserModelError(f"a model under provider '{pid}' is missing 'id'")
@@ -70,6 +75,11 @@ def _merge_model(pid: str, raw: dict, existing: Model | None, base_url: str | No
         ),
         max_tokens=int(raw.get("max_tokens", existing.max_tokens if existing else DEFAULT_MAX_TOKENS)),
         reasoning=bool(raw.get("reasoning", existing.reasoning if existing else False)),
+        input_cost=_optional_float(raw, "input_cost", existing.input_cost if existing else None),
+        output_cost=_optional_float(raw, "output_cost", existing.output_cost if existing else None),
+        cache_read_cost=_optional_float(
+            raw, "cache_read_cost", existing.cache_read_cost if existing else None
+        ),
     )
 
 

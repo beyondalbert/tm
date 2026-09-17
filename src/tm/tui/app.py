@@ -17,7 +17,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
-from tm.ai.types import AssistantMessage, Model, TextContent, ToolResultMessage, UserMessage
+from tm.ai.types import AssistantMessage, Model, TextContent, ToolResultMessage, Usage, UserMessage
 from tm.cli.commands import ExitSignal
 from tm.core.agent import Agent
 from tm.core.compaction import estimate_tokens
@@ -499,6 +499,19 @@ class TMPromptApp(App[None]):
         stats = f"↑{format_tokens(total_in)} ↓{format_tokens(total_out)}"
         if cache_read:
             stats += f" R{format_tokens(cache_read)}"
+            prompt_tokens = total_in + cache_read
+            if prompt_tokens:
+                stats += f" CH{cache_read * 100 // prompt_tokens}%"
+        cost = model.cost(
+            Usage(
+                input=total_in,
+                output=total_out,
+                cache_read=cache_read,
+                total=total_in + total_out + cache_read,
+            )
+        )
+        if cost:
+            stats += f"  ${cost:.4f}"
         if window:
             stats += f"  {used * 100 // window}%/{format_tokens(window)} (auto)"
 

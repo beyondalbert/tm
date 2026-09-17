@@ -101,13 +101,18 @@ class Policy(BaseModel):
 
     @classmethod
     def load(
-        cls, cwd: Path | None = None, config_dir: Path | None = None
+        cls,
+        cwd: Path | None = None,
+        config_dir: Path | None = None,
+        *,
+        include_project: bool = True,
     ) -> Policy:
         working_dir = (cwd or Path.cwd()).resolve()
         paths: list[Path] = []
         if config_dir is not None:
             paths.append(config_dir / "policy.toml")
-        paths.append(working_dir / ".aiagent" / "policy.toml")
+        if include_project:
+            paths.append(working_dir / ".aiagent" / "policy.toml")
 
         merged: dict = {}
         for path in paths:

@@ -44,11 +44,14 @@ class ExtensionAPI:
         self.commands[name] = handler
 
 
-def extension_roots(cwd: Path, config_dir: Path | None = None) -> list[Path]:
+def extension_roots(
+    cwd: Path, config_dir: Path | None = None, *, include_project: bool = True
+) -> list[Path]:
     roots: list[Path] = []
     if config_dir is not None:
         roots.append(config_dir / "extensions")
-    roots.append(cwd / ".aiagent" / "extensions")
+    if include_project:
+        roots.append(cwd / ".aiagent" / "extensions")
     return roots
 
 

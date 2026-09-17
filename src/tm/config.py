@@ -54,6 +54,8 @@ class Settings:
     telemetry: bool = False
     durable: bool = False
     mouse: bool = True
+    default_project_trust: str = "ask"
+    cache_retention: str = "short"
 
 
 def load_settings() -> Settings:

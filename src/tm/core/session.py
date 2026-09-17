@@ -9,12 +9,12 @@ root, and ``branch_from`` moves the leaf so later appends continue elsewhere.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from tm.ai.types import Message, Usage, now_ms
+from tm.ai.types import Message, Usage, UserMessage, now_ms
 from tm.core.storage import Storage, StoredEntry
 
 _MESSAGE_ADAPTER: TypeAdapter[Message] = TypeAdapter(Message)
@@ -27,6 +27,7 @@ class SessionEntry:
     type: str
     timestamp: int
     message: Message | None = None
+    payload: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -50,6 +51,7 @@ def _to_entry(stored: StoredEntry) -> SessionEntry:
         type=stored.type,
         timestamp=stored.timestamp,
         message=message,
+        payload=dict(stored.payload),
     )
 
 
@@ -122,7 +124,15 @@ class Session:
         ]
 
     def messages(self) -> list[Message]:
-        return [entry.message for entry in self.points() if entry.message is not None]
+        """Provider context: compaction entries reset history to their summary."""
+        result: list[Message] = []
+        for entry in self.active_entries():
+            if entry.type == "compaction":
+                summary = str(entry.payload.get("summary", ""))
+                result = [UserMessage(content=f"Summary of earlier conversation:\n{summary}")]
+            elif entry.type == "message" and entry.message is not None:
+                result.append(entry.message)
+        return result
 
     def append(self, message: Message, parent_id: str | None = None) -> SessionEntry:
         parent = parent_id if parent_id is not None else self._leaf_id
@@ -166,6 +176,45 @@ class Session:
             last_id = entry_id
         self.storage.commit(writes)
         self._leaf_id = last_id
+
+    def append_compaction(self, summary: str, retained: list[Message]) -> None:
+        """Record a compaction entry, then copy the retained tail forward.
+
+        Compaction is not erasure: the summary is a durable entry and the
+        retained messages are copied forward as its children, so the branch's
+        context is rebuilt as ``[summary, *retained]`` on reopen.
+        """
+        from tm.core.storage import EntryWrite, Write
+
+        writes: list[Write] = []
+        parent = self._leaf_id
+        compaction_id = uuid.uuid4().hex[:12]
+        writes.append(
+            EntryWrite(
+                {
+                    "id": compaction_id,
+                    "parent_id": parent,
+                    "type": "compaction",
+                    "payload": {"summary": summary},
+                }
+            )
+        )
+        parent = compaction_id
+        for message in retained:
+            entry_id = uuid.uuid4().hex[:12]
+            writes.append(
+                EntryWrite(
+                    {
+                        "id": entry_id,
+                        "parent_id": parent,
+                        "type": "message",
+                        "payload": {"message": message.model_dump(mode="json")},
+                    }
+                )
+            )
+            parent = entry_id
+        self.storage.commit(writes)
+        self._leaf_id = parent
 
     def branch_from(self, entry_id: str) -> None:
         if self.storage.get_entry(entry_id) is None:

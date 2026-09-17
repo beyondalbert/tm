@@ -165,6 +165,9 @@ default_model = "my-model"
 id = "my-model"
 context_window = 32768
 max_tokens = 4096
+input_cost = 0.5        # 可选：USD / 百万 token
+output_cost = 1.5
+cache_read_cost = 0.05
 
 # 给内置 provider 追加或覆盖模型
 [[providers.deepseek.models]]
@@ -196,6 +199,8 @@ context_window = 65536
 | `tm --telemetry` | 将脱敏 span 写入 `<config>/telemetry.jsonl` |
 | `tm --durable` | 为每次运行在 `<config>/state.jsonl` 持久化重启点 |
 | `tm --no-mouse` | 让终端接管鼠标选择/复制 |
+| `tm --approve` | 本次运行信任项目本地文件（`-a`） |
+| `tm --no-approve` | 本次运行忽略项目本地文件（`-na`） |
 
 上下文文件（`AGENTS.md` / `CLAUDE.md`，从当前目录向上查找，外加全局配置目录）会追加到
 系统提示词。用 `--no-context-files` 关闭。
@@ -241,6 +246,13 @@ allow = ["api.deepseek.com"]
 
 注意：Shell 命令是**按文本匹配**的。TM 无法可靠阻止某条 Shell 命令发起网络请求；
 若需要硬性网络边界，请使用沙箱/容器。
+
+**项目信任。** 项目本地中**能执行代码或改变策略**的资源（`.aiagent/extensions`、
+`.aiagent/skills`、`.aiagent/prompts`、`.agents/skills`、`.aiagent/policy.toml`、
+`.aiagent/SYSTEM.md`）只有在信任该目录后才会加载。首次使用时 TM 会询问，决定保存在
+`<config>/trust.json`，并支持 `--approve`/`--no-approve`、`/trust [off]` 以及
+`default_project_trust`（`ask` | `always` | `never`）。`AGENTS.md` 等上下文文件不受信任门限制。
+非交互模式（`-p`、`--json`、`--mode rpc`）不询问，默认拒绝。
 
 ## 交互命令
 
@@ -297,10 +309,16 @@ system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true      # summarize older context when nearing the limit
 compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
+default_project_trust = "ask"  # ask | always | never
+cache_retention = "short"      # short | long（provider 提示缓存；TM_CACHE_RETENTION 可覆盖）
 ```
 
 当估算上下文超过 `context_window * compact_threshold` 时，会在发送提示词前自动压缩。
-单次运行可用 `--no-auto-compact` 关闭。
+单次运行可用 `--no-auto-compact` 关闭。若某回合被截断或报上下文溢出，TM 会压缩并重试一次。
+压缩会作为持久化条目存储，因此摘要后的上下文在重启后仍然保留。
+
+可在 `models.toml` 里为模型设置价格（`input_cost`、`output_cost`、`cache_read_cost`，USD/百万
+token），页脚随后会显示 `$cost` 与缓存命中率（`CH%`）。
 
 ## 定制
 

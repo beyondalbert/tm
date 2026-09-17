@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from tm.ai.event_stream import EventStream
 from tm.ai.providers.anthropic import AnthropicProvider, messages_to_anthropic
+from tm.ai.providers.base import StreamOptions
 from tm.ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
@@ -166,6 +167,21 @@ async def test_provider_error_becomes_error_event() -> None:
 
     assert any(e.type == "error" for e in events)
     assert final.stop_reason == "error"
+
+
+async def test_cache_control_when_long() -> None:
+    prov, messages = provider(text_events())
+    context = Context(
+        system_prompt="be nice",
+        messages=[UserMessage(content="hi")],
+        tools=[ToolSpec(name="read", description="read", parameters={"type": "object"})],
+    )
+
+    await collect(prov.stream(MODEL, context, StreamOptions(cache_retention="long")))
+
+    params = messages.last_params
+    assert params["system"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert params["tools"][-1]["cache_control"]["ttl"] == "1h"
 
 
 def test_messages_to_anthropic_groups_tool_results() -> None:

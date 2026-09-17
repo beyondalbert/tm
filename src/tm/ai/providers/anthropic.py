@@ -151,6 +151,12 @@ class AnthropicProvider(Provider):
     def _build_params(
         self, model: Model, context: Context, options: StreamOptions
     ) -> dict[str, Any]:
+        cache_control: dict[str, Any] | None = None
+        if options.cache_retention is not None:
+            cache_control = {"type": "ephemeral"}
+            if options.cache_retention == "long":
+                cache_control["ttl"] = "1h"
+
         params: dict[str, Any] = {
             "model": model.id,
             "max_tokens": options.max_tokens or model.max_tokens,
@@ -158,11 +164,20 @@ class AnthropicProvider(Provider):
             "stream": True,
         }
         if context.system_prompt:
-            params["system"] = context.system_prompt
+            if cache_control is not None:
+                params["system"] = [
+                    {
+                        "type": "text",
+                        "text": context.system_prompt,
+                        "cache_control": cache_control,
+                    }
+                ]
+            else:
+                params["system"] = context.system_prompt
         if options.temperature is not None:
             params["temperature"] = options.temperature
         if context.tools:
-            params["tools"] = [
+            tools: list[dict[str, Any]] = [
                 {
                     "name": spec.name,
                     "description": spec.description,
@@ -170,6 +185,9 @@ class AnthropicProvider(Provider):
                 }
                 for spec in context.tools
             ]
+            if cache_control is not None:
+                tools[-1] = {**tools[-1], "cache_control": cache_control}
+            params["tools"] = tools
         return params
 
     def stream(

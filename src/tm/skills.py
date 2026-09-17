@@ -39,12 +39,15 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return meta, body
 
 
-def skill_roots(cwd: Path, config_dir: Path | None = None) -> list[Path]:
+def skill_roots(
+    cwd: Path, config_dir: Path | None = None, *, include_project: bool = True
+) -> list[Path]:
     roots: list[Path] = []
     if config_dir is not None:
         roots.append(config_dir / "skills")
-    roots.append(cwd / ".agents" / "skills")
-    roots.append(cwd / ".aiagent" / "skills")
+    if include_project:
+        roots.append(cwd / ".agents" / "skills")
+        roots.append(cwd / ".aiagent" / "skills")
     return roots
 
 

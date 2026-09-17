@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +56,7 @@ from tm.prompts import PromptTemplate, load_prompt_templates, prompt_roots
 from tm.skills import Skill, build_skills_section, load_skills, skill_roots
 from tm.telemetry import FileTelemetry, NoopTelemetry, Telemetry
 from tm.tools import build_default_tools
+from tm.trust import TrustManager, project_resources
 
 app = typer.Typer(
     add_completion=False,
@@ -188,13 +190,50 @@ def _make_store(enabled: bool) -> Store | None:
     return Store.open(config_dir() / "state.jsonl")
 
 
-def _load_resources() -> Resources:
+def _load_resources(trusted: bool) -> Resources:
     cwd = Path.cwd()
     return Resources(
-        skills=load_skills(skill_roots(cwd, config_dir())),
-        templates=load_prompt_templates(prompt_roots(cwd, config_dir())),
-        extensions=load_extensions(extension_roots(cwd, config_dir())),
+        skills=load_skills(skill_roots(cwd, config_dir(), include_project=trusted)),
+        templates=load_prompt_templates(prompt_roots(cwd, config_dir(), include_project=trusted)),
+        extensions=load_extensions(extension_roots(cwd, config_dir(), include_project=trusted)),
     )
+
+
+def _resolve_trust(settings: Settings, approve: bool, no_approve: bool) -> bool:
+    """Decide whether project-local resources may load.
+
+    Order: CLI override, then a saved decision, then ``default_project_trust``.
+    ``ask`` with no terminal (non-interactive modes) declines, matching pi.
+    """
+    cwd = Path.cwd()
+    resources = project_resources(cwd)
+    if not resources:
+        return True
+    if approve:
+        return True
+    if no_approve:
+        return False
+    manager = TrustManager(config_dir() / "trust.json")
+    saved = manager.decision(cwd)
+    if saved is not None:
+        return saved
+    default = (settings.default_project_trust or "ask").lower()
+    if default == "always":
+        return True
+    if default == "never":
+        return False
+    if not sys.stdin.isatty():
+        return False
+    console.print(
+        f"[yellow]{cwd} has project-local resources that can run code or change permissions:[/yellow]"
+    )
+    for path in resources:
+        console.print(f"  [dim]{path}[/dim]")
+    answer = input("Load them? [y]es / [n]o / [a]lways: ").strip().lower()
+    if answer in ("a", "always"):
+        manager.save(cwd, True)
+        return True
+    return answer in ("y", "yes")
 
 
 def _system_prompt(settings: Settings, resources: Resources, no_context_files: bool) -> str:
@@ -224,9 +263,11 @@ def _build_agent(
     json_output: bool = False,
     telemetry: Telemetry | None = None,
     store: Store | None = None,
+    trusted: bool = True,
+    cache_retention: str | None = None,
 ) -> Agent:
     cwd = Path.cwd()
-    policy = Policy.load(cwd=cwd, config_dir=config_dir())
+    policy = Policy.load(cwd=cwd, config_dir=config_dir(), include_project=trusted)
     checker = PermissionChecker(
         policy,
         approver=approver,
@@ -247,6 +288,7 @@ def _build_agent(
         compact_keep_recent=settings.compact_keep_recent,
         telemetry=telemetry,
         store=store,
+        cache_retention=cache_retention,
     )
     agent.before_tool_call = build_permission_hook(checker, cwd)
     for listener in resources.extensions.listeners:
@@ -276,6 +318,7 @@ def _command_context(
             templates=resources.templates,
             extensions=resources.extensions,
             picker=picker,
+            trust_manager=TrustManager(config_dir() / "trust.json"),
         )
     )
 
@@ -385,6 +428,8 @@ def _run_tui(
     telemetry: Telemetry,
     store: Store | None,
     mouse: bool,
+    trusted: bool,
+    cache_retention: str | None,
 ) -> None:
     from tm.tui import DeferredApprover, TextualApprover, TMPromptApp
 
@@ -401,6 +446,8 @@ def _run_tui(
         no_auto_compact=no_auto_compact,
         telemetry=telemetry,
         store=store,
+        trusted=trusted,
+        cache_retention=cache_retention,
     )
     prompt_app = TMPromptApp(
         agent, model, banner=_startup_banner(model, resources, no_context_files)
@@ -555,6 +602,12 @@ def main(
         "--no-mouse",
         help="Let the terminal handle mouse selection/copy (disables in-app mouse).",
     ),
+    approve: bool = typer.Option(
+        False, "--approve", "-a", help="Trust project-local files for this run."
+    ),
+    no_approve: bool = typer.Option(
+        False, "--no-approve", "-na", help="Ignore project-local files for this run."
+    ),
     login: str | None = typer.Option(
         None, "--login", help="Store an API key for a provider and exit."
     ),
@@ -605,7 +658,13 @@ def main(
         raise typer.Exit(code=1) from exc
 
     tools = _select_tools(no_tools, read_only)
-    resources = Resources() if no_extensions else _load_resources()
+    trusted = _resolve_trust(settings, approve, no_approve)
+    if not trusted:
+        console.print(
+            "[dim]project-local extensions/skills/prompts/policy ignored (untrusted); "
+            "use --approve or /trust[/dim]"
+        )
+    resources = Resources() if no_extensions else _load_resources(trusted)
     text = " ".join(prompt) if prompt else None
     if text is None and (print_mode or json_output) and not sys.stdin.isatty():
         piped = sys.stdin.read().strip()
@@ -635,6 +694,7 @@ def main(
     telemetry = _make_telemetry(telemetry_flag or settings.telemetry)
     store = _make_store(durable_flag or settings.durable)
     mouse = settings.mouse and not no_mouse
+    cache_retention = os.environ.get("TM_CACHE_RETENTION", settings.cache_retention)
 
     async def run() -> None:
         try:
@@ -652,6 +712,8 @@ def main(
                     json_output=json_output,
                     telemetry=telemetry,
                     store=store,
+                    trusted=trusted,
+                    cache_retention=cache_retention,
                 )
                 if store is not None and await agent.recover():
                     console.print("[dim]recovered an interrupted operation[/dim]")
@@ -691,6 +753,8 @@ def main(
                 telemetry,
                 store,
                 mouse,
+                trusted,
+                cache_retention,
             )
         else:
             asyncio.run(run())
