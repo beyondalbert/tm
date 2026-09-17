@@ -16,8 +16,9 @@ from pydantic import BaseModel
 
 from tm.config import config_dir, load_settings
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
+from tm.tools.output import format_truncation, spill_output
 from tm.tools.subprocess_utils import stream_command
-from tm.tools.truncate import truncate_text
+from tm.tools.truncate import truncate_tail
 
 _PACKAGE_PROBE = (
     "import importlib.util, sys\n"
@@ -51,7 +52,9 @@ class PythonTool(Tool[PythonParams]):
         "anything shell one-liners cannot express: parse data, drive a software "
         "API, or build and check a service. The code is saved to a workspace file "
         "so it can be re-run or edited. `packages` lists pip packages the code "
-        "needs; missing ones are installed first when auto-install is enabled."
+        "needs; missing ones are installed first when auto-install is enabled. "
+        "Output is truncated to the last 2000 lines or 50KB, and a non-zero exit "
+        "code is reported as an error."
     )
     parameters_model = PythonParams
     execution_mode = "sequential"
@@ -155,7 +158,10 @@ class PythonTool(Tool[PythonParams]):
 
 
 def _format(prefix: str, result, script: Path, timeout: int | None = None) -> str:
-    output, truncated = truncate_text(result.output)
+    truncation = truncate_tail(result.output)
+    full_path = (
+        spill_output(result.output, name="python") if truncation.truncated else None
+    )
     notes = []
     if result.aborted:
         notes.append("aborted")
@@ -163,11 +169,16 @@ def _format(prefix: str, result, script: Path, timeout: int | None = None) -> st
         notes.append(f"timed out after {timeout}s")
     notes.append(f"exit code {result.returncode}")
     notes.append(f"script {script}")
-    head = f"{prefix}\n" if prefix else ""
-    summary = head + output + ("\n" if output else "") + f"[{', '.join(notes)}]"
-    if truncated:
-        summary += "\n... (output truncated)"
-    return summary
+    parts = []
+    if prefix:
+        parts.append(prefix)
+    if truncation.content:
+        parts.append(truncation.content)
+    notice = format_truncation(truncation, full_path=full_path, tail=True)
+    if notice:
+        parts.append(notice)
+    parts.append(f"[{', '.join(notes)}]")
+    return "\n".join(parts)
 
 
 __all__ = ["PythonParams", "PythonTool", "script_path"]

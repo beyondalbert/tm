@@ -8,8 +8,9 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
+from tm.tools.output import format_truncation
 from tm.tools.path_utils import resolve_path
-from tm.tools.truncate import truncate_text
+from tm.tools.truncate import truncate_head
 
 _SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", ".mypy_cache"}
 
@@ -38,7 +39,10 @@ def _python_find(base: Path, args: FindParams) -> list[str]:
 
 class FindTool(Tool[FindParams]):
     name = "find"
-    description = "Find files by glob pattern."
+    description = (
+        "Find files by glob pattern. Results are capped at max_results; output is "
+        "truncated to the first 2000 lines or 50KB."
+    )
     parameters_model = FindParams
     replay_safe = True
 
@@ -76,9 +80,10 @@ class FindTool(Tool[FindParams]):
 
         if not results:
             return text_result(f"No files matching '{args.pattern}'")
-        body, truncated = truncate_text("\n".join(results))
-        if truncated:
-            body += "\n... (output truncated)"
+        truncation = truncate_head("\n".join(results))
+        body = truncation.content
+        if truncation.truncated:
+            body += ("\n" if body else "") + format_truncation(truncation, tail=False)
         return text_result(body)
 
 

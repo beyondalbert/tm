@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.path_utils import resolve_path
-from tm.tools.truncate import truncate_text
+from tm.tools.truncate import format_size, truncate_head
 
 
 class ReadParams(BaseModel):
@@ -15,7 +15,11 @@ class ReadParams(BaseModel):
 
 class ReadTool(Tool[ReadParams]):
     name = "read"
-    description = "Read a UTF-8 text file, with optional 1-based offset and line limit."
+    description = (
+        "Read a UTF-8 text file, with optional 1-based offset and line limit. "
+        "Output is truncated to the first 2000 lines or 50KB; when truncated, "
+        "continue with the offset shown in the result."
+    )
     parameters_model = ReadParams
     replay_safe = True
 
@@ -41,10 +45,25 @@ class ReadTool(Tool[ReadParams]):
         if not window and start > 0:
             return text_result(f"No lines at offset {start + 1} in {path}")
 
-        numbered = "\n".join(f"{start + i + 1:6d}: {line}" for i, line in enumerate(window))
-        numbered, truncated = truncate_text(numbered)
-        if truncated:
-            numbered += "\n... (output truncated)"
+        truncation = truncate_head("\n".join(window))
+        kept = truncation.content.split("\n") if truncation.content else []
+        numbered = "\n".join(
+            f"{start + i + 1:6d}: {line}" for i, line in enumerate(kept)
+        )
+        if truncation.truncated:
+            first = start + 1
+            if truncation.output_lines == 0:
+                hint = (
+                    f"[Line {first} exceeds {format_size(truncation.max_bytes)}; "
+                    f"use offset={first} with a smaller limit.]"
+                )
+            else:
+                last = start + truncation.output_lines
+                hint = (
+                    f"[Showing lines {first}-{last} of {len(lines)}. "
+                    f"Use offset={last + 1} to continue.]"
+                )
+            numbered = f"{numbered}\n\n{hint}" if numbered else hint
         return text_result(numbered or "(empty file)")
 
 

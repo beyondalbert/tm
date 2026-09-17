@@ -217,10 +217,14 @@ When stdout is not a terminal (piped or redirected) or `textual` is not
 installed, `tm` falls back to the console REPL automatically.
 
 **Copying text.** The TUI captures the mouse for in-app selection and scrolling.
-Drag to select text and press `Ctrl+C` (or `Ctrl+Shift+C`) to copy it; Textual
-copies via OSC52, which most terminals support. If copying does nothing, start
-the TUI with `--no-mouse` and use the terminal's own selection (Shift+drag on
-most terminals). Set `mouse = false` in settings to make that the default.
+Drag to select text and press `Ctrl+Shift+C` to copy it. Copying uses the real
+system clipboard (`clip`/`Set-Clipboard` on Windows, `pbcopy`, `wl-copy`, or
+`xclip`/`xsel`), with an OSC52 fallback for terminals that support it. With no
+selection, `Ctrl+Shift+C` copies the last reply. You can also run `/copy [n]` to
+copy the nth-from-last reply. If copying does nothing (some terminals intercept
+`Ctrl+Shift+C`), start the TUI with `--no-mouse` and use the terminal's own
+selection (Shift+drag on most terminals). Set `mouse = false` in settings to make
+that the default.
 
 ## Permissions
 
@@ -303,6 +307,7 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 | `/compact [note]` | summarize older context |
 | `/recover` | reconcile interrupted durable operations |
 | `/undo [n]` | roll back the last n reversible changes |
+| `/copy [n]` | copy the nth-from-last reply to the clipboard |
 | `/skills` | list available skills |
 | `/skill:<name>` | load a skill into the conversation |
 | `/prompts` | list prompt templates |
@@ -394,6 +399,14 @@ one-liners are not enough.
 
 The architecture and the multi-phase plan live in
 [docs/design/device-management.md](docs/design/device-management.md).
+
+**Tool output.** Command and file output is capped at 2000 lines or 50KB,
+whichever is hit first. Command output (shell, python, elevate) keeps the
+**end**, where errors and the exit code appear, and a non-zero exit code marks
+the result as an error; file and search output keeps the **beginning** (reads add
+`Use offset=N to continue`, grep caps each match line at 500 characters). When
+output is truncated, the full text is saved under `<config>/workspace/spill/` and
+the notice names that file.
 
 ## Customization
 

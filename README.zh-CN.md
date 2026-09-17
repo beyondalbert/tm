@@ -209,10 +209,12 @@ context_window = 65536
 
 当 stdout 不是终端（被管道/重定向）或未安装 `textual` 时，`tm` 会自动回退为控制台 REPL。
 
-**复制文本。** TUI 会捕获鼠标以便内置选择与滚动。按住拖动选中文字后按 `Ctrl+C`（或
-`Ctrl+Shift+C`）复制；Textual 通过 OSC52 写入剪贴板，多数终端支持。如果没有效果，用
-`--no-mouse` 启动 TUI，改用终端自带的选择（多数终端为 Shift+拖动）。可在 settings 里设
-`mouse = false` 使其成为默认。
+**复制文本。** TUI 会捕获鼠标以便内置选择与滚动。按住拖动选中文字后按 `Ctrl+Shift+C` 复制。
+复制走**系统真实剪贴板**（Windows 用 `clip`/`Set-Clipboard`，macOS 用 `pbcopy`，Linux 用
+`wl-copy` 或 `xclip`/`xsel`），不支持的终端再退回 OSC52。没有选中内容时，`Ctrl+Shift+C`
+会复制最后一条回复；也可用 `/copy [n]` 复制倒数第 n 条回复。如果没有效果（有些终端会拦截
+`Ctrl+Shift+C`），用 `--no-mouse` 启动 TUI，改用终端自带的选择（多数终端为 Shift+拖动）。
+可在 settings 里设 `mouse = false` 使其成为默认。
 
 ## 权限
 
@@ -284,6 +286,7 @@ allow = ["api.deepseek.com"]
 | `/compact [note]` | 摘要较早的上下文 |
 | `/recover` | 恢复被中断的持久化操作 |
 | `/undo [n]` | 回退最近 n 个可逆变更 |
+| `/copy [n]` | 复制倒数第 n 条回复到剪贴板 |
 | `/skills` | 列出可用技能 |
 | `/skill:<name>` | 将技能载入对话 |
 | `/prompts` | 列出提示词模板 |
@@ -359,6 +362,11 @@ TM 先了解这台机器，再动手；当 shell 一行命令不够用时，会�
   Python 包 → 系统级变更，并且逐步验证、先尝试再提问。
 
 架构与多阶段计划见 [docs/design/device-management.md](docs/design/device-management.md)。
+
+**工具输出。** 命令与文件输出上限为 2000 行或 50KB（先到者为准）。命令输出（shell、python、
+elevate）保留**末尾**（错误与退出码在这里），且**非零退出码会把结果标记为错误**；文件/搜索输出
+保留**开头**（read 会给出 `Use offset=N to continue`，grep 每行最多 500 字符）。发生截断时，
+完整内容保存到 `<config>/workspace/spill/`，提示会给出文件路径。
 
 ## 定制
 

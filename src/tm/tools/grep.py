@@ -9,8 +9,9 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
+from tm.tools.output import format_truncation
 from tm.tools.path_utils import resolve_path
-from tm.tools.truncate import truncate_text
+from tm.tools.truncate import GREP_MAX_LINE_LENGTH, truncate_head, truncate_line
 
 _SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", ".mypy_cache"}
 
@@ -61,7 +62,12 @@ def _python_search(base: Path, args: GrepParams) -> tuple[list[str], int]:
 
 class GrepTool(Tool[GrepParams]):
     name = "grep"
-    description = "Search file contents by regular expression or literal string."
+    description = (
+        "Search file contents by regular expression or literal string. Results are "
+        f"capped at max_results and each match line at {GREP_MAX_LINE_LENGTH} chars; "
+        "output is truncated to the first 2000 lines or 50KB, so refine the pattern "
+        "if results look cut off."
+    )
     parameters_model = GrepParams
     replay_safe = True
 
@@ -98,8 +104,13 @@ class GrepTool(Tool[GrepParams]):
 
         if not shown:
             return text_result(f"No matches for '{args.pattern}'")
-        body, truncated = truncate_text("\n".join(shown))
-        if truncated or total > len(shown):
+        shown = [truncate_line(line)[0] for line in shown]
+        truncation = truncate_head("\n".join(shown))
+        body = truncation.content
+        if truncation.truncated:
+            body += ("\n" if body else "") + format_truncation(truncation, tail=False)
+            body += f"\n... ({total} matches, showing {truncation.output_lines})"
+        elif total > len(shown):
             body += f"\n... ({total} matches, showing {len(shown)})"
         return text_result(body)
 

@@ -8,9 +8,10 @@ from pydantic import BaseModel
 
 from tm.host import detect_host
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
+from tm.tools.output import format_truncation, spill_output
 from tm.tools.shell import shell_argv
 from tm.tools.subprocess_utils import stream_command
-from tm.tools.truncate import truncate_text
+from tm.tools.truncate import truncate_tail
 
 
 class ElevateParams(BaseModel):
@@ -24,7 +25,8 @@ class ElevateTool(Tool[ElevateParams]):
     description = (
         "Run a shell command with administrator/root privileges. On Windows this "
         "triggers a UAC prompt; on Linux it uses sudo/pkexec. Use it only when a "
-        "normal command failed for lack of privileges."
+        "normal command failed for lack of privileges. Output is truncated to the "
+        "last 2000 lines or 50KB; a non-zero exit code is reported as an error."
     )
     parameters_model = ElevateParams
     execution_mode = "sequential"
@@ -59,7 +61,10 @@ class ElevateTool(Tool[ElevateParams]):
         except OSError as exc:
             return text_result(f"Could not start elevated command: {exc}", is_error=True)
 
-        output, truncated = truncate_text(result.output)
+        truncation = truncate_tail(result.output)
+        full_path = (
+            spill_output(result.output, name="elevate") if truncation.truncated else None
+        )
         notes = []
         if result.aborted:
             notes.append("aborted")
@@ -68,11 +73,14 @@ class ElevateTool(Tool[ElevateParams]):
         notes.append(f"exit code {result.returncode}")
         if already_elevated:
             notes.append("already elevated")
-        summary = output + ("\n" if output else "") + f"[{', '.join(notes)}]"
-        if truncated:
-            summary += "\n... (output truncated)"
+        parts = [truncation.content] if truncation.content else []
+        notice = format_truncation(truncation, full_path=full_path, tail=True)
+        if notice:
+            parts.append(notice)
+        parts.append(f"[{', '.join(notes)}]")
         return text_result(
-            summary, is_error=result.aborted or result.timed_out or result.returncode != 0
+            "\n".join(parts),
+            is_error=result.aborted or result.timed_out or result.returncode != 0,
         )
 
 
