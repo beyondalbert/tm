@@ -70,7 +70,7 @@ uv run tm --help
 ### First run
 
 ```bash
-tm --login deepseek        # store an API key (hidden input)
+tm --login deepseek        # store an API key (input visible)
 tm "list the files in this folder"
 ```
 
@@ -93,12 +93,15 @@ python -m uv run tm "list the files in this folder"
 
 Three options, in order of convenience:
 
-1. **Store it once (recommended)**. Prompts with hidden input and saves to the
-   credentials file:
+1. **Store it once (recommended)**. Prompts for the key (visible, so you can
+   confirm it) and saves it to the credentials file:
 
    ```powershell
    python -m uv run tm --login deepseek
    ```
+
+   After saving, TM echoes back a masked preview (for example
+   `sk-000...0000 (35 chars)`) so you can confirm it was entered correctly.
 
    Saved to `<config>/credentials.toml`:
    - Windows: `%APPDATA%\the-machine\credentials.toml`

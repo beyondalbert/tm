@@ -69,7 +69,7 @@ uv run tm --help
 ### 首次运行
 
 ```bash
-tm --login deepseek        # 保存 API Key（隐藏输入）
+tm --login deepseek        # 保存 API Key（输入可见）
 tm "list the files in this folder"
 ```
 
@@ -91,11 +91,13 @@ python -m uv run tm "list the files in this folder"
 
 三种方式，按便捷程度排序：
 
-1. **存一次（推荐）**。隐藏输入并保存到凭据文件：
+1. **存一次（推荐）**。输入时可见（便于确认），保存到凭据文件：
 
    ```powershell
    python -m uv run tm --login deepseek
    ```
+
+   保存后会回显一个脱敏预览（例如 `sk-000...0000 (35 chars)`），便于确认是否输入正确。
 
    保存位置为 `<config>/credentials.toml`：
    - Windows：`%APPDATA%\the-machine\credentials.toml`

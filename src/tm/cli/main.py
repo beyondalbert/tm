@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import getpass
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +30,7 @@ from tm.config import (
     config_dir,
     load_credentials,
     load_settings,
+    sanitize_api_key,
     save_credential,
 )
 from tm.context import build_context_section, load_context_files
@@ -161,6 +161,15 @@ def _make_telemetry(enabled: bool) -> Telemetry:
     if not enabled:
         return NoopTelemetry()
     return FileTelemetry(config_dir() / "telemetry.jsonl")
+
+
+def _mask_key(key: str) -> str:
+    """Masked preview of a key so the user can confirm what was stored."""
+    if not key:
+        return "<empty>"
+    if len(key) <= 10:
+        return "*" * len(key)
+    return f"{key[:6]}...{key[-4:]} ({len(key)} chars)"
 
 
 def _make_store(enabled: bool) -> Store | None:
@@ -539,12 +548,14 @@ def main(
             console.print(f"[red]Unknown provider: {login}[/red]")
             console.print(f"Known providers: {', '.join(sorted(known))}")
             raise typer.Exit(code=1)
-        key = getpass.getpass(f"Paste API key for {login} (input hidden): ").strip()
+        key = input(f"Paste API key for {login}: ").strip()
+        key = sanitize_api_key(key)
         if not key:
             console.print("[red]No key entered[/red]")
             raise typer.Exit(code=1)
         saved = save_credential(login, key)
         console.print(f"Saved {login} credential to [bold]{saved}[/bold]")
+        console.print(f"[dim]key: {_mask_key(key)}[/dim]")
         raise typer.Exit()
 
     if list_models:
