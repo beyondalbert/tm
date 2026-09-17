@@ -45,12 +45,14 @@ from tm.extensions import ExtensionAPI, extension_roots, load_extensions
 from tm.host import detect_host, render_environment
 from tm.permissions import (
     READ_TOOLS,
+    ApprovalMemory,
+    Approver,
     AuditLog,
-    AutoAllowApprover,
     AutoDenyApprover,
     ConsoleApprover,
     PermissionChecker,
     Policy,
+    SessionApprover,
     build_permission_hook,
 )
 from tm.prompts import PromptTemplate, load_prompt_templates, prompt_roots
@@ -156,12 +158,9 @@ def _select_tools(no_tools: bool, read_only: bool, *, no_python: bool = False) -
     return tools
 
 
-def _make_approver(yolo: bool):
-    if yolo:
-        return AutoAllowApprover()
-    if sys.stdin.isatty():
-        return ConsoleApprover(console)
-    return AutoDenyApprover()
+def _make_approver(yolo: bool) -> SessionApprover:
+    inner: Approver = ConsoleApprover(console) if sys.stdin.isatty() else AutoDenyApprover()
+    return SessionApprover(inner, auto=yolo)
 
 
 def _make_registry() -> Registry:
@@ -284,6 +283,7 @@ def _build_agent(
         policy,
         approver=approver,
         audit=AuditLog(config_dir() / "audit.jsonl"),
+        memory=ApprovalMemory.load(config_dir() / "approvals.json"),
     )
     all_tools = [*tools, *resources.extensions.tools]
     environment = render_environment(detect_host()) if settings.env_probe else None
@@ -322,6 +322,7 @@ def _command_context(
     resources: Resources,
     emit,
     picker=None,
+    approver: SessionApprover | None = None,
 ) -> SlashCommands:
     return SlashCommands(
         CommandContext(
@@ -337,6 +338,7 @@ def _command_context(
             picker=picker,
             trust_manager=TrustManager(config_dir() / "trust.json"),
             journal=agent.journal,
+            approver=approver,
         )
     )
 
@@ -468,16 +470,18 @@ def _run_tui(
     cache_retention: str | None,
     journal: Journal | None = None,
     dry_run: bool = False,
+    yolo: bool = False,
 ) -> None:
     from tm.tui import DeferredApprover, TextualApprover, TMPromptApp
 
     deferred = DeferredApprover()
+    approver = SessionApprover(deferred, auto=yolo)
     agent = _build_agent(
         provider,
         model,
         settings,
         tools,
-        deferred,
+        approver,
         session,
         resources,
         no_context_files=no_context_files,
@@ -496,6 +500,7 @@ def _run_tui(
     )
     prompt_app.resume_on_start = resume_on_start
     prompt_app.recover_on_start = bool(agent.pending_recovery())
+    prompt_app.session_approver = approver
     commands = _command_context(
         agent,
         registry,
@@ -504,6 +509,7 @@ def _run_tui(
         resources,
         prompt_app.write_line,
         picker=prompt_app.pick_session,
+        approver=approver,
     )
     prompt_app.command_handler = commands.handle
     deferred.set(TextualApprover(prompt_app))
@@ -513,6 +519,7 @@ def _run_tui(
 async def _agent_repl(
     agent: Agent, model: Model, registry: Registry, session_manager: SessionManager | None,
     resources: Resources, session: Session | None,
+    approver: SessionApprover | None = None,
 ) -> None:
     commands = _command_context(
         agent,
@@ -522,6 +529,7 @@ async def _agent_repl(
         resources,
         console.print,
         picker=_console_picker,
+        approver=approver,
     )
     console.print(
         f"[bold]TM[/bold] {__version__} | {agent.model.provider}/{agent.model.id} | /help | /exit"
@@ -748,12 +756,13 @@ def main(
     async def run() -> None:
         try:
             if tools:
+                approver = _make_approver(yolo)
                 agent = _build_agent(
                     selected_provider,
                     selected_model,
                     settings,
                     tools,
-                    _make_approver(yolo),
+                    approver,
                     session,
                     resources,
                     no_context_files=no_context_files,
@@ -775,7 +784,8 @@ def main(
                         console.print()
                 else:
                     await _agent_repl(
-                        agent, selected_model, registry, session_manager, resources, session
+                        agent, selected_model, registry, session_manager, resources, session,
+                        approver,
                     )
             elif text:
                 await _chat_once(
@@ -809,6 +819,7 @@ def main(
                 cache_retention,
                 journal,
                 dry_run,
+                yolo,
             )
         else:
             asyncio.run(run())

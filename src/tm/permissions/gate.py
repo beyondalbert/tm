@@ -8,6 +8,7 @@ from tm.core.agent import BeforeToolCallResult
 from tm.permissions.actions import Action, ActionKind, Decision
 from tm.permissions.approval import Approver, AutoDenyApprover
 from tm.permissions.audit import AuditLog
+from tm.permissions.memory import ApprovalMemory
 from tm.permissions.policy import Policy
 from tm.safety import is_dangerous
 
@@ -62,14 +63,12 @@ class PermissionChecker:
         policy: Policy,
         approver: Approver | None = None,
         audit: AuditLog | None = None,
+        memory: ApprovalMemory | None = None,
     ) -> None:
         self.policy = policy
         self.approver: Approver = approver or AutoDenyApprover()
         self.audit = audit or AuditLog(None)
-        # "Always allow" remembers a scope: the containing folder for file
-        # actions, the exact command/host otherwise.
-        self._remembered_folders: set[Path] = set()
-        self._remembered_keys: set[str] = set()
+        self.memory = memory or ApprovalMemory()
 
     def _absolute(self, action: Action) -> Path:
         path = Path(action.target).expanduser()
@@ -77,69 +76,123 @@ class PermissionChecker:
             path = self.policy.cwd / path
         return path.resolve()
 
+    @staticmethod
+    def _program(command: str) -> str:
+        tokens = command.strip().split()
+        return (tokens[0] if tokens else command.strip()).lower()
+
+    def _may_remember(self, action: Action) -> bool:
+        dangerous = action.kind is ActionKind.SHELL and is_dangerous(action.target)
+        return action.kind is not ActionKind.ELEVATED and not dangerous
+
     def _is_remembered(self, action: Action) -> bool:
         if action.kind in (ActionKind.FILE_READ, ActionKind.FILE_WRITE):
             path = self._absolute(action)
-            return any(path == folder or folder in path.parents for folder in self._remembered_folders)
-        return action.key in self._remembered_keys
+            for folder in self.memory.folders:
+                base = Path(folder)
+                if path == base or base in path.parents:
+                    return True
+            return False
+        if action.kind is ActionKind.SHELL:
+            return self._program(action.target) in self.memory.programs
+        if action.kind is ActionKind.NETWORK:
+            return action.target.lower() in self.memory.hosts
+        return False
 
     def _remember(self, action: Action) -> str:
         if action.kind in (ActionKind.FILE_READ, ActionKind.FILE_WRITE):
             path = self._absolute(action)
             folder = path if path.is_dir() else path.parent
-            self._remembered_folders.add(folder)
-            return str(folder)
-        self._remembered_keys.add(action.key)
+            self.memory.folders.add(str(folder))
+            self.memory.save()
+            return f"folder {folder}"
+        if action.kind is ActionKind.SHELL:
+            program = self._program(action.target)
+            self.memory.programs.add(program)
+            self.memory.save()
+            return f"program `{program}`"
+        if action.kind is ActionKind.NETWORK:
+            host = action.target.lower()
+            self.memory.hosts.add(host)
+            self.memory.save()
+            return f"host {host}"
         return action.key
 
-    async def authorize(self, action: Action) -> bool:
+    def _evaluate(self, action: Action) -> tuple[Decision, str]:
+        """Policy + remembered + dangerous-command decision, before asking."""
         if action.kind is ActionKind.ELEVATED:
-            # Elevation is a trust upgrade: always ask, never remember.
-            outcome = await self.approver.request(action, "elevation (never remembered)")
-            self.audit.record(
-                action=action,
-                decision=Decision.ALLOW if outcome.allowed else Decision.DENY,
-                allowed=outcome.allowed,
-                reason="elevation",
-            )
-            return outcome.allowed
-
+            return Decision.ASK, "elevation (never remembered)"
         decision, reason = self.policy.evaluate(action)
-        dangerous = action.kind is ActionKind.SHELL and is_dangerous(action.target)
-        if dangerous and decision is not Decision.DENY:
-            decision, reason = Decision.ASK, "dangerous command requires explicit approval"
-        if decision is Decision.ASK and not dangerous and self._is_remembered(action):
-            decision, reason = Decision.ALLOW, "remembered decision"
+        if (
+            decision is not Decision.DENY
+            and action.kind is ActionKind.SHELL
+            and is_dangerous(action.target)
+        ):
+            return Decision.ASK, "dangerous command requires explicit approval"
+        if decision is Decision.ASK and self._is_remembered(action):
+            return Decision.ALLOW, "remembered decision"
+        return decision, reason
 
-        if decision is Decision.ALLOW:
-            self.audit.record(action=action, decision=decision, allowed=True, reason=reason)
-            return True
-        if decision is Decision.DENY:
-            self.audit.record(action=action, decision=decision, allowed=False, reason=reason)
-            return False
-
-        outcome = await self.approver.request(action, reason)
-        if outcome.remember and outcome.allowed and not dangerous:
-            scope = self._remember(action)
-            reason = f"user decision (remembered {scope})"
-        else:
-            reason = "user decision"
+    def _record(self, action: Action, allowed: bool, reason: str) -> None:
         self.audit.record(
             action=action,
-            decision=Decision.ALLOW if outcome.allowed else Decision.DENY,
-            allowed=outcome.allowed,
+            decision=Decision.ALLOW if allowed else Decision.DENY,
+            allowed=allowed,
             reason=reason,
         )
+
+    async def _ask(self, actions: list[Action], reason: str) -> bool:
+        outcome = await self.approver.request(actions[0], reason)
+        if outcome.remember and outcome.allowed:
+            remembered = [self._remember(a) for a in actions if self._may_remember(a)]
+            reason = (
+                f"user decision (remembered {', '.join(remembered)})"
+                if remembered
+                else "user decision"
+            )
+        else:
+            reason = "user decision"
+        for action in actions:
+            self._record(action, outcome.allowed, reason)
         return outcome.allowed
+
+    async def authorize(self, action: Action) -> bool:
+        return await self.authorize_all([action])
+
+    async def authorize_all(self, actions: list[Action]) -> bool:
+        """Authorize a tool call's actions, asking at most once.
+
+        A single denial blocks the whole call; already-allowed actions are
+        recorded and never asked. Remaining actions are approved together so
+        e.g. a shell+network pair prompts once.
+        """
+        pending: list[tuple[Action, str]] = []
+        for action in actions:
+            decision, reason = self._evaluate(action)
+            if decision is Decision.DENY:
+                self._record(action, False, reason)
+                return False
+            if decision is Decision.ALLOW:
+                self._record(action, True, reason)
+                continue
+            pending.append((action, reason))
+        if not pending:
+            return True
+        primary_reason = pending[0][1]
+        if len(pending) > 1:
+            extras = ", ".join(action.describe() for action, _ in pending[1:])
+            primary_reason = f"{primary_reason}; also requires: {extras}"
+        return await self._ask([action for action, _ in pending], primary_reason)
 
 
 def build_permission_hook(checker: PermissionChecker, cwd: Path):
     async def hook(call, args) -> BeforeToolCallResult | None:
-        for action in actions_for_tool(call.name, call.arguments, cwd):
-            if not await checker.authorize(action):
-                return BeforeToolCallResult(
-                    block=True, reason=f"Permission denied: {action.describe()}"
-                )
+        actions = actions_for_tool(call.name, call.arguments, cwd)
+        if actions and not await checker.authorize_all(actions):
+            described = ", ".join(action.describe() for action in actions)
+            return BeforeToolCallResult(
+                block=True, reason=f"Permission denied: {described}"
+            )
         return None
 
     return hook

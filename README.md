@@ -225,15 +225,24 @@ most terminals). Set `mouse = false` in settings to make that the default.
 ## Permissions
 
 Every file, shell, and network action is evaluated against a policy. Deny rules
-win, then allow rules, then the `default` decision (`ask` by default). Undecided
-actions prompt the user; `a` remembers the decision for the session. All
-decisions are appended to `<config>/audit.jsonl`.
+win, then allow rules, then the default decision. **Reads are allowed by
+default** (`default_read = "allow"`); writes, shell, and network default to
+`ask`. Undecided actions prompt the user; `a` (always) remembers the scope and
+persists it to `<config>/approvals.json`, so it survives a restart. All decisions
+are appended to `<config>/audit.jsonl`.
+
+To reduce prompts during a session, `/auto on` (or `Ctrl+Y` in the TUI) auto
+approves everything that is not explicitly denied for the rest of the session;
+`/auto off` returns to prompting, and `tm --yolo` starts in that mode. A built-in
+list of destructive commands always asks and is never remembered, as does
+`elevate`.
 
 Policy files are merged from `<config>/policy.toml` (global) and
 `<cwd>/.aiagent/policy.toml` (project). Example:
 
 ```toml
-default = "ask"
+default = "ask"          # writes, shell, network
+default_read = "allow"   # reads (set "ask" to be prompted)
 
 [files.read]
 allow = ["**"]
@@ -254,8 +263,9 @@ allow = ["api.deepseek.com"]
 File rules are **folder-aware**: a rule naming a directory (`src`, `src/`, or
 `src/**`) covers everything under it, so you can control access per folder
 instead of per file. When the policy leaves an action as `ask` and you answer
-`a` (always), TM remembers the **scope**: the containing folder for file
-actions, the exact command/host otherwise.
+`a` (always), TM remembers the **scope**: the containing folder for file actions,
+the **program** for shell commands (`git` covers `git status`, `git log`, ...),
+and the host for network actions.
 
 Note: shell commands are matched textually. TM cannot reliably stop a shell
 command from making network calls; use a sandbox/container when you need a hard

@@ -359,3 +359,25 @@ async def test_recover_command_reruns_pending(tmp_path: Path) -> None:
 
     assert "recovered 1 interrupted operation(s)" in emitted[-1]
     assert tool.calls == 1
+
+
+async def test_auto_command_toggles_the_session_approver(tmp_path: Path) -> None:
+    from tm.permissions.approval import AutoDenyApprover, SessionApprover
+
+    emitted: list[str] = []
+    approver = SessionApprover(AutoDenyApprover(), auto=False)
+    ctx = CommandContext(
+        agent=make_agent(),
+        registry=Registry(),
+        cwd=tmp_path,
+        emit=emitted.append,
+        approver=approver,
+    )
+    commands = SlashCommands(ctx)
+
+    await commands.handle("auto on")
+    assert approver.auto is True
+    assert "on" in emitted[-1]
+
+    await commands.handle("auto")
+    assert approver.auto is False

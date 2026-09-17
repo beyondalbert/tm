@@ -41,7 +41,7 @@ from tm.core.events import (
     ToolExecutionStartEvent,
 )
 from tm.core.session import SessionInfo
-from tm.permissions import ApprovalOutcome
+from tm.permissions import ApprovalOutcome, SessionApprover
 
 # pi dark theme palette
 _TEXT = "#d4d4d4"
@@ -366,6 +366,7 @@ class TMPromptApp(App[None]):
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+o", "toggle_tools", "Expand tools"),
+        Binding("ctrl+y", "toggle_auto", "Auto-approve"),
         Binding("ctrl+shift+c", "copy_selection", "Copy selection", show=False),
         Binding("tab", "accept_suggestion", "Complete", show=False),
         Binding("down", "suggestion_down", "Next suggestion", show=False),
@@ -381,6 +382,7 @@ class TMPromptApp(App[None]):
         self.command_handler: Callable[[str], Awaitable[str | None]] | None = None
         self.resume_on_start = False
         self.recover_on_start = False
+        self.session_approver: SessionApprover | None = None
         self._status = "idle"
         self._current: AssistantMessageWidget | None = None
         self._current_mounted = False
@@ -478,6 +480,14 @@ class TMPromptApp(App[None]):
         self._expanded = not self._expanded
         for widget in self.query(ToolWidget):
             widget.set_expanded(self._expanded)
+
+    def action_toggle_auto(self) -> None:
+        approver = self.session_approver
+        if approver is None:
+            return
+        approver.auto = not approver.auto
+        self.notify(f"auto-approve {'on' if approver.auto else 'off'}")
+        self._update_footer()
 
     def action_copy_selection(self) -> None:
         """Copy the current mouse selection (Ctrl+C / Ctrl+Shift+C)."""
@@ -671,6 +681,8 @@ class TMPromptApp(App[None]):
         right = f"({model.provider}) {model.id}"
         if model.reasoning:
             right += " • thinking"
+        if self.session_approver is not None and self.session_approver.auto:
+            right += " • AUTO"
         width = max(self.size.width - 2, 20)
         pad = max(1, width - len(stats) - len(right))
         self.query_one("#footer", Static).update(

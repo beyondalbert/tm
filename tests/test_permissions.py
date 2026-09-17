@@ -13,6 +13,7 @@ from tm.permissions.gate import (
     actions_for_tool,
     build_permission_hook,
 )
+from tm.permissions.memory import ApprovalMemory
 from tm.permissions.policy import Policy
 
 
@@ -186,7 +187,7 @@ def test_folder_deny_covers_subtree(tmp_path: Path) -> None:
 
 
 async def test_always_allows_remember_the_folder(tmp_path: Path) -> None:
-    policy = Policy.from_dict({"default": "ask"}, cwd=tmp_path)
+    policy = Policy.from_dict({"default": "ask", "default_read": "ask"}, cwd=tmp_path)
 
     class RememberOnce:
         def __init__(self) -> None:
@@ -208,8 +209,8 @@ async def test_always_allows_remember_the_folder(tmp_path: Path) -> None:
     assert approver.calls == 2
 
 
-async def test_always_command_remembers_exact_command(tmp_path: Path) -> None:
-    policy = Policy.from_dict({"default": "ask"}, cwd=tmp_path)
+async def test_always_command_remembers_the_program(tmp_path: Path) -> None:
+    policy = Policy.from_dict({"default": "ask", "default_read": "allow"}, cwd=tmp_path)
 
     class RememberOnce:
         def __init__(self) -> None:
@@ -223,9 +224,11 @@ async def test_always_command_remembers_exact_command(tmp_path: Path) -> None:
     checker = PermissionChecker(policy, approver=approver)
 
     assert await checker.authorize(Action(ActionKind.SHELL, "git status")) is True
-    assert await checker.authorize(Action(ActionKind.SHELL, "git status")) is True
+    # same program: remembered, no second prompt
+    assert await checker.authorize(Action(ActionKind.SHELL, "git log")) is True
     assert approver.calls == 1
-    assert await checker.authorize(Action(ActionKind.SHELL, "git push")) is True
+    # different program: prompt again
+    assert await checker.authorize(Action(ActionKind.SHELL, "ls -la")) is True
     assert approver.calls == 2
 
 
@@ -307,3 +310,78 @@ def test_process_service_package_map_to_shell() -> None:
         actions = actions_for_tool(name, args, Path("."))
         assert len(actions) == 1
         assert actions[0].kind is ActionKind.SHELL
+
+
+def test_read_is_allowed_by_default() -> None:
+    policy = Policy.from_dict({})
+    assert policy.evaluate(Action(ActionKind.FILE_READ, "a.txt"))[0] is Decision.ALLOW
+
+
+def test_default_read_can_be_raised_to_ask() -> None:
+    policy = Policy.from_dict({"default_read": "ask"})
+    assert policy.evaluate(Action(ActionKind.FILE_READ, "a.txt"))[0] is Decision.ASK
+
+
+def test_read_deny_still_wins_over_default_allow() -> None:
+    policy = Policy.from_dict({"files": {"read": {"deny": ["secrets/**"]}}})
+    decision, _ = policy.evaluate(Action(ActionKind.FILE_READ, "secrets/token.txt"))
+    assert decision is Decision.DENY
+
+
+async def test_authorize_all_asks_once(tmp_path: Path) -> None:
+    policy = Policy.from_dict({"default": "ask", "default_read": "allow"})
+
+    class Counting:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request(self, action, reason) -> ApprovalOutcome:
+            self.calls += 1
+            return ApprovalOutcome(allowed=True)
+
+    approver = Counting()
+    checker = PermissionChecker(policy, approver=approver)
+    actions = [
+        Action(ActionKind.SHELL, "python call an API"),
+        Action(ActionKind.NETWORK, "pypi.org"),
+    ]
+    assert await checker.authorize_all(actions) is True
+    assert approver.calls == 1
+
+
+async def test_remembered_program_persists_to_disk(tmp_path: Path) -> None:
+    path = tmp_path / "approvals.json"
+    policy = Policy.from_dict({"default": "ask", "default_read": "allow"})
+
+    class Remember:
+        async def request(self, action, reason) -> ApprovalOutcome:
+            return ApprovalOutcome(allowed=True, remember=True)
+
+    checker = PermissionChecker(
+        policy, approver=Remember(), memory=ApprovalMemory.load(path)
+    )
+    assert await checker.authorize(Action(ActionKind.SHELL, "git status")) is True
+    assert path.is_file()
+
+    class Deny:
+        async def request(self, action, reason) -> ApprovalOutcome:
+            raise AssertionError("remembered programs must not ask again")
+
+    reloaded = PermissionChecker(
+        policy, approver=Deny(), memory=ApprovalMemory.load(path)
+    )
+    assert await reloaded.authorize(Action(ActionKind.SHELL, "git log")) is True
+
+
+async def test_session_approver_auto_allows_but_deny_wins(tmp_path: Path) -> None:
+    from tm.permissions.approval import SessionApprover
+
+    policy = Policy.from_dict(
+        {"default": "ask", "default_read": "allow", "shell": {"deny": ["rm *"]}}
+    )
+    approver = SessionApprover(AutoDenyApprover(), auto=True)
+    checker = PermissionChecker(policy, approver=approver)
+
+    assert await checker.authorize(Action(ActionKind.SHELL, "git status")) is True
+    # a policy deny is decided before the approver
+    assert await checker.authorize(Action(ActionKind.SHELL, "rm -rf build")) is False

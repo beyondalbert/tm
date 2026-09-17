@@ -81,6 +81,8 @@ def _command_candidates(command: str) -> list[str]:
 
 class Policy(BaseModel):
     default: Decision = Decision.ASK
+    #: Reads are safe, so they are allowed unless a read rule says otherwise.
+    default_read: Decision = Decision.ALLOW
     files_read: RuleSet = RuleSet()
     files_write: RuleSet = RuleSet()
     shell: RuleSet = RuleSet()
@@ -92,6 +94,7 @@ class Policy(BaseModel):
         files = data.get("files", {})
         return cls(
             default=Decision(str(data.get("default", "ask")).lower()),
+            default_read=Decision(str(data.get("default_read", "allow")).lower()),
             files_read=RuleSet.model_validate(files.get("read", {})),
             files_write=RuleSet.model_validate(files.get("write", {})),
             shell=RuleSet.model_validate(data.get("shell", {})),
@@ -146,6 +149,8 @@ class Policy(BaseModel):
             return Decision.DENY, "matched a deny rule"
         if self._matches(rules.allow, action):
             return Decision.ALLOW, "matched an allow rule"
+        if action.kind is ActionKind.FILE_READ:
+            return self.default_read, "default read policy"
         return self.default, "default policy"
 
 

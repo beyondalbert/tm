@@ -32,9 +32,27 @@ class AutoAllowApprover:
         return ApprovalOutcome(allowed=True)
 
 
+class SessionApprover:
+    """Wraps an approver and can auto-approve for the rest of the session.
+
+    Policy ``deny`` rules are still enforced: they are decided before the
+    approver is consulted. This matches ``--yolo`` and can be toggled with
+    ``/auto on|off`` (Ctrl+Y in the TUI).
+    """
+
+    def __init__(self, inner: Approver, auto: bool = False) -> None:
+        self.inner = inner
+        self.auto = auto
+
+    async def request(self, action: Action, reason: str) -> ApprovalOutcome:
+        if self.auto:
+            return ApprovalOutcome(allowed=True)
+        return await self.inner.request(action, reason)
+
+
 class ConsoleApprover:
-    """Ask the user on the terminal. 'always' remembers a scope (a folder for
-    file actions, the exact command/host otherwise)."""
+    """Ask the user on the terminal. 'always' remembers a scope: a folder for
+    file actions, a program for shell commands, a host for network actions."""
 
     def __init__(self, console: Console | None = None) -> None:
         self.console = console or Console()
@@ -48,7 +66,9 @@ class ConsoleApprover:
             folder = path if path.is_dir() else path.parent
             return f"this folder ({folder})"
         if action.kind is ActionKind.SHELL:
-            return "this command"
+            tokens = action.target.strip().split()
+            program = tokens[0] if tokens else action.target.strip()
+            return f"every `{program}` command"
         return "this host"
 
     async def request(self, action: Action, reason: str) -> ApprovalOutcome:
@@ -72,4 +92,5 @@ __all__ = [
     "AutoAllowApprover",
     "AutoDenyApprover",
     "ConsoleApprover",
+    "SessionApprover",
 ]

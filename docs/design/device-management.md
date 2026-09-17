@@ -174,6 +174,13 @@ as audit-only (non-reversible) entries.
   `Host.elevated_argv(argv)`, which triggers the OS prompt (UAC / sudo / pkexec).
   In a headless environment with no prompt available, fail with a clear message.
 
+Approval ergonomics: reads are allowed by default (`default_read = "allow"`),
+shell approvals remember the **program** rather than the exact command, and
+"always" decisions persist in `<config>/approvals.json` across sessions. A
+session-level auto-approve toggle (`/auto`, Ctrl+Y in the TUI) bypasses prompts
+without bypassing policy deny rules. Multiple actions for one call (e.g. shell +
+network) prompt once.
+
 ## 8. Cognition
 
 - The system prompt gains:

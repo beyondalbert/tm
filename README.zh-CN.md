@@ -216,15 +216,21 @@ context_window = 65536
 
 ## 权限
 
-每一项文件、Shell、网络操作都会依据策略评估。拒绝规则优先，其次允许规则，最后是
-`default` 决策（默认 `ask`）。未决操作会询问用户；输入 `a` 会在本次会话内记住该决定。
+每一项文件、Shell、网络操作都会依据策略评估。拒绝规则优先，其次允许规则，最后是默认决策。
+**读操作默认放行**（`default_read = "allow"`）；写、Shell、网络默认 `ask`。未决操作会询问
+用户；输入 `a`（always）会记住**作用域**并持久化到 `<config>/approvals.json`，重启后仍有效。
 所有决策写入 `<config>/audit.jsonl`。
+
+会话内想减少弹窗：`/auto on`（TUI 为 `Ctrl+Y`）会对所有未被显式拒绝的操作自动放行，`/auto off`
+恢复询问；`tm --yolo` 则以该模式启动。内置的危险命令清单**始终询问且不记忆**，`elevate` 同样
+如此。
 
 策略文件会合并 `<config>/policy.toml`（全局）与 `<cwd>/.aiagent/policy.toml`（项目）。
 示例：
 
 ```toml
-default = "ask"
+default = "ask"          # 写、Shell、网络
+default_read = "allow"   # 读（设为 "ask" 则每次询问）
 
 [files.read]
 allow = ["**"]
@@ -244,7 +250,8 @@ allow = ["api.deepseek.com"]
 
 文件规则是**目录级**的：规则里写目录（`src`、`src/` 或 `src/**`）会覆盖其下所有内容，
 可以按文件夹控制而不是逐个文件。当策略未决（`ask`）而你回答 `a`（always）时，TM 记住的是
-**作用域**：文件操作记住所在文件夹，命令/网络记住具体命令/主机。
+**作用域**：文件操作记住所在文件夹，Shell 命令记住**程序名**（`git` 覆盖 `git status`、
+`git log` 等），网络记住主机。
 
 注意：Shell 命令是**按文本匹配**的。TM 无法可靠阻止某条 Shell 命令发起网络请求；
 若需要硬性网络边界，请使用沙箱/容器。
