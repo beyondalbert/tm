@@ -188,7 +188,8 @@ context_window = 65536
 | `tm --yolo` | 自动批准所有操作 |
 | `tm -p` | 一次性，无提示时读取 stdin |
 | `tm --json` | 以 JSON Lines 输出 Agent 事件（便于集成） |
-| `tm -c` | 继续本目录最近的会话 |
+| `tm -c` | 继续本目录最近的会话（默认行为） |
+| `tm --new-session` | 新建会话，而不是继续最近的会话 |
 | `tm -r` | 选择已保存的会话恢复（`--all-sessions` 含其它目录） |
 | `tm --no-extensions` | 不加载 `.aiagent/extensions` |
 | `tm --no-auto-compact` | 关闭自动上下文压缩 |
@@ -264,16 +265,20 @@ allow = ["api.deepseek.com"]
 
 ## 会话
 
-会话以 JSONL 追加写入 `<config>/sessions/`，并标注工作目录。恢复方式：
+会话以 JSONL 追加写入 `<config>/sessions/`，并标注工作目录。`tm` **默认继续本目录最近的
+会话**（TUI 启动时会把历史渲染出来）。
 
-- `tm -c` —— 继续本目录最近的会话。
+- `tm` —— 继续本目录最近的会话。
+- `tm --new-session` —— 新建会话（会话内也可用 `/new`）。
+- `tm -c` —— 默认行为的显式写法。
 - `tm -r` —— 列出已保存会话（序号、消息数、更新时间、预览）并选择；
   `--all-sessions` 含其它目录。
 - `tm --session <file>` —— 打开指定文件。
 - `tm --no-session` —— 不持久化运行。
 
 会话内可用 `/resume [n|id]` 切换会话（TUI 中为选择弹窗）、`/tree` 导航对话节点、
-`/fork` 将分支复制为新文件。
+`/fork` 将分支复制为新文件。TUI 会在启动时以及 `/resume`、`/new`、`/tree`、`/fork`
+之后重新渲染恢复出来的历史消息。
 
 ## 设置
 

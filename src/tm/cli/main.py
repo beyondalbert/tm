@@ -466,6 +466,7 @@ def _resolve_session(
     tools: list,
     *,
     continue_session: bool,
+    new_session: bool,
     resume: bool,
     session_path: str | None,
     no_session: bool,
@@ -477,11 +478,6 @@ def _resolve_session(
     manager = SessionManager(config_dir() / "sessions")
     if session_path:
         return manager.open(Path(session_path)), manager, False
-    if continue_session:
-        existing = manager.continue_recent(Path.cwd())
-        if existing is not None:
-            console.print(f"[dim]resuming session {existing.id}[/dim]")
-            return existing, manager, False
     if resume:
         choices = _session_choices(manager, all_sessions)
         if not choices:
@@ -492,6 +488,14 @@ def _resolve_session(
             chosen = _pick_session_console(choices, console)
             if chosen is not None:
                 return manager.open(chosen.path), manager, False
+        return manager.create(cwd=Path.cwd()), manager, False
+    if not new_session:
+        # Default: continue the most recent session for this directory.
+        existing = manager.continue_recent(Path.cwd())
+        if existing is not None:
+            if continue_session:
+                console.print(f"[dim]resuming session {existing.id}[/dim]")
+            return existing, manager, False
     return manager.create(cwd=Path.cwd()), manager, False
 
 
@@ -513,7 +517,13 @@ def main(
     print_mode: bool = typer.Option(False, "--print", help="One-shot; read stdin if no prompt."),
     json_output: bool = typer.Option(False, "--json", help="Emit agent events as JSON lines."),
     continue_session: bool = typer.Option(
-        False, "--continue", "-c", help="Continue the most recent session here."
+        False, "--continue", "-c", help="Continue the most recent session here (the default)."
+    ),
+    new_session: bool = typer.Option(
+        False,
+        "--new-session",
+        "--new",
+        help="Start a fresh session instead of continuing the most recent one.",
     ),
     resume: bool = typer.Option(
         False, "--resume", "-r", help="Pick a saved session to resume."
@@ -614,6 +624,7 @@ def main(
     session, session_manager, resume_on_start = _resolve_session(
         tools,
         continue_session=continue_session,
+        new_session=new_session,
         resume=resume,
         session_path=session_path,
         no_session=no_session,

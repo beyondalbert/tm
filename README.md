@@ -194,7 +194,8 @@ Switch to a custom model with `/model my-model` or `tm --model my-model`.
 | `tm --yolo` | Auto-approve every action |
 | `tm -p` | One-shot, reads stdin when no prompt is given |
 | `tm --json` | Emit agent events as JSON lines (for integration) |
-| `tm -c` | Continue the most recent session in this directory |
+| `tm -c` | Continue the most recent session here (the default) |
+| `tm --new-session` | Start a fresh session instead of continuing the latest |
 | `tm -r` | Pick a saved session to resume (`--all-sessions` to include other dirs) |
 | `tm --no-extensions` | Skip loading `.aiagent/extensions` |
 | `tm --no-auto-compact` | Disable automatic context compaction |
@@ -277,9 +278,12 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 ## Sessions
 
 Sessions are appended to JSONL files under `<config>/sessions/`, tagged with the
-working directory. Resume them in several ways:
+working directory. `tm` **continues the most recent session for the current
+directory by default** (in the TUI, its history is rendered on startup).
 
-- `tm -c` — continue the most recent session for this directory.
+- `tm` — continue the most recent session for this directory.
+- `tm --new-session` — start a fresh session (also `/new` inside a session).
+- `tm -c` — explicit form of the default.
 - `tm -r` — list saved sessions (number, message count, updated time, preview)
   and pick one; `--all-sessions` includes other directories.
 - `tm --session <file>` — open a specific file.
@@ -287,6 +291,8 @@ working directory. Resume them in several ways:
 
 Inside a session, `/resume [n|id]` switches sessions (a picker modal in the TUI),
 `/tree` navigates conversation points, and `/fork` copies a branch to a new file.
+The TUI re-renders the resumed conversation's history on startup and after
+`/resume`, `/new`, `/tree`, and `/fork`.
 
 ## Settings
 
