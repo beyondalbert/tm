@@ -24,7 +24,9 @@ from tm.core.storage import (
     operation_result,
     operation_state,
     pending_entry,
+    session_model,
     session_name,
+    session_provider,
     value,
 )
 
@@ -48,6 +50,8 @@ __all__ = [
     "operation_result",
     "operation_state",
     "pending_entry",
+    "session_model",
     "session_name",
+    "session_provider",
     "value",
 ]

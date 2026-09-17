@@ -299,6 +299,8 @@ allow = ["api.deepseek.com"]
 `/fork` 将分支复制为新文件。TUI 会在启动时以及 `/resume`、`/new`、`/tree`、`/fork`
 之后重新渲染恢复出来的历史消息。
 
+用 `/model` 切换的 provider/模型会**按会话记住**，恢复该会话时自动还原，优先于 settings 默认值。
+
 ## 设置
 
 `<config>/settings.toml`（Windows：`%APPDATA%\the-machine\settings.toml`）：

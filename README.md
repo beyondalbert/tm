@@ -318,6 +318,9 @@ Inside a session, `/resume [n|id]` switches sessions (a picker modal in the TUI)
 The TUI re-renders the resumed conversation's history on startup and after
 `/resume`, `/new`, `/tree`, and `/fork`.
 
+The provider/model you switch to with `/model` is remembered **per session** and
+restored when that session is resumed, overriding the settings default.
+
 ## Settings
 
 `<config>/settings.toml` (Windows: `%APPDATA%\the-machine\settings.toml`):

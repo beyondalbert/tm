@@ -234,6 +234,40 @@ async def test_resume_no_sessions(tmp_path: Path) -> None:
     assert "no saved sessions" in emitted[-1]
 
 
+async def test_model_command_persists_to_session(tmp_path: Path) -> None:
+    from tm.core.session import SessionManager
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    agent = make_agent()
+    agent.resume(session)
+    commands, _emitted, ctx = make_commands(
+        tmp_path, agent, session=session, session_manager=manager
+    )
+
+    await commands.handle("model deepseek-flash")
+
+    assert ctx.session is not None
+    assert ctx.session.model_selection() == ("deepseek", "deepseek-flash")
+
+
+async def test_resume_restores_session_model(tmp_path: Path) -> None:
+    from tm.core.session import SessionManager
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    session.set_model_selection("deepseek", "deepseek-flash")
+    agent = make_agent()
+    commands, emitted, _ctx = make_commands(
+        tmp_path, agent, session=None, session_manager=manager
+    )
+
+    await commands.handle(f"resume {session.id[:6]}")
+
+    assert "resumed session" in emitted[-1]
+    assert agent.model.id == "deepseek-flash"
+
+
 def test_match_session(tmp_path: Path) -> None:
     from tm.core.session import SessionInfo
 

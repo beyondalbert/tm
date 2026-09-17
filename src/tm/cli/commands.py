@@ -173,9 +173,29 @@ class SlashCommands:
             session = self.ctx.session_manager.create(cwd=self.ctx.cwd)
             self.ctx.session = session
             self.ctx.agent.session = session
+            if self.ctx.agent.provider is not None:
+                session.set_model_selection(
+                    self.ctx.agent.provider.id, self.ctx.agent.model.id
+                )
             self._emit(f"new session {session.id}")
         else:
             self._emit("conversation cleared")
+
+    def _apply_session_model(self) -> None:
+        """Restore the provider/model the session remembers, if any."""
+        session = self.ctx.session
+        if session is None:
+            return
+        selection = session.model_selection()
+        if selection is None:
+            return
+        provider_id, model_id = selection
+        try:
+            provider, model = self.ctx.registry.resolve(model_id, provider_id)
+        except RegistryError:
+            return
+        self.ctx.agent.provider = provider
+        self.ctx.agent.model = model
 
     def _show_session(self) -> None:
         session = self.ctx.session
@@ -247,6 +267,7 @@ class SlashCommands:
         session = manager.open(chosen.path)
         self.ctx.session = session
         self.ctx.agent.resume(session)
+        self._apply_session_model()
         self._emit(f"resumed session {session.id} ({len(session.messages())} messages)")
 
     def _tree(self, argument: str) -> None:
@@ -321,6 +342,8 @@ class SlashCommands:
             return
         self.ctx.agent.provider = provider
         self.ctx.agent.model = model
+        if self.ctx.session is not None:
+            self.ctx.session.set_model_selection(provider.id, model.id)
         self._emit(f"model set to {model.provider}/{model.id}")
 
     def _list_skills(self) -> None:

@@ -57,3 +57,24 @@ def test_no_session_disables_persistence(tmp_path, monkeypatch) -> None:
     assert session is None
     assert manager is None
     assert resume_on_start is False
+
+
+def test_restore_session_model(tmp_path) -> None:
+    from tm.ai.registry import Registry
+    from tm.ai.types import Model
+    from tm.cli.main import _restore_session_model
+    from tm.core.agent import Agent
+    from tm.core.session import SessionManager
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    session.set_model_selection("deepseek", "deepseek-flash")
+
+    agent = Agent(
+        Model(id="deepseek-v4-pro", provider="deepseek"),
+        stream_fn=lambda *a: None,  # type: ignore[arg-type]
+    )
+    _restore_session_model(agent, session, Registry())
+
+    assert agent.model.id == "deepseek-flash"
+    assert agent.provider is not None and agent.provider.id == "deepseek"

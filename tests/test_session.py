@@ -171,6 +171,18 @@ def test_fork_copies_branch_to_new_file(tmp_path: Path) -> None:
     assert [m.content for m in reopened.messages()] == ["a", "b"]
 
 
+def test_session_model_selection_roundtrip(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    assert session.model_selection() is None
+
+    session.set_model_selection("deepseek", "deepseek-flash")
+    assert session.model_selection() == ("deepseek", "deepseek-flash")
+
+    reopened = manager.open(session.path)
+    assert reopened.model_selection() == ("deepseek", "deepseek-flash")
+
+
 def test_points_and_path_to(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path / "sessions")
     session = manager.create(cwd=tmp_path)

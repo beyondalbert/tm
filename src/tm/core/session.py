@@ -15,7 +15,12 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from tm.ai.types import Message, Usage, UserMessage, now_ms
-from tm.core.storage import Storage, StoredEntry
+from tm.core.storage import (
+    Storage,
+    StoredEntry,
+    session_model,
+    session_provider,
+)
 
 _MESSAGE_ADAPTER: TypeAdapter[Message] = TypeAdapter(Message)
 
@@ -227,6 +232,19 @@ class Session:
 
     def usage_totals(self) -> Usage:
         return self.storage.stats().usage
+
+    # -- model selection --------------------------------------------------
+    def set_model_selection(self, provider_id: str, model_id: str) -> None:
+        """Remember the user's chosen provider/model for this session."""
+        self.storage.set_value(session_provider(), provider_id)
+        self.storage.set_value(session_model(), model_id)
+
+    def model_selection(self) -> tuple[str, str] | None:
+        provider_id = self.storage.get_value(session_provider())
+        model_id = self.storage.get_value(session_model())
+        if provider_id and model_id:
+            return str(provider_id), str(model_id)
+        return None
 
 
 class SessionManager:

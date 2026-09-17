@@ -94,6 +94,14 @@ def session_name() -> Value[str]:
     return value(f"{_RESERVED}.session.name")
 
 
+def session_provider() -> Value[str]:
+    return value(f"{_RESERVED}.session.provider")
+
+
+def session_model() -> Value[str]:
+    return value(f"{_RESERVED}.session.model")
+
+
 def entry_label(entry_id: str) -> Value[str]:
     return value(f"{_RESERVED}.entry.label", entry_id)
 
@@ -647,6 +655,8 @@ __all__ = [
     "operation_result",
     "operation_state",
     "pending_entry",
+    "session_model",
     "session_name",
+    "session_provider",
     "value",
 ]

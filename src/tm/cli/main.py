@@ -323,6 +323,24 @@ def _command_context(
     )
 
 
+def _restore_session_model(
+    agent: Agent, session: Session | None, registry: Registry
+) -> None:
+    """Restore the model a resumed session remembers, overriding the default."""
+    if session is None:
+        return
+    selection = session.model_selection()
+    if selection is None:
+        return
+    provider_id, model_id = selection
+    try:
+        provider, model = registry.resolve(model_id, provider_id)
+    except RegistryError:
+        return
+    agent.provider = provider
+    agent.model = model
+
+
 def _session_choices(manager: SessionManager, all_sessions: bool) -> list[SessionInfo]:
     infos = manager.list()
     if all_sessions:
@@ -449,14 +467,16 @@ def _run_tui(
         trusted=trusted,
         cache_retention=cache_retention,
     )
+    registry = _make_registry()
+    _restore_session_model(agent, session, registry)
     prompt_app = TMPromptApp(
-        agent, model, banner=_startup_banner(model, resources, no_context_files)
+        agent, agent.model, banner=_startup_banner(agent.model, resources, no_context_files)
     )
     prompt_app.resume_on_start = resume_on_start
     prompt_app.recover_on_start = bool(agent.pending_recovery())
     commands = _command_context(
         agent,
-        _make_registry(),
+        registry,
         session,
         session_manager,
         resources,
@@ -482,7 +502,7 @@ async def _agent_repl(
         picker=_console_picker,
     )
     console.print(
-        f"[bold]TM[/bold] {__version__} | {model.provider}/{model.id} | /help | /exit"
+        f"[bold]TM[/bold] {__version__} | {agent.model.provider}/{agent.model.id} | /help | /exit"
     )
     while True:
         try:
@@ -715,6 +735,7 @@ def main(
                     trusted=trusted,
                     cache_retention=cache_retention,
                 )
+                _restore_session_model(agent, session, registry)
                 if store is not None and await agent.recover():
                     console.print("[dim]recovered an interrupted operation[/dim]")
                 if text:
