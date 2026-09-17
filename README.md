@@ -289,6 +289,10 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 | `/<template> [args]` | expand a prompt template |
 | `/exit` | quit |
 
+**Completion.** In the TUI, press `Tab` to accept a suggestion: type `/` to
+complete a command, or `@` to fuzzy-search a file path. `Up`/`Down` move the
+selection and `Escape` dismisses it.
+
 ## Sessions
 
 Sessions are appended to JSONL files under `<config>/sessions/`, tagged with the

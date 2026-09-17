@@ -60,6 +60,22 @@ class CommandContext:
     trust_manager: TrustManager | None = None
 
 
+COMMAND_SPECS: list[tuple[str, str]] = [
+    ("help", "show this help"),
+    ("model", "list models or switch model"),
+    ("new", "start a new session"),
+    ("session", "show current session info"),
+    ("resume", "resume a saved session"),
+    ("tree", "list conversation points or branch"),
+    ("fork", "fork the session into a new file"),
+    ("compact", "summarize older context"),
+    ("recover", "reconcile interrupted durable operations"),
+    ("trust", "trust or untrust this project"),
+    ("skills", "list available skills"),
+    ("prompts", "list prompt templates"),
+    ("exit", "quit"),
+]
+
 HELP = """commands:
   /help                 show this help
   /model [pattern]      list models or switch model
@@ -352,4 +368,12 @@ class SlashCommands:
         self._emit(f"{state} {self.ctx.cwd} (restart to apply)")
 
 
-__all__ = ["HELP", "CommandContext", "Emit", "ExitSignal", "SessionPicker", "SlashCommands"]
+__all__ = [
+    "COMMAND_SPECS",
+    "HELP",
+    "CommandContext",
+    "Emit",
+    "ExitSignal",
+    "SessionPicker",
+    "SlashCommands",
+]

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rich.markdown import Markdown
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -18,7 +19,15 @@ from textual.widgets import Button, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from tm.ai.types import AssistantMessage, Model, TextContent, ToolResultMessage, Usage, UserMessage
-from tm.cli.commands import ExitSignal
+from tm.cli.autocomplete import (
+    Completion,
+    FileIndex,
+    Span,
+    apply_completion,
+    command_completions,
+    detect,
+)
+from tm.cli.commands import COMMAND_SPECS, ExitSignal
 from tm.core.agent import Agent
 from tm.core.compaction import estimate_tokens
 from tm.core.events import (
@@ -294,6 +303,35 @@ class DeferredApprover:
         return await self._inner.request(action, reason)
 
 
+class PromptInput(Input):
+    """Input that routes suggestion keys to the app while suggestions are open."""
+
+    async def _on_key(self, event: events.Key) -> None:
+        app = self.app
+        if isinstance(app, TMPromptApp) and app.suggestions_active:
+            if event.key == "tab":
+                event.stop()
+                event.prevent_default()
+                app.accept_suggestion()
+                return
+            if event.key == "down":
+                event.stop()
+                event.prevent_default()
+                app.move_suggestion(1)
+                return
+            if event.key == "up":
+                event.stop()
+                event.prevent_default()
+                app.move_suggestion(-1)
+                return
+            if event.key == "escape":
+                event.stop()
+                event.prevent_default()
+                app.close_suggestions()
+                return
+        await super()._on_key(event)
+
+
 class TMPromptApp(App[None]):
     CSS = f"""
     .user {{ background: {_USER_BG}; color: {_TEXT}; width: 1fr; padding: 1 1; margin-bottom: 1; }}
@@ -309,6 +347,7 @@ class TMPromptApp(App[None]):
     .system {{ color: {_DIM}; width: 1fr; margin-bottom: 1; }}
     #messages {{ height: 1fr; }}
     #editor-status {{ height: 1; }}
+    #suggestions {{ display: none; height: auto; max-height: 8; border: round {_ACCENT}; }}
     #prompt {{ border: none; background: {_INPUT_BG}; }}
     #footer {{ height: 2; padding: 0 1; }}
     #perm-box {{ width: 60%; height: auto; padding: 1 2; background: $panel; border: round {_WARNING}; }}
@@ -323,6 +362,10 @@ class TMPromptApp(App[None]):
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+o", "toggle_tools", "Expand tools"),
         Binding("ctrl+shift+c", "copy_selection", "Copy selection", show=False),
+        Binding("tab", "accept_suggestion", "Complete", show=False),
+        Binding("down", "suggestion_down", "Next suggestion", show=False),
+        Binding("up", "suggestion_up", "Previous suggestion", show=False),
+        Binding("escape", "dismiss_suggestions", "Dismiss suggestions", show=False),
     ]
 
     def __init__(self, agent: Agent, model: Model, *, banner: str | None = None) -> None:
@@ -340,6 +383,9 @@ class TMPromptApp(App[None]):
         self._expanded = False
         self._spin_index = 0
         self._spinner_timer: Timer | None = None
+        self._suggestions: list[Completion] = []
+        self._suggestion_span: Span | None = None
+        self._file_index: FileIndex | None = None
 
     # -- small public API used by commands / tests ------------------------
     def write_line(self, text: str, style: str = _DIM) -> None:
@@ -352,7 +398,8 @@ class TMPromptApp(App[None]):
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="messages")
         yield Static("", id="editor-status")
-        yield Input(placeholder="Ask TM to do something, then Enter.", id="prompt")
+        yield OptionList(id="suggestions")
+        yield PromptInput(placeholder="Ask TM to do something, then Enter.", id="prompt")
         yield Static("", id="footer")
 
     def on_mount(self) -> None:
@@ -432,6 +479,91 @@ class TMPromptApp(App[None]):
         selection = self.screen.get_selected_text()
         if selection:
             self.copy_to_clipboard(selection)
+
+    # -- autocomplete -----------------------------------------------------
+    @property
+    def suggestions_active(self) -> bool:
+        return bool(self._suggestions)
+
+    def _file_index_for_cwd(self) -> FileIndex:
+        if self._file_index is None:
+            self._file_index = FileIndex(Path.cwd())
+        return self._file_index
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._refresh_suggestions()
+
+    def _refresh_suggestions(self) -> None:
+        inp = self.query_one("#prompt", Input)
+        span = detect(inp.value, inp.cursor_position)
+        if span is None:
+            self.close_suggestions()
+            return
+        if span.kind == "command":
+            completions = command_completions(span.token, COMMAND_SPECS)
+        else:
+            completions = [
+                Completion(f"@{c.value}", c.label, c.description)
+                for c in self._file_index_for_cwd().match(span.token[1:])
+            ]
+        self._suggestion_span = span
+        self._show_suggestions(completions)
+
+    def _show_suggestions(self, completions: list[Completion]) -> None:
+        options = self.query_one("#suggestions", OptionList)
+        options.clear_options()
+        self._suggestions = completions
+        if not completions:
+            options.display = False
+            return
+        options.add_options(
+            [
+                Option(f"{c.label}  {c.description}".rstrip(), id=str(index))
+                for index, c in enumerate(completions)
+            ]
+        )
+        options.highlighted = 0
+        options.display = True
+
+    def close_suggestions(self) -> None:
+        self._suggestions = []
+        self._suggestion_span = None
+        self.query_one("#suggestions", OptionList).display = False
+
+    def move_suggestion(self, delta: int) -> None:
+        if not self._suggestions:
+            return
+        options = self.query_one("#suggestions", OptionList)
+        current = options.highlighted if options.highlighted is not None else 0
+        options.highlighted = (current + delta) % len(self._suggestions)
+
+    def accept_suggestion(self) -> None:
+        if not self._suggestions or self._suggestion_span is None:
+            return
+        options = self.query_one("#suggestions", OptionList)
+        index = options.highlighted if options.highlighted is not None else 0
+        if not 0 <= index < len(self._suggestions):
+            return
+        inp = self.query_one("#prompt", Input)
+        new_value = apply_completion(
+            inp.value, self._suggestion_span, self._suggestions[index].value
+        )
+        inp.value = new_value
+        inp.cursor_position = len(new_value)
+        self.close_suggestions()
+        inp.focus()
+
+    def action_accept_suggestion(self) -> None:
+        self.accept_suggestion()
+
+    def action_suggestion_down(self) -> None:
+        self.move_suggestion(1)
+
+    def action_suggestion_up(self) -> None:
+        self.move_suggestion(-1)
+
+    def action_dismiss_suggestions(self) -> None:
+        self.close_suggestions()
 
     # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
@@ -589,6 +721,7 @@ class TMPromptApp(App[None]):
         event.input.value = ""
         if not text:
             return
+        self.close_suggestions()
         # Run in a worker so commands can push screens (e.g. the session picker).
         self.run_worker(self._handle_input(text), exclusive=True, exit_on_error=False)
 

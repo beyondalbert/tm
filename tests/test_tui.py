@@ -412,3 +412,38 @@ async def test_new_command_clears_rendered_history(tmp_path) -> None:
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert len(app.query(".user")) == 0
+
+
+async def test_tui_command_autocomplete(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "/mod"
+        prompt.cursor_position = 4
+        await pilot.pause()
+        assert app.query_one("#suggestions").display is True
+
+        await pilot.press("tab")
+        await pilot.pause()
+        assert prompt.value.startswith("/model")
+
+
+async def test_tui_file_autocomplete(tmp_path, monkeypatch) -> None:
+    (tmp_path / "hello.txt").write_text("x")
+    monkeypatch.chdir(tmp_path)
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "@hel"
+        prompt.cursor_position = 4
+        await pilot.pause()
+        assert app.query_one("#suggestions").display is True
+
+        await pilot.press("tab")
+        await pilot.pause()
+        assert prompt.value.startswith("@hello.txt")
