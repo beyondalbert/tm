@@ -133,7 +133,7 @@ Providers and env vars:
 
 | Provider | Id | Env var | Default model |
 |---|---|---|---|
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | deepseek-chat |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | deepseek-v4-pro |
 | Qwen (DashScope) | `qwen` | `DASHSCOPE_API_KEY` | qwen-plus |
 | Moonshot (Kimi) | `moonshot` | `MOONSHOT_API_KEY` | moonshot-v1-32k |
 | Zhipu (GLM) | `zhipu` | `ZHIPUAI_API_KEY` | glm-4-plus |
@@ -258,7 +258,7 @@ Inside a session, `/resume [n|id]` switches sessions (a picker modal in the TUI)
 
 ```toml
 provider = "deepseek"
-model = "deepseek-chat"
+model = "deepseek-v4-pro"
 temperature = 0.2
 max_tokens = 8192
 system_prompt = "Extra instructions appended to the system prompt."

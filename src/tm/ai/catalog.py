@@ -36,10 +36,10 @@ PRESETS: dict[str, ProviderPreset] = {
         name="DeepSeek",
         base_url="https://api.deepseek.com/v1",
         api_key_env=("DEEPSEEK_API_KEY",),
-        default_model="deepseek-chat",
+        default_model="deepseek-v4-pro",
         models=(
-            _m("deepseek", "deepseek-chat", context=131_072, max_tokens=8_192),
-            _m("deepseek", "deepseek-reasoner", context=131_072, max_tokens=8_192, reasoning=True),
+            _m("deepseek", "deepseek-v4-pro", context=131_072, max_tokens=8_192, reasoning=True),
+            _m("deepseek", "deepseek-flash", context=131_072, max_tokens=8_192, reasoning=True),
         ),
     ),
     "qwen": ProviderPreset(

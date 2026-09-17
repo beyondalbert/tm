@@ -79,7 +79,7 @@ def _provider(chunks) -> tuple[OpenAICompatProvider, FakeCompletions]:
     provider = OpenAICompatProvider(
         "deepseek",
         "DeepSeek",
-        [Model(id="deepseek-chat", provider="deepseek")],
+        [Model(id="deepseek-v4-pro", provider="deepseek")],
         client=client,  # type: ignore[arg-type]
     )
     return provider, client.chat.completions
@@ -102,7 +102,7 @@ async def test_streams_text_deltas_and_usage() -> None:
     provider, completions = _provider(chunks)
     context = Context(messages=[UserMessage(content="hi")])
 
-    events, final = await _collect(provider.stream(Model(id="deepseek-chat", provider="deepseek"), context))
+    events, final = await _collect(provider.stream(Model(id="deepseek-v4-pro", provider="deepseek"), context))
 
     deltas = [e.delta for e in events if e.type == "text_delta"]
     assert deltas == ["Hel", "lo"]
@@ -121,7 +121,7 @@ async def test_streams_reasoning_content() -> None:
     provider, _ = _provider(chunks)
     context = Context(messages=[UserMessage(content="q")])
 
-    events, final = await _collect(provider.stream(Model(id="deepseek-reasoner", provider="deepseek"), context))
+    events, final = await _collect(provider.stream(Model(id="deepseek-flash", provider="deepseek"), context))
 
     reasoning = "".join(e.delta for e in events if e.type == "thinking_delta")
     assert reasoning == "think"
@@ -141,7 +141,7 @@ async def test_accumulates_streamed_tool_call_arguments() -> None:
         tools=[ToolSpec(name="read", description="read", parameters={"type": "object"})],
     )
 
-    events, final = await _collect(provider.stream(Model(id="deepseek-chat", provider="deepseek"), context))
+    events, final = await _collect(provider.stream(Model(id="deepseek-v4-pro", provider="deepseek"), context))
 
     assert [e.type for e in events if e.type.startswith("toolcall")] == [
         "toolcall_start",
@@ -169,12 +169,12 @@ async def test_provider_error_becomes_error_event() -> None:
     provider = OpenAICompatProvider(
         "deepseek",
         "DeepSeek",
-        [Model(id="deepseek-chat", provider="deepseek")],
+        [Model(id="deepseek-v4-pro", provider="deepseek")],
         client=client,  # type: ignore[arg-type]
     )
     context = Context(messages=[UserMessage(content="hi")])
 
-    events, final = await _collect(provider.stream(Model(id="deepseek-chat", provider="deepseek"), context))
+    events, final = await _collect(provider.stream(Model(id="deepseek-v4-pro", provider="deepseek"), context))
 
     assert any(e.type == "error" for e in events)
     assert final.stop_reason == "error"
@@ -216,7 +216,7 @@ async def test_aborted_signal_stops_stream() -> None:
 
     _, final = await _collect(
         provider.stream(
-            Model(id="deepseek-chat", provider="deepseek"),
+            Model(id="deepseek-v4-pro", provider="deepseek"),
             context,
             StreamOptions(signal=signal),
         )

@@ -84,8 +84,8 @@ async def test_model_switch(tmp_path: Path) -> None:
     await commands.handle("model")
     assert "providers:" in emitted[-1]
 
-    await commands.handle("model deepseek-chat")
-    assert agent.model.id == "deepseek-chat"
+    await commands.handle("model deepseek-v4-pro")
+    assert agent.model.id == "deepseek-v4-pro"
     assert agent.provider is not None and agent.provider.id == "deepseek"
 
 

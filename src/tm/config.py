@@ -33,7 +33,7 @@ def credentials_path() -> Path:
 @dataclass
 class Settings:
     provider: str = "deepseek"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-pro"
     temperature: float | None = None
     max_tokens: int | None = None
     system_prompt: str | None = None

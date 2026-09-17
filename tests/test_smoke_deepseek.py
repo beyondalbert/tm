@@ -18,7 +18,7 @@ async def test_deepseek_chat() -> None:
 
     registry = Registry()
     try:
-        provider, model = registry.resolve("deepseek-chat", "deepseek")
+        provider, model = registry.resolve("deepseek-v4-pro", "deepseek")
         context = Context(messages=[UserMessage(content="Reply with exactly: PONG")])
         stream = provider.stream(model, context)
         text = "".join(

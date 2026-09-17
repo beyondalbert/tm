@@ -8,7 +8,7 @@ def test_resolve_default_provider_and_model() -> None:
     registry = Registry()
     provider, model = registry.resolve(None, "deepseek")
     assert provider.id == "deepseek"
-    assert model.id == "deepseek-chat"
+    assert model.id == "deepseek-v4-pro"
 
 
 def test_resolve_provider_slash_model() -> None:
@@ -20,9 +20,9 @@ def test_resolve_provider_slash_model() -> None:
 
 def test_resolve_model_without_provider_searches_catalog() -> None:
     registry = Registry()
-    provider, model = registry.resolve("deepseek-reasoner", None)
+    provider, model = registry.resolve("deepseek-flash", None)
     assert provider.id == "deepseek"
-    assert model.id == "deepseek-reasoner"
+    assert model.id == "deepseek-flash"
 
 
 def test_resolve_unknown_model_raises() -> None:

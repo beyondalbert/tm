@@ -128,7 +128,7 @@ Provider 与对应环境变量：
 
 | Provider | Id | 环境变量 | 默认模型 |
 |---|---|---|---|
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | deepseek-chat |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | deepseek-v4-pro |
 | Qwen（DashScope） | `qwen` | `DASHSCOPE_API_KEY` | qwen-plus |
 | Moonshot（Kimi） | `moonshot` | `MOONSHOT_API_KEY` | moonshot-v1-32k |
 | Zhipu（GLM） | `zhipu` | `ZHIPUAI_API_KEY` | glm-4-plus |
@@ -247,7 +247,7 @@ allow = ["api.deepseek.com"]
 
 ```toml
 provider = "deepseek"
-model = "deepseek-chat"
+model = "deepseek-v4-pro"
 temperature = 0.2
 max_tokens = 8192
 system_prompt = "Extra instructions appended to the system prompt."

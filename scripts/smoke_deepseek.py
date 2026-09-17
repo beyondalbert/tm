@@ -89,7 +89,7 @@ async def main() -> int:
 
     registry = Registry()
     try:
-        provider, model = registry.resolve("deepseek-chat", "deepseek")
+        provider, model = registry.resolve("deepseek-v4-pro", "deepseek")
         print(f"using {model.provider}/{model.id}")
         await test_chat(provider, model)
         await test_tool_call(provider, model)
