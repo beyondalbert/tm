@@ -23,13 +23,14 @@ from tm.ai.types import (
 )
 from tm.core.events import (
     AgentEvent,
+    MessageEndEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
     TurnStartEvent,
 )
 from tm.core.loop import LoopHooks, StreamFn, agent_loop
-from tm.core.operation import Operation, OperationStatus, PendingEffect
+from tm.core.operation import Operation, OperationState, OperationStatus, PendingEffect
 from tm.core.session import Session
 from tm.core.store import Store
 from tm.telemetry import (
@@ -200,8 +201,14 @@ class Agent:
     async def _emit(self, event: AgentEvent) -> None:
         if self.operation is not None and isinstance(event, TurnStartEvent):
             self.operation.set_turn(event.turn)
+        if isinstance(event, MessageEndEvent):
+            self._persist_message(event.message)
         for listener in list(self._listeners):
             await listener(event)
+
+    def _persist_message(self, message: Message) -> None:
+        if self.session is not None:
+            self.session.append(message)
 
     # -- queueing ---------------------------------------------------------
     def steer(self, content: str | Message) -> None:
@@ -228,7 +235,11 @@ class Agent:
         if self.auto_compact:
             await self._maybe_auto_compact()
         self._messages.extend(new_messages)
-        persist_from = len(self._messages) - len(new_messages)
+        for message in new_messages:
+            self._persist_message(message)
+        return await self._run_loop(new_messages)
+
+    async def _run_loop(self, new_messages: list[Message]) -> list[Message]:
         self._signal = AbortSignal()
         self._running = True
         options = StreamOptions(
@@ -258,8 +269,11 @@ class Agent:
         child_context = TelemetryContext(
             trace_id=context.trace_id, parent_id=self._operation_span_id
         )
+        session_id = self.session.id if self.session is not None else None
         operation = (
-            Operation.accept(uuid.uuid4().hex[:12], self.store, kind="run")
+            Operation.accept(
+                uuid.uuid4().hex[:12], self.store, kind="run", session_id=session_id
+            )
             if self.store is not None
             else None
         )
@@ -290,10 +304,122 @@ class Agent:
                 operation.settle(
                     self._terminal_status(status), message_count=len(self._messages)
                 )
-        if self.session is not None:
-            for message in self._messages[persist_from:]:
-                self.session.append(message)
         return new_messages
+
+    # -- recovery ---------------------------------------------------------
+    def pending_recovery(self) -> list[OperationState]:
+        """Interrupted operations for this session that recovery would reconcile."""
+        if self.store is None:
+            return []
+        session_id = self.session.id if self.session is not None else None
+        return Operation.unsettled(self.store, session_id)
+
+    async def recover(self) -> bool:
+        """Reconcile interrupted operations and continue the run.
+
+        A replay-safe effect is re-run from the persisted intent. A non-replay-safe
+        effect is surfaced as an error result without re-running, because it may or
+        may not have happened. Returns True if any interrupted operation was found.
+        """
+        if self.store is None:
+            return False
+        states = self.pending_recovery()
+        if not states:
+            return False
+        resume = False
+        for state in states:
+            operation = Operation(state.operation_id, self.store)
+            if state.status is OperationStatus.EFFECT_PENDING and state.pending is not None:
+                recovered = await self._recover_effect(state)
+                if recovered is not None:
+                    message, effect_status = recovered
+                    self._messages.append(message)
+                    self._persist_message(message)
+                    resume = True
+                    operation.settle(effect_status, message_count=len(self._messages))
+                    continue
+                # No message produced: either the result was already recorded
+                # (settle completed) or the effect cannot be reconciled.
+                pending = state.pending
+                already = any(
+                    isinstance(message, ToolResultMessage)
+                    and message.tool_call_id == pending.call_id
+                    for message in self._messages
+                )
+                operation.settle(
+                    OperationStatus.COMPLETED if already else OperationStatus.FAILED,
+                    message_count=len(self._messages),
+                )
+            else:
+                operation.settle(OperationStatus.ABORTED, message_count=len(self._messages))
+        if resume:
+            await self._run_loop([])
+        return True
+
+    async def _recover_effect(
+        self, state: OperationState
+    ) -> tuple[ToolResultMessage, OperationStatus] | None:
+        pending = state.pending
+        assert pending is not None
+        for message in self._messages:
+            if (
+                isinstance(message, ToolResultMessage)
+                and message.tool_call_id == pending.call_id
+            ):
+                return None  # already settled
+        tool = next((tool for tool in self.tools if tool.name == pending.tool_name), None)
+        status = OperationStatus.COMPLETED
+        if tool is None:
+            result = text_result(
+                f"Recovered: tool '{pending.tool_name}' is no longer available.",
+                is_error=True,
+            )
+            status = OperationStatus.FAILED
+        elif tool.replay_safe:
+            call = ToolCall(
+                id=pending.call_id,
+                name=pending.tool_name,
+                arguments=pending.arguments,
+            )
+            try:
+                args = tool.parameters_model.model_validate(pending.arguments)
+            except ValidationError as exc:
+                result = text_result(
+                    f"Recovered re-run skipped: invalid arguments ({exc})", is_error=True
+                )
+                status = OperationStatus.FAILED
+            else:
+                blocked = None
+                if self.before_tool_call is not None:
+                    blocked = await _maybe_await(self.before_tool_call(call, args))
+                if blocked is not None and blocked.block:
+                    result = text_result(blocked.reason or "Blocked", is_error=True)
+                    status = OperationStatus.FAILED
+                else:
+                    try:
+                        result = await tool.execute(
+                            pending.call_id, args, ToolContext(cwd=self.cwd)
+                        )
+                    except Exception as exc:  # noqa: BLE001 - failures become results
+                        result = text_result(
+                            f"Recovered re-run failed: {exc}", is_error=True
+                        )
+                        status = OperationStatus.FAILED
+        else:
+            result = text_result(
+                f"Recovered after an interruption: '{pending.tool_name}' was in flight "
+                "when the process stopped and is not replay-safe, so it was not re-run. "
+                "Check its effects before continuing.",
+                is_error=True,
+            )
+            status = OperationStatus.FAILED
+        message = ToolResultMessage(
+            tool_call_id=pending.call_id,
+            tool_name=pending.tool_name,
+            content=result.content or [TextContent(text="")],
+            is_error=result.is_error,
+        )
+        return message, status
 
     def _final_run_status(self) -> str:
         if self._signal is not None and self._signal.aborted:

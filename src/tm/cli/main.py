@@ -36,7 +36,6 @@ from tm.config import (
 from tm.context import build_context_section, load_context_files
 from tm.core.agent import Agent
 from tm.core.events import AgentEvent
-from tm.core.operation import Operation
 from tm.core.session import Session, SessionInfo, SessionManager
 from tm.core.store import Store
 from tm.core.system_prompt import build_system_prompt
@@ -167,14 +166,7 @@ def _make_telemetry(enabled: bool) -> Telemetry:
 def _make_store(enabled: bool) -> Store | None:
     if not enabled:
         return None
-    store = Store.open(config_dir() / "state.jsonl")
-    pending = Operation.pending(store)
-    if pending:
-        console.print(
-            f"[yellow]warning:[/yellow] {len(pending)} operation(s) were interrupted "
-            "mid-effect; a tool may or may not have run."
-        )
-    return store
+    return Store.open(config_dir() / "state.jsonl")
 
 
 def _load_resources() -> Resources:
@@ -394,6 +386,7 @@ def _run_tui(
         agent, model, banner=_startup_banner(model, resources, no_context_files)
     )
     prompt_app.resume_on_start = resume_on_start
+    prompt_app.recover_on_start = bool(agent.pending_recovery())
     commands = _command_context(
         agent,
         Registry(api_keys=load_credentials()),
@@ -621,6 +614,8 @@ def main(
                     telemetry=telemetry,
                     store=store,
                 )
+                if store is not None and await agent.recover():
+                    console.print("[dim]recovered an interrupted operation[/dim]")
                 if text:
                     await agent.prompt(text)
                     if not json_output:

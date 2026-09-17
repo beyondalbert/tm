@@ -331,6 +331,7 @@ class TMPromptApp(App[None]):
         self._banner = banner
         self.command_handler: Callable[[str], Awaitable[str | None]] | None = None
         self.resume_on_start = False
+        self.recover_on_start = False
         self._status = "idle"
         self._current: AssistantMessageWidget | None = None
         self._current_mounted = False
@@ -362,6 +363,8 @@ class TMPromptApp(App[None]):
             self.run_worker(self._mount(SystemNote(self._banner)), exit_on_error=False)
         if self.resume_on_start:
             self.run_worker(self._resume_startup(), exclusive=True)
+        if self.recover_on_start:
+            self.run_worker(self._recover_startup(), exclusive=True)
 
     async def _mount(self, widget: Widget) -> None:
         container = self.query_one("#messages", VerticalScroll)
@@ -371,6 +374,10 @@ class TMPromptApp(App[None]):
     async def _resume_startup(self) -> None:
         if self.command_handler is not None:
             await self.command_handler("resume")
+
+    async def _recover_startup(self) -> None:
+        if await self._agent.recover():
+            self.write_line("recovered an interrupted operation", _DIM)
 
     def action_toggle_tools(self) -> None:
         self._expanded = not self._expanded

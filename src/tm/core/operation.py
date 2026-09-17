@@ -26,7 +26,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from tm.ai.types import now_ms
 from tm.core.store import Store, operation_result, operation_state
@@ -70,6 +70,7 @@ class OperationState(BaseModel):
     """
 
     operation_id: str
+    session_id: str | None = None
     kind: str = "run"
     status: OperationStatus = OperationStatus.OPEN
     turn: int = 0
@@ -91,14 +92,23 @@ class Operation:
 
     # -- lifecycle --------------------------------------------------------
     @classmethod
-    def accept(cls, operation_id: str, store: Store, *, kind: str = "run") -> Operation:
+    def accept(
+        cls,
+        operation_id: str,
+        store: Store,
+        *,
+        kind: str = "run",
+        session_id: str | None = None,
+    ) -> Operation:
         """Durably accept a new operation and return it in the ``open`` state."""
         operation = cls.__new__(cls)
         operation.operation_id = operation_id
         operation.store = store
         operation._address = operation_state(operation_id)
         operation._result_address = operation_result(operation_id)
-        operation.state = OperationState(operation_id=operation_id, kind=kind)
+        operation.state = OperationState(
+            operation_id=operation_id, kind=kind, session_id=session_id
+        )
         operation._persist()
         return operation
 
@@ -119,19 +129,40 @@ class Operation:
             self._persist()
 
     @staticmethod
-    def pending(store: Store) -> list[OperationState]:
+    def pending(store: Store, session_id: str | None = None) -> list[OperationState]:
         """Operations left in ``effect_pending``: interrupted mid-effect.
 
         Recovery must reconcile these before starting new work, since a tool may
         or may not have run.
         """
+        return [
+            state
+            for state in Operation.unsettled(store, session_id)
+            if state.status is OperationStatus.EFFECT_PENDING
+        ]
+
+    @staticmethod
+    def unsettled(store: Store, session_id: str | None = None) -> list[OperationState]:
+        """Operations that were never settled: ``open`` or ``effect_pending``.
+
+        Used by recovery to clean up interrupted runs. When ``session_id`` is
+        given, operations belonging to other sessions are ignored; operations
+        without a recorded session are included.
+        """
         states: list[OperationState] = []
         for _address, raw in store.scan_values(operation_state("").namespace):
             if not isinstance(raw, dict):
                 continue
-            state = OperationState.model_validate(raw)
-            if state.status is OperationStatus.EFFECT_PENDING:
-                states.append(state)
+            try:
+                state = OperationState.model_validate(raw)
+            except ValidationError:
+                continue
+            if state.status not in (OperationStatus.OPEN, OperationStatus.EFFECT_PENDING):
+                continue
+            if session_id is not None and state.session_id not in (None, session_id):
+                continue
+            states.append(state)
+        states.sort(key=lambda state: state.started_at)
         return states
 
     # -- transitions ------------------------------------------------------

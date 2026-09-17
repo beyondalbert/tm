@@ -320,11 +320,20 @@ the single choke point, and adapters (`NoopTelemetry`, `MemoryTelemetry`,
 
 Opt in with `--durable` (or `durable = true`). Each `tm` run is a durable
 *operation* tracked in `<config>/state.jsonl`: before an uncertain external
-effect (a tool call) the intent is recorded, and it is settled afterwards. If a
-run is killed mid-tool, the next start warns that an operation was interrupted —
-a tool may or may not have run. Read-only tools declare `replay_safe`, so a
-recovery knows it can re-run them. See `tm/core/operation.py` and
-`tm/core/store.py`.
+effect (a tool call) the intent is recorded, and it is settled afterwards.
+Messages are persisted to the session as they are produced, so the in-flight
+call is durable too.
+
+On the next start, TM **automatically recovers** interrupted operations:
+
+- a `replay_safe` effect (read-only tools) is re-run from the recorded intent and
+  the run continues;
+- an effect that is not replay-safe is not re-run; it is surfaced to the model as
+  an error result telling it to check the effects;
+- an operation with no effect in flight is settled as aborted.
+
+Recovered re-runs still go through the permission gate. See
+`tm/core/operation.py` and `tm/core/agent.py`.
 
 ## Architecture
 

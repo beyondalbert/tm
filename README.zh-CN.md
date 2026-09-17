@@ -305,8 +305,15 @@ def setup(api):
 
 用 `--durable`（或 `durable = true`）开启。每次 `tm` 运行是一个持久化 *operation*，记录在
 `<config>/state.jsonl`：在不确定的外部副作用（工具调用）之前先记录 intent，完成后再 settle。
-若运行在工具执行中途被杀，下次启动会提示有操作被中断——该工具可能已执行也可能没有。
-只读工具声明 `replay_safe`，恢复时可安全重跑。见 `tm/core/operation.py`、`tm/core/store.py`。
+消息在产生时就写入会话，所以进行中的调用也是持久的。
+
+下次启动时，TM 会**自动恢复**被中断的 operation：
+
+- `replay_safe` 的副作用（只读工具）会按记录重新执行，然后继续该次运行；
+- 非 replay-safe 的副作用**不会**重跑，而是以错误结果告知模型去核对影响；
+- 没有副作用在途的 operation 会被 settle 为 aborted。
+
+恢复时的重跑同样会经过权限门。见 `tm/core/operation.py`、`tm/core/agent.py`。
 
 ## 架构
 
