@@ -162,6 +162,8 @@ Anthropic 与 Google 使用官方 SDK；其余使用 OpenAI 兼容适配器。`o
 | `tm -r` | 选择已保存的会话恢复（`--all-sessions` 含其它目录） |
 | `tm --no-extensions` | 不加载 `.aiagent/extensions` |
 | `tm --no-auto-compact` | 关闭自动上下文压缩 |
+| `tm --telemetry` | 将脱敏 span 写入 `<config>/telemetry.jsonl` |
+| `tm --durable` | 为每次运行在 `<config>/state.jsonl` 持久化重启点 |
 
 上下文文件（`AGENTS.md` / `CLAUDE.md`，从当前目录向上查找，外加全局配置目录）会追加到
 系统提示词。用 `--no-context-files` 关闭。
@@ -195,6 +197,10 @@ deny = ["rm -rf *", "shutdown*", "format *"]
 [network]
 allow = ["api.deepseek.com"]
 ```
+
+文件规则是**目录级**的：规则里写目录（`src`、`src/` 或 `src/**`）会覆盖其下所有内容，
+可以按文件夹控制而不是逐个文件。当策略未决（`ask`）而你回答 `a`（always）时，TM 记住的是
+**作用域**：文件操作记住所在文件夹，命令/网络记住具体命令/主机。
 
 注意：Shell 命令是**按文本匹配**的。TM 无法可靠阻止某条 Shell 命令发起网络请求；
 若需要硬性网络边界，请使用沙箱/容器。
@@ -288,14 +294,31 @@ def setup(api):
     api.register_command("greet", lambda arg: f"hello {arg}")
 ```
 
+## 遥测（Telemetry）
+
+用 `--telemetry`（或 settings 里 `telemetry = true`）开启，span 写入
+`<config>/telemetry.jsonl`。契约（`tm/telemetry/`）刻意收窄，**绝不携带提示词、消息内容、
+工具参数、工具输出或凭据**——只有结构化元数据与计数。`redact()` 是唯一出口，适配器
+（`NoopTelemetry`、`MemoryTelemetry`、`FileTelemetry`）只能看到已脱敏的 span。
+
+## 持久化操作（Durable operations）
+
+用 `--durable`（或 `durable = true`）开启。每次 `tm` 运行是一个持久化 *operation*，记录在
+`<config>/state.jsonl`：在不确定的外部副作用（工具调用）之前先记录 intent，完成后再 settle。
+若运行在工具执行中途被杀，下次启动会提示有操作被中断——该工具可能已执行也可能没有。
+只读工具声明 `replay_safe`，恢复时可安全重跑。见 `tm/core/operation.py`、`tm/core/store.py`。
+
 ## 架构
 
 - `tm/ai` —— 统一的多 Provider 流式 LLM 层（类型、事件流、OpenAI 兼容 +
   Anthropic + Google 适配器、注册表/目录）
-- `tm/core` —— Agent 循环、高层 `Agent`、事件、会话、压缩
+- `tm/core` —— Agent 循环、高层 `Agent`、事件、会话、压缩，以及持久化的
+  `store`/`operation` 重启点
+- `tm/telemetry` —— 厂商无关的遥测契约、脱敏、适配器
 - `tm/tools` —— 内置本机控制工具（read/write/edit/shell/grep/find/ls）
 - `tm/permissions` —— 策略、allow/deny/ask 判定、审批、审计日志
 - `tm/skills.py`、`tm/prompts.py`、`tm/extensions.py`、`tm/context` —— 资源
+- `tests/evals` —— faux provider 评测场景
 - `tm/tui` —— 终端界面（Textual）
 - `tm/cli` —— Typer 入口与斜杠命令
 
@@ -329,12 +352,17 @@ Windows 下可用 `start.bat`（cmd）或 `run.ps1`（PowerShell），首次运�
 
 ```bash
 python -m uv run pytest -q                         # 全量
+python -m uv run pytest tests/evals -q -m eval     # 离线评测场景
+python -m uv run python scripts/run-evals.py       # 评测报告
 python -m uv run pytest tests/test_tui.py -q       # 单文件
 python -m uv run pytest -q -k tool                 # 按名称
 python -m uv run ruff check .                      # lint
 python -m uv run mypy                              # 类型
 python -m uv build                                 # wheel + sdist
 ```
+
+发布前用 `scripts/release-smoke.ps1` 构建、在临时 venv 校验元数据并运行
+`tm --version` / `tm --list-models`。
 
 说明：
 

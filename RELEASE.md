@@ -22,6 +22,13 @@ uv build                 # writes dist/*.whl and dist/*.tar.gz
 uvx twine check dist/*   # validates metadata (README, license, classifiers)
 ```
 
+On Windows, `scripts/release-smoke.ps1` does build + metadata check + installs
+the wheel into a throwaway venv and runs `tm --version` / `tm --list-models`:
+
+```powershell
+.\scripts\release-smoke.ps1 -Version X.Y.Z
+```
+
 ## 3. Publish
 
 ### Option A - Trusted Publishing (recommended, no tokens)

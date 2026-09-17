@@ -166,6 +166,8 @@ List models: `tm --list-models`.
 | `tm -r` | Pick a saved session to resume (`--all-sessions` to include other dirs) |
 | `tm --no-extensions` | Skip loading `.aiagent/extensions` |
 | `tm --no-auto-compact` | Disable automatic context compaction |
+| `tm --telemetry` | Write redacted spans to `<config>/telemetry.jsonl` |
+| `tm --durable` | Persist a durable restart point per run to `<config>/state.jsonl` |
 
 Context files (`AGENTS.md` / `CLAUDE.md`, walking up from cwd, plus the global
 config dir) are appended to the system prompt. Disable with `--no-context-files`.
@@ -201,6 +203,12 @@ deny = ["rm -rf *", "shutdown*", "format *"]
 [network]
 allow = ["api.deepseek.com"]
 ```
+
+File rules are **folder-aware**: a rule naming a directory (`src`, `src/`, or
+`src/**`) covers everything under it, so you can control access per folder
+instead of per file. When the policy leaves an action as `ask` and you answer
+`a` (always), TM remembers the **scope**: the containing folder for file
+actions, the exact command/host otherwise.
 
 Note: shell commands are matched textually. TM cannot reliably stop a shell
 command from making network calls; use a sandbox/container when you need a hard
@@ -299,14 +307,36 @@ def setup(api):
     api.register_command("greet", lambda arg: f"hello {arg}")
 ```
 
+## Telemetry
+
+Opt in with `--telemetry` (or `telemetry = true` in settings). Spans are written
+to `<config>/telemetry.jsonl`. The contract (`tm/telemetry/`) is deliberately
+narrow and **never carries prompts, message content, tool arguments, tool
+output, or credentials** — only structural metadata and counts. `redact()` is
+the single choke point, and adapters (`NoopTelemetry`, `MemoryTelemetry`,
+`FileTelemetry`) can only ever see redacted spans.
+
+## Durable operations
+
+Opt in with `--durable` (or `durable = true`). Each `tm` run is a durable
+*operation* tracked in `<config>/state.jsonl`: before an uncertain external
+effect (a tool call) the intent is recorded, and it is settled afterwards. If a
+run is killed mid-tool, the next start warns that an operation was interrupted —
+a tool may or may not have run. Read-only tools declare `replay_safe`, so a
+recovery knows it can re-run them. See `tm/core/operation.py` and
+`tm/core/store.py`.
+
 ## Architecture
 
 - `tm/ai` – unified multi-provider streaming LLM layer (types, event stream,
   OpenAI-compatible + Anthropic + Google adapters, registry/catalog)
-- `tm/core` – agent loop, high-level `Agent`, events, sessions, compaction
+- `tm/core` – agent loop, high-level `Agent`, events, sessions, compaction, and
+  the durable `store`/`operation` restart point
+- `tm/telemetry` – vendor-neutral telemetry contract, redaction, adapters
 - `tm/tools` – built-in machine-control tools (read/write/edit/shell/grep/find/ls)
 - `tm/permissions` – policy, allow/deny/ask checker, approval, audit log
 - `tm/skills.py`, `tm/prompts.py`, `tm/extensions.py`, `tm/context` – resources
+- `tests/evals` – faux-provider eval scenarios
 - `tm/tui` – terminal UI (Textual)
 - `tm/cli` – Typer entry point and slash commands
 
@@ -342,12 +372,17 @@ Tests and quality gates (same as CI):
 
 ```bash
 python -m uv run pytest -q                         # full suite
+python -m uv run pytest tests/evals -q -m eval     # offline eval scenarios
+python -m uv run python scripts/run-evals.py       # eval report
 python -m uv run pytest tests/test_tui.py -q       # one file
 python -m uv run pytest -q -k tool                 # by name
 python -m uv run ruff check .                      # lint
 python -m uv run mypy                              # types
 python -m uv build                                 # wheel + sdist
 ```
+
+Before a release, `scripts/release-smoke.ps1` builds, validates metadata in a
+throwaway venv, and runs `tm --version` / `tm --list-models`.
 
 Notes:
 
