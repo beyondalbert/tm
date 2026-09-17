@@ -83,3 +83,7 @@ no_implicit_optional = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "eval: end-to-end eval scenarios (offline unless a real provider is configured)",
+    "live: evals that call a real provider and need credentials",
+]
