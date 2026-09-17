@@ -17,7 +17,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
-from tm.ai.types import AssistantMessage, Model
+from tm.ai.types import AssistantMessage, Model, TextContent, ToolResultMessage, UserMessage
 from tm.cli.commands import ExitSignal
 from tm.core.agent import Agent
 from tm.core.compaction import estimate_tokens
@@ -360,25 +360,67 @@ class TMPromptApp(App[None]):
         self._update_editor_status()
         self._update_footer()
         self.query_one("#prompt", Input).focus()
+        self.run_worker(self._startup(), exclusive=True, exit_on_error=False)
+
+    async def _startup(self) -> None:
         if self._banner:
-            self.run_worker(self._mount(SystemNote(self._banner)), exit_on_error=False)
-        if self.resume_on_start:
-            self.run_worker(self._resume_startup(), exclusive=True)
-        if self.recover_on_start:
-            self.run_worker(self._recover_startup(), exclusive=True)
+            await self._mount(SystemNote(self._banner))
+        if self.resume_on_start and self.command_handler is not None:
+            await self.command_handler("resume")
+        if self._agent.messages:
+            await self._render_history()
+        if self.recover_on_start and await self._agent.recover():
+            self.write_line("recovered an interrupted operation", _DIM)
+
+    @staticmethod
+    def _user_text(message: UserMessage) -> str:
+        if isinstance(message.content, str):
+            return message.content
+        return " ".join(b.text for b in message.content if isinstance(b, TextContent))
+
+    async def _render_history(self) -> None:
+        """Render the messages already loaded from a resumed session."""
+        widgets: list[Widget] = []
+        tools: dict[str, ToolWidget] = {}
+        for message in self._agent.messages:
+            if isinstance(message, UserMessage):
+                widgets.append(UserMessageWidget(self._user_text(message)))
+            elif isinstance(message, AssistantMessage):
+                if message.text().strip() or message.thinking().strip() or message.stop_reason == "error":
+                    widget = AssistantMessageWidget()
+                    error = (
+                        f"Error: {message.error_message or 'unknown error'}"
+                        if message.stop_reason == "error"
+                        else None
+                    )
+                    widget.set_content(message.thinking(), message.text(), error=error)
+                    widgets.append(widget)
+                for call in message.tool_calls:
+                    tool_widget = ToolWidget(
+                        call.name, call.arguments, expanded=self._expanded
+                    )
+                    tools[call.id] = tool_widget
+                    widgets.append(tool_widget)
+            elif isinstance(message, ToolResultMessage):
+                existing = tools.get(message.tool_call_id)
+                if existing is not None:
+                    existing.set_result(message.text(), message.is_error)
+                else:
+                    widgets.append(SystemNote(f"[{message.tool_name}] {message.text()}"))
+        if widgets:
+            container = self.query_one("#messages", VerticalScroll)
+            await container.mount(*widgets)
+            container.scroll_end(animate=False)
+
+    async def _reload_history(self) -> None:
+        container = self.query_one("#messages", VerticalScroll)
+        await container.remove_children()
+        await self._render_history()
 
     async def _mount(self, widget: Widget) -> None:
         container = self.query_one("#messages", VerticalScroll)
         await container.mount(widget)
         container.scroll_end(animate=False)
-
-    async def _resume_startup(self) -> None:
-        if self.command_handler is not None:
-            await self.command_handler("resume")
-
-    async def _recover_startup(self) -> None:
-        if await self._agent.recover():
-            self.write_line("recovered an interrupted operation", _DIM)
 
     def action_toggle_tools(self) -> None:
         self._expanded = not self._expanded
@@ -432,6 +474,7 @@ class TMPromptApp(App[None]):
         return None
 
     def _update_footer(self) -> None:
+        model = self._agent.model
         cwd = str(Path.cwd())
         home = str(Path.home())
         if cwd.startswith(home):
@@ -447,7 +490,7 @@ class TMPromptApp(App[None]):
                 total_out += message.usage.output
                 cache_read += message.usage.cache_read
         used = estimate_tokens(self._agent.messages, self._agent.system_prompt)
-        window = self._model.context_window or 0
+        window = model.context_window or 0
 
         stats = f"↑{format_tokens(total_in)} ↓{format_tokens(total_out)}"
         if cache_read:
@@ -455,8 +498,8 @@ class TMPromptApp(App[None]):
         if window:
             stats += f"  {used * 100 // window}%/{format_tokens(window)} (auto)"
 
-        right = f"({self._model.provider}) {self._model.id}"
-        if self._model.reasoning:
+        right = f"({model.provider}) {model.id}"
+        if model.reasoning:
             right += " • thinking"
         width = max(self.size.width - 2, 20)
         pad = max(1, width - len(stats) - len(right))
@@ -529,20 +572,28 @@ class TMPromptApp(App[None]):
         event.input.value = ""
         if not text:
             return
+        # Run in a worker so commands can push screens (e.g. the session picker).
+        self.run_worker(self._handle_input(text), exclusive=True, exit_on_error=False)
+
+    async def _handle_input(self, text: str) -> None:
         await self._mount(UserMessageWidget(text))
         if text.startswith("/"):
             if self.command_handler is None:
                 return
+            command = text[1:].split(None, 1)[0].lower()
             try:
                 forwarded = await self.command_handler(text[1:])
             except ExitSignal:
                 self.exit()
                 return
             self.query_one("#prompt", Input).focus()
+            self._update_footer()
+            if command in ("resume", "new", "tree", "fork"):
+                await self._reload_history()
             if forwarded is None:
                 return
             text = forwarded
-        self.run_worker(self._prompt(text), exclusive=True)
+        await self._prompt(text)
 
     async def _prompt(self, text: str) -> None:
         try:

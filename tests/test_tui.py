@@ -289,6 +289,37 @@ def test_tool_title_formats() -> None:
     assert str(tool_title("ls", {"path": "src"})) == "ls src"
 
 
+async def test_footer_reflects_live_agent_model() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        agent.model = Model(id="qwen-max", provider="qwen")
+        app._update_footer()
+        await pilot.pause()
+        assert "qwen-max" in str(app.query_one("#footer").render())
+
+
+async def test_footer_refreshes_after_model_command() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async def handler(text: str) -> str | None:
+        if text.startswith("model "):
+            agent.model = Model(id="glm-4-plus", provider="zhipu")
+        return None
+
+    app.command_handler = handler
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "/model glm-4-plus"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "glm-4-plus" in str(app.query_one("#footer").render())
+
+
 async def test_tool_output_truncates_and_ctrl_o_expands() -> None:
     tool_turn = AssistantMessage(
         tool_calls=[ToolCall(id="t1", name="long", arguments={})],
@@ -316,3 +347,50 @@ async def test_tool_output_truncates_and_ctrl_o_expands() -> None:
         body = app.query_one(".tool .tool-body")
         assert "ctrl+o to expand" not in str(body.render())
         assert "line 39" in str(body.render())
+
+
+async def test_tui_renders_resumed_history(tmp_path) -> None:
+    from tm.core.session import SessionManager
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    session.append(UserMessage(content="earlier question"))
+    session.append(AssistantMessage(content=[TextContent(text="earlier answer")], stop_reason="stop"))
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn, session=session)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.query(".user")) == 1
+        assert len(app.query(".assistant")) == 1
+        assert app.query(".assistant .body")
+
+
+async def test_new_command_clears_rendered_history(tmp_path) -> None:
+    from tm.core.session import SessionManager
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    session.append(UserMessage(content="old message"))
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn, session=session)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async def handler(text: str) -> str | None:
+        if text == "new":
+            agent.reset()
+        return None
+
+    app.command_handler = handler
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        assert len(app.query(".user")) == 1
+
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "/new"
+        await pilot.pause()
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.query(".user")) == 0
