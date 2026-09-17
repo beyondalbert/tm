@@ -11,6 +11,7 @@ class ActionKind(StrEnum):
     FILE_WRITE = "file_write"
     SHELL = "shell"
     NETWORK = "network"
+    ELEVATED = "elevated"
 
 
 class Decision(StrEnum):

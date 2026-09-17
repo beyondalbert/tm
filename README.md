@@ -193,6 +193,8 @@ Switch to a custom model with `/model my-model` or `tm --model my-model`.
 | `tm --no-tui` | Plain console REPL instead of the TUI |
 | `tm --tui` | Force the TUI (default when interactive) |
 | `tm --read-only` | Only read/grep/find/ls tools |
+| `tm --no-python` | Disable the python tool (shell stays) |
+| `tm --dry-run` | Show what would change without mutating the machine |
 | `tm --no-tools` | Plain chat, no machine control |
 | `tm --yolo` | Auto-approve every action |
 | `tm -p` | One-shot, reads stdin when no prompt is given |
@@ -268,6 +270,13 @@ and honors `--approve`/`--no-approve`, `/trust [off]`, and the
 as `AGENTS.md` are not gated. Non-interactive runs (`-p`, `--json`, `--mode rpc`)
 do not prompt and decline by default.
 
+**Changes and undo.** Mutating tools append to `<config>/changes/changes.jsonl`.
+File writes/edits snapshot the previous content; package installs and service
+start/stops record enough to reverse them, so `/undo [n]` restores the previous
+state. Destructive shell commands (a built-in deny list) always need an explicit,
+non-remembered approval. `elevate` is never auto-approved or remembered. Use
+`tm --dry-run` to preview mutations without applying them.
+
 ## Interactive commands
 
 Inside `tm` (agent REPL or TUI) type `/` for commands:
@@ -283,6 +292,7 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 | `/fork [n]` | fork the session (at point n) into a new file |
 | `/compact [note]` | summarize older context |
 | `/recover` | reconcile interrupted durable operations |
+| `/undo [n]` | roll back the last n reversible changes |
 | `/skills` | list available skills |
 | `/skill:<name>` | load a skill into the conversation |
 | `/prompts` | list prompt templates |
@@ -336,6 +346,11 @@ compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
 default_project_trust = "ask"  # ask | always | never
 cache_retention = "short"      # short | long (provider prompt cache; TM_CACHE_RETENTION overrides)
+env_probe = true               # add a machine summary to the system prompt
+python_executable = ""         # interpreter for the python tool (default: the one running TM)
+python_timeout = 120           # seconds per python script
+workspace_dir = ""             # where python scripts are saved (default: <config>/workspace)
+auto_install = true            # install missing pip packages declared by the python tool
 ```
 
 Automatic compaction runs before a prompt when the estimated context exceeds
@@ -347,6 +362,28 @@ restart.
 Per-model pricing (`input_cost`, `output_cost`, `cache_read_cost`, USD per 1M
 tokens) can be set in `models.toml`; the footer then shows `$cost` and the cache
 hit rate (`CH%`).
+
+## Machine awareness and the Python fallback
+
+TM inspects the machine before assuming anything, and writes Python when shell
+one-liners are not enough.
+
+- **Environment probe.** At startup TM appends a compact summary of the machine
+  (OS, CPU/memory/disk, GPUs, Python, installed tools) to the system prompt. The
+  `system_info` tool returns the same facts on demand (pass `full` for tool
+  paths). Disable with `env_probe = false`.
+- **`python` tool.** Runs a Python script with a configurable interpreter
+  (default: the one running TM), saves it under `<config>/workspace/scripts/` so
+  it can be re-run or edited, streams output, enforces a timeout, and returns
+  the traceback on failure. Declare `packages` to have missing pip dependencies
+  installed first (auto-install, gated by the network permission). Disable with
+  `--no-python`.
+- **Solve ladder.** The system prompt tells the model to prefer, in order: an
+  installed tool, the OS-native command, the Python standard library, a package,
+  then a system-level change; to verify every step; and to try before asking.
+
+The architecture and the multi-phase plan live in
+[docs/design/device-management.md](docs/design/device-management.md).
 
 ## Customization
 
@@ -424,7 +461,12 @@ Recovered re-runs still go through the permission gate. See
 - `tm/core` – agent loop, high-level `Agent`, events, sessions, compaction, and
   the durable `store`/`operation` restart point
 - `tm/telemetry` – vendor-neutral telemetry contract, redaction, adapters
-- `tm/tools` – built-in machine-control tools (read/write/edit/shell/grep/find/ls)
+- `tm/tools` – built-in machine-control tools
+  (read/write/edit/shell/python/grep/find/ls/system_info, plus process/service/
+  package/elevate for lifecycle, services, packages, and guided elevation)
+- `tm/host` – cross-platform machine probing and control (identity, resources,
+  software, processes, services, packages, elevation)
+- `tm/safety` – change journal, reversible snapshots, dangerous-command guard
 - `tm/permissions` – policy, allow/deny/ask checker, approval, audit log
 - `tm/skills.py`, `tm/prompts.py`, `tm/extensions.py`, `tm/context` – resources
 - `tests/evals` – faux-provider eval scenarios
@@ -507,9 +549,15 @@ See [RELEASE.md](RELEASE.md) for publishing to PyPI.
 | P9 | compaction, print/json mode, packaging | done |
 | P10 | sessions: resume picker, fork, tree navigation | done |
 | P11 | Google Gemini + extra providers, TUI streaming/status | done |
+| P12 | device management A: host probe, python tool, solve ladder | done |
+| P13 | device management B: process/service/package lifecycle | done |
+| P14 | device management C: guided elevation, change journal, `/undo`, dry-run | done |
 
-All planned phases are implemented. Possible future work: more providers,
-provider-side prompt caching controls, a web UI, and multi-agent orchestration.
+Device management phases D-G are planned in
+[docs/design/device-management.md](docs/design/device-management.md): dynamic
+monitoring, OS-native scheduling, remote SSH, and reuse/specialization. Possible
+future work: more providers, provider-side prompt caching controls, a web UI, and
+multi-agent orchestration.
 
 ## License
 

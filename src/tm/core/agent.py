@@ -34,6 +34,7 @@ from tm.core.loop import LoopHooks, StreamFn, agent_loop
 from tm.core.operation import Operation, OperationState, OperationStatus, PendingEffect
 from tm.core.session import Session
 from tm.core.store import Store
+from tm.safety.journal import Journal
 from tm.telemetry import (
     SPAN_OPERATION,
     SPAN_TOOL,
@@ -107,6 +108,8 @@ class Agent:
         telemetry: Telemetry | None = None,
         store: Store | None = None,
         cache_retention: str | None = None,
+        journal: Journal | None = None,
+        dry_run: bool = False,
     ) -> None:
         self.model = model
         self.provider = provider
@@ -127,6 +130,8 @@ class Agent:
         self.telemetry: Telemetry = telemetry or NoopTelemetry()
         self.store = store
         self.cache_retention = cache_retention
+        self.journal = journal
+        self.dry_run = dry_run
         self.operation: Operation | None = None
         self._trace_id = ""
         self._operation_span_id: str | None = None
@@ -461,7 +466,14 @@ class Agent:
                 else:
                     try:
                         result = await tool.execute(
-                            pending.call_id, args, ToolContext(cwd=self.cwd)
+                            pending.call_id,
+                            args,
+                            ToolContext(
+                                cwd=self.cwd,
+                                session=self.session.id if self.session is not None else None,
+                                journal=self.journal,
+                                dry_run=self.dry_run,
+                            ),
                         )
                     except Exception as exc:  # noqa: BLE001 - failures become results
                         result = text_result(
@@ -582,7 +594,14 @@ class Agent:
                 tool_call_id=call.id, tool_name=call.name, arguments=call.arguments
             )
         )
-        tool_context = ToolContext(cwd=self.cwd, signal=self._signal, on_update=on_update)
+        tool_context = ToolContext(
+            cwd=self.cwd,
+            signal=self._signal,
+            on_update=on_update,
+            session=self.session.id if self.session is not None else None,
+            journal=self.journal,
+            dry_run=self.dry_run,
+        )
         operation = self.operation
         if operation is not None:
             # Intent before the uncertain effect: if the process dies here, the

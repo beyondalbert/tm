@@ -42,6 +42,7 @@ from tm.core.session import Session, SessionInfo, SessionManager
 from tm.core.store import Store
 from tm.core.system_prompt import build_system_prompt
 from tm.extensions import ExtensionAPI, extension_roots, load_extensions
+from tm.host import detect_host, render_environment
 from tm.permissions import (
     READ_TOOLS,
     AuditLog,
@@ -53,6 +54,7 @@ from tm.permissions import (
     build_permission_hook,
 )
 from tm.prompts import PromptTemplate, load_prompt_templates, prompt_roots
+from tm.safety import Journal
 from tm.skills import Skill, build_skills_section, load_skills, skill_roots
 from tm.telemetry import FileTelemetry, NoopTelemetry, Telemetry
 from tm.tools import build_default_tools
@@ -143,12 +145,14 @@ async def _json_listener(event: AgentEvent) -> None:
     print(event.model_dump_json(), flush=True)
 
 
-def _select_tools(no_tools: bool, read_only: bool) -> list:
+def _select_tools(no_tools: bool, read_only: bool, *, no_python: bool = False) -> list:
     if no_tools:
         return []
     tools = build_default_tools()
     if read_only:
-        return [tool for tool in tools if tool.name in READ_TOOLS]
+        tools = [tool for tool in tools if tool.name in READ_TOOLS]
+    if no_python:
+        tools = [tool for tool in tools if tool.name != "python"]
     return tools
 
 
@@ -236,7 +240,13 @@ def _resolve_trust(settings: Settings, approve: bool, no_approve: bool) -> bool:
     return answer in ("y", "yes")
 
 
-def _system_prompt(settings: Settings, resources: Resources, no_context_files: bool) -> str:
+def _system_prompt(
+    settings: Settings,
+    resources: Resources,
+    no_context_files: bool,
+    *,
+    environment: str | None = None,
+) -> str:
     cwd = Path.cwd()
     extra = settings.system_prompt
     if not no_context_files:
@@ -246,7 +256,7 @@ def _system_prompt(settings: Settings, resources: Resources, no_context_files: b
     skills_section = build_skills_section(resources.skills)
     if skills_section:
         extra = f"{extra}\n\n{skills_section}" if extra else skills_section
-    return build_system_prompt(cwd, extra)
+    return build_system_prompt(cwd, extra, environment=environment)
 
 
 def _build_agent(
@@ -265,6 +275,8 @@ def _build_agent(
     store: Store | None = None,
     trusted: bool = True,
     cache_retention: str | None = None,
+    journal: Journal | None = None,
+    dry_run: bool = False,
 ) -> Agent:
     cwd = Path.cwd()
     policy = Policy.load(cwd=cwd, config_dir=config_dir(), include_project=trusted)
@@ -274,11 +286,14 @@ def _build_agent(
         audit=AuditLog(config_dir() / "audit.jsonl"),
     )
     all_tools = [*tools, *resources.extensions.tools]
+    environment = render_environment(detect_host()) if settings.env_probe else None
     agent = Agent(
         model,
         provider=provider,
         tools=all_tools,
-        system_prompt=_system_prompt(settings, resources, no_context_files),
+        system_prompt=_system_prompt(
+            settings, resources, no_context_files, environment=environment
+        ),
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
         cwd=cwd,
@@ -289,6 +304,8 @@ def _build_agent(
         telemetry=telemetry,
         store=store,
         cache_retention=cache_retention,
+        journal=journal,
+        dry_run=dry_run,
     )
     agent.before_tool_call = build_permission_hook(checker, cwd)
     for listener in resources.extensions.listeners:
@@ -319,6 +336,7 @@ def _command_context(
             extensions=resources.extensions,
             picker=picker,
             trust_manager=TrustManager(config_dir() / "trust.json"),
+            journal=agent.journal,
         )
     )
 
@@ -448,6 +466,8 @@ def _run_tui(
     mouse: bool,
     trusted: bool,
     cache_retention: str | None,
+    journal: Journal | None = None,
+    dry_run: bool = False,
 ) -> None:
     from tm.tui import DeferredApprover, TextualApprover, TMPromptApp
 
@@ -466,6 +486,8 @@ def _run_tui(
         store=store,
         trusted=trusted,
         cache_retention=cache_retention,
+        journal=journal,
+        dry_run=dry_run,
     )
     registry = _make_registry()
     _restore_session_model(agent, session, registry)
@@ -576,6 +598,12 @@ def main(
     model: str | None = typer.Option(None, "--model", "-m", help="Model id or pattern."),
     no_tools: bool = typer.Option(False, "--no-tools", "-nt", help="Disable tools."),
     read_only: bool = typer.Option(False, "--read-only", help="Only read-only tools."),
+    no_python: bool = typer.Option(
+        False, "--no-python", help="Disable the python tool (shell remains)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would change without mutating the machine."
+    ),
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve all actions."),
     tui: bool = typer.Option(False, "--tui", help="Force the Textual TUI."),
     no_tui: bool = typer.Option(
@@ -677,7 +705,7 @@ def main(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
-    tools = _select_tools(no_tools, read_only)
+    tools = _select_tools(no_tools, read_only, no_python=no_python)
     trusted = _resolve_trust(settings, approve, no_approve)
     if not trusted:
         console.print(
@@ -713,6 +741,7 @@ def main(
 
     telemetry = _make_telemetry(telemetry_flag or settings.telemetry)
     store = _make_store(durable_flag or settings.durable)
+    journal = Journal(config_dir() / "changes" / "changes.jsonl")
     mouse = settings.mouse and not no_mouse
     cache_retention = os.environ.get("TM_CACHE_RETENTION", settings.cache_retention)
 
@@ -734,6 +763,8 @@ def main(
                     store=store,
                     trusted=trusted,
                     cache_retention=cache_retention,
+                    journal=journal,
+                    dry_run=dry_run,
                 )
                 _restore_session_model(agent, session, registry)
                 if store is not None and await agent.recover():
@@ -776,6 +807,8 @@ def main(
                 mouse,
                 trusted,
                 cache_retention,
+                journal,
+                dry_run,
             )
         else:
             asyncio.run(run())

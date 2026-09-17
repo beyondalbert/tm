@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from tm.safety import record_file_change
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.path_utils import resolve_path
 
@@ -49,10 +50,23 @@ class EditTool(Tool[EditParams]):
                 )
             updated = updated.replace(operation.old_text, operation.new_text, 1)
 
+        if ctx.dry_run:
+            return text_result(
+                f"[dry-run] would apply {len(args.edits)} edit(s) to {path}"
+            )
         try:
             path.write_text(updated, encoding="utf-8")
         except OSError as exc:
             return text_result(f"Could not write {path}: {exc}", is_error=True)
+        record_file_change(
+            ctx.journal,
+            session=ctx.session,
+            tool="edit",
+            path=path,
+            existed=True,
+            content=text.encode("utf-8"),
+            summary=f"edit {path}",
+        )
         return text_result(f"Applied {len(args.edits)} edit(s) to {path}")
 
 

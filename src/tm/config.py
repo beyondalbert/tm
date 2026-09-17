@@ -56,6 +56,11 @@ class Settings:
     mouse: bool = True
     default_project_trust: str = "ask"
     cache_retention: str = "short"
+    env_probe: bool = True
+    python_executable: str | None = None
+    python_timeout: int = 120
+    workspace_dir: str | None = None
+    auto_install: bool = True
 
 
 def load_settings() -> Settings:

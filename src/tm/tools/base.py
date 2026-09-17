@@ -6,12 +6,15 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
 from tm.ai.types import Content, TextContent, ToolSpec
 from tm.utils.abort import AbortSignal
+
+if TYPE_CHECKING:
+    from tm.safety.journal import Journal
 
 P = TypeVar("P", bound=BaseModel)
 
@@ -23,6 +26,9 @@ class ToolContext:
     cwd: Path
     signal: AbortSignal | None = None
     on_update: OnUpdate | None = None
+    session: str | None = None
+    journal: Journal | None = None
+    dry_run: bool = False
 
 
 class ToolResult(BaseModel):

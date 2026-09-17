@@ -13,7 +13,9 @@ from tm.ai.types import AssistantMessage, Message, ToolResultMessage, UserMessag
 from tm.core.agent import Agent
 from tm.core.session import Session, SessionInfo, SessionManager
 from tm.extensions import ExtensionAPI
+from tm.host import detect_host
 from tm.prompts import PromptTemplate, expand_template
+from tm.safety import Journal, apply_undo
 from tm.skills import Skill, find_skill
 from tm.trust import TrustManager
 
@@ -58,6 +60,7 @@ class CommandContext:
     extensions: ExtensionAPI | None = None
     picker: SessionPicker | None = None
     trust_manager: TrustManager | None = None
+    journal: Journal | None = None
 
 
 COMMAND_SPECS: list[tuple[str, str]] = [
@@ -70,6 +73,7 @@ COMMAND_SPECS: list[tuple[str, str]] = [
     ("fork", "fork the session into a new file"),
     ("compact", "summarize older context"),
     ("recover", "reconcile interrupted durable operations"),
+    ("undo", "roll back the last change(s)"),
     ("trust", "trust or untrust this project"),
     ("skills", "list available skills"),
     ("prompts", "list prompt templates"),
@@ -86,6 +90,7 @@ HELP = """commands:
   /fork [n]             fork the session (at point n) into a new file
   /compact [note]       summarize older context
   /recover              reconcile interrupted durable operations
+  /undo [n]             roll back the last n reversible changes
   /trust [off]          trust (or untrust) this project for future sessions
   /skills               list available skills
   /skill:<name>         load a skill into the conversation
@@ -146,6 +151,9 @@ class SlashCommands:
             return None
         if command == "recover":
             await self._recover()
+            return None
+        if command == "undo":
+            self._undo(argument)
             return None
         if command == "trust":
             self._trust(argument)
@@ -379,6 +387,22 @@ class SlashCommands:
             return
         await self.ctx.agent.recover()
         self._emit(f"recovered {len(pending)} interrupted operation(s)")
+
+    def _undo(self, argument: str) -> None:
+        journal = self.ctx.journal
+        if journal is None:
+            self._emit("no change journal available")
+            return
+        count = int(argument) if argument.strip().isdigit() else 1
+        session = self.ctx.session.id if self.ctx.session is not None else None
+        changes = [change for change in journal.last(count, session=session) if change.reversible]
+        if not changes:
+            self._emit("nothing to undo")
+            return
+        host = detect_host()
+        for change in reversed(changes):
+            self._emit(apply_undo(change, host))
+            journal.mark(change.id, "reverted")
 
     def _trust(self, argument: str) -> None:
         manager = self.ctx.trust_manager

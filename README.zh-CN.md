@@ -187,6 +187,8 @@ context_window = 65536
 | `tm --no-tui` | 使用普通控制台 REPL（不用 TUI） |
 | `tm --tui` | 强制使用 TUI（交互时默认） |
 | `tm --read-only` | 仅启用 read/grep/find/ls 工具 |
+| `tm --no-python` | 禁用 python 工具（保留 shell） |
+| `tm --dry-run` | 只预览将要发生的变更，不真正修改本机 |
 | `tm --no-tools` | 纯对话，不控制本机 |
 | `tm --yolo` | 自动批准所有操作 |
 | `tm -p` | 一次性，无提示时读取 stdin |
@@ -254,6 +256,11 @@ allow = ["api.deepseek.com"]
 `default_project_trust`（`ask` | `always` | `never`）。`AGENTS.md` 等上下文文件不受信任门限制。
 非交互模式（`-p`、`--json`、`--mode rpc`）不询问，默认拒绝。
 
+**变更与撤销。** 会产生变更的工具会向 `<config>/changes/changes.jsonl` 追加记录：文件
+写入/编辑会快照旧内容，包安装与服务启停会记录足以回退的信息，因此 `/undo [n]` 可恢复
+之前的状态。危险 Shell 命令（内置拒绝清单）始终需要一次显式、不可记忆的确认；`elevate`
+永远不会被自动批准或记住。用 `tm --dry-run` 预览变更而不实际执行。
+
 ## 交互命令
 
 在 `tm`（Agent REPL 或 TUI）内输入 `/` 触发命令：
@@ -269,6 +276,7 @@ allow = ["api.deepseek.com"]
 | `/fork [n]` | 将该会话（第 n 个节点）分叉为新文件 |
 | `/compact [note]` | 摘要较早的上下文 |
 | `/recover` | 恢复被中断的持久化操作 |
+| `/undo [n]` | 回退最近 n 个可逆变更 |
 | `/skills` | 列出可用技能 |
 | `/skill:<name>` | 将技能载入对话 |
 | `/prompts` | 列出提示词模板 |
@@ -316,6 +324,11 @@ compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
 default_project_trust = "ask"  # ask | always | never
 cache_retention = "short"      # short | long（provider 提示缓存；TM_CACHE_RETENTION 可覆盖）
+env_probe = true               # 在系统提示词中加入本机摘要
+python_executable = ""         # python 工具使用的解释器（默认：运行 TM 的解释器）
+python_timeout = 120           # 每个 python 脚本的超时秒数
+workspace_dir = ""             # python 脚本保存目录（默认 <config>/workspace）
+auto_install = true            # 自动安装 python 工具声明的缺失 pip 包
 ```
 
 当估算上下文超过 `context_window * compact_threshold` 时，会在发送提示词前自动压缩。
@@ -324,6 +337,21 @@ cache_retention = "short"      # short | long（provider 提示缓存；TM_CACHE
 
 可在 `models.toml` 里为模型设置价格（`input_cost`、`output_cost`、`cache_read_cost`，USD/百万
 token），页脚随后会显示 `$cost` 与缓存命中率（`CH%`）。
+
+## 本机感知与 Python 兜底
+
+TM 先了解这台机器，再动手；当 shell 一行命令不够用时，会自己写 Python。
+
+- **环境探测。** 启动时把本机摘要（OS、CPU/内存/磁盘、GPU、Python、已装工具）追加到系统
+  提示词。`system_info` 工具可按需返回同样的事实（`full` 附带工具路径）。用
+  `env_probe = false` 关闭。
+- **`python` 工具。** 用可配置解释器（默认运行 TM 的解释器）执行脚本，保存到
+  `<config>/workspace/scripts/` 以便复跑或编辑，流式输出、强制超时、失败时回传 traceback。
+  声明 `packages` 可先自动安装缺失的 pip 依赖（受 network 权限约束）。用 `--no-python` 关闭。
+- **解决阶梯。** 系统提示词要求模型按序选择：已装工具 → OS 原生命令 → Python 标准库 →
+  Python 包 → 系统级变更，并且逐步验证、先尝试再提问。
+
+架构与多阶段计划见 [docs/design/device-management.md](docs/design/device-management.md)。
 
 ## 定制
 
@@ -391,7 +419,11 @@ def setup(api):
 - `tm/core` —— Agent 循环、高层 `Agent`、事件、会话、压缩，以及持久化的
   `store`/`operation` 重启点
 - `tm/telemetry` —— 厂商无关的遥测契约、脱敏、适配器
-- `tm/tools` —— 内置本机控制工具（read/write/edit/shell/grep/find/ls）
+- `tm/tools` —— 内置本机控制工具
+  （read/write/edit/shell/python/grep/find/ls/system_info，以及 process/service/
+  package/elevate：进程与生命周期、服务、包管理、引导式提权）
+- `tm/host` —— 跨平台本机探测与控制（身份、资源、软件、进程、服务、包、提权）
+- `tm/safety` —— 变更日志、可逆快照、危险命令守卫
 - `tm/permissions` —— 策略、allow/deny/ask 判定、审批、审计日志
 - `tm/skills.py`、`tm/prompts.py`、`tm/extensions.py`、`tm/context` —— 资源
 - `tests/evals` —— faux provider 评测场景
@@ -469,9 +501,13 @@ Linux、Windows、macOS 上以 Python 3.11 与 3.12 运行测试。发布到 PyP
 | P9 | 压缩、print/json 模式、打包 | 完成 |
 | P10 | 会话：恢复选择器、分叉、树导航 | 完成 |
 | P11 | Google Gemini + 更多 Provider、TUI 流式/状态 | 完成 |
+| P12 | 设备管理 A：本机探测、python 工具、解决阶梯 | 完成 |
+| P13 | 设备管理 B：进程/服务/包生命周期 | 完成 |
+| P14 | 设备管理 C：引导式提权、变更日志、`/undo`、dry-run | 完成 |
 
-计划内的全部阶段均已实现。后续可选：更多 Provider、Provider 侧提示词缓存控制、
-Web UI、多 Agent 编排。
+设备管理 D–G 阶段见 [docs/design/device-management.md](docs/design/device-management.md)：
+动态监控、OS 原生调度、远程 SSH、复用与专精。后续可选：更多 Provider、Provider 侧提示词
+缓存控制、Web UI、多 Agent 编排。
 
 ## 许可
 

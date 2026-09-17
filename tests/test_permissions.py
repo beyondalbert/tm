@@ -7,7 +7,12 @@ from tm.ai.types import ToolCall
 from tm.permissions.actions import Action, ActionKind, Decision
 from tm.permissions.approval import ApprovalOutcome, AutoAllowApprover, AutoDenyApprover
 from tm.permissions.audit import AuditLog
-from tm.permissions.gate import PermissionChecker, action_for_tool, build_permission_hook
+from tm.permissions.gate import (
+    PermissionChecker,
+    action_for_tool,
+    actions_for_tool,
+    build_permission_hook,
+)
 from tm.permissions.policy import Policy
 
 
@@ -222,3 +227,83 @@ async def test_always_command_remembers_exact_command(tmp_path: Path) -> None:
     assert approver.calls == 1
     assert await checker.authorize(Action(ActionKind.SHELL, "git push")) is True
     assert approver.calls == 2
+
+
+def test_python_tool_reuses_shell_action() -> None:
+    action = action_for_tool("python", {"description": "parse logs"}, Path("."))
+    assert action is not None
+    assert action.kind is ActionKind.SHELL
+    assert "python" in action.target
+
+
+def test_python_packages_also_require_network() -> None:
+    actions = actions_for_tool(
+        "python", {"description": "call an API", "packages": ["requests"]}, Path(".")
+    )
+    kinds = {action.kind for action in actions}
+    assert kinds == {ActionKind.SHELL, ActionKind.NETWORK}
+
+
+async def test_python_hook_blocks_when_network_denied(tmp_path: Path) -> None:
+    policy = Policy.from_dict(
+        {"shell": {"allow": ["python *"]}, "network": {"deny": ["pypi.org"]}}
+    )
+    checker = PermissionChecker(policy, approver=AutoDenyApprover())
+    hook = build_permission_hook(checker, tmp_path)
+
+    call = ToolCall(
+        id="1", name="python", arguments={"description": "x", "packages": ["requests"]}
+    )
+    decision = await hook(call, None)
+    assert decision is not None
+    assert decision.block is True
+    assert "network" in (decision.reason or "")
+
+
+async def test_python_hook_allows_plain_script(tmp_path: Path) -> None:
+    policy = Policy.from_dict({"shell": {"allow": ["python *"]}})
+    checker = PermissionChecker(policy, approver=AutoDenyApprover())
+    hook = build_permission_hook(checker, tmp_path)
+
+    call = ToolCall(id="1", name="python", arguments={"description": "x"})
+    assert await hook(call, None) is None
+
+
+def test_elevate_maps_to_elevated_action() -> None:
+    actions = actions_for_tool("elevate", {"command": "systemctl restart nginx"}, Path("."))
+    assert [action.kind for action in actions] == [ActionKind.ELEVATED]
+
+
+async def test_elevation_is_always_asked_and_never_remembered() -> None:
+    class Counting:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request(self, action, reason) -> ApprovalOutcome:
+            self.calls += 1
+            return ApprovalOutcome(allowed=True, remember=True)
+
+    approver = Counting()
+    checker = PermissionChecker(Policy.from_dict({"default": "allow"}), approver=approver)
+    action = Action(ActionKind.ELEVATED, "systemctl restart nginx")
+    assert await checker.authorize(action) is True
+    assert await checker.authorize(action) is True
+    assert approver.calls == 2
+
+
+async def test_dangerous_command_forces_approval() -> None:
+    policy = Policy.from_dict({"default": "allow", "shell": {"allow": ["shutdown *"]}})
+    checker = PermissionChecker(policy, approver=AutoDenyApprover())
+    assert await checker.authorize(Action(ActionKind.SHELL, "shutdown now")) is False
+
+
+def test_process_service_package_map_to_shell() -> None:
+    cases = [
+        ("process", {"action": "start", "command": "serve"}),
+        ("service", {"action": "start", "name": "nginx"}),
+        ("package", {"action": "install", "name": "jq"}),
+    ]
+    for name, args in cases:
+        actions = actions_for_tool(name, args, Path("."))
+        assert len(actions) == 1
+        assert actions[0].kind is ActionKind.SHELL
