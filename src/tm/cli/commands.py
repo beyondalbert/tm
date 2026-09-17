@@ -67,6 +67,7 @@ HELP = """commands:
   /tree [n]             list conversation points or branch from point n
   /fork [n]             fork the session (at point n) into a new file
   /compact [note]       summarize older context
+  /recover              reconcile interrupted durable operations
   /skills               list available skills
   /skill:<name>         load a skill into the conversation
   /prompts              list prompt templates
@@ -123,6 +124,9 @@ class SlashCommands:
             return None
         if command == "compact":
             await self._compact(argument or None)
+            return None
+        if command == "recover":
+            await self._recover()
             return None
 
         templates = self.ctx.templates or {}
@@ -321,6 +325,14 @@ class SlashCommands:
     async def _compact(self, instructions: str | None) -> None:
         changed = await self.ctx.agent.compact(instructions)
         self._emit("compacted" if changed else "nothing to compact")
+
+    async def _recover(self) -> None:
+        pending = self.ctx.agent.pending_recovery()
+        if not pending:
+            self._emit("nothing to recover")
+            return
+        await self.ctx.agent.recover()
+        self._emit(f"recovered {len(pending)} interrupted operation(s)")
 
 
 __all__ = ["HELP", "CommandContext", "Emit", "ExitSignal", "SessionPicker", "SlashCommands"]

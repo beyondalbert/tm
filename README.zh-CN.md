@@ -219,6 +219,7 @@ allow = ["api.deepseek.com"]
 | `/tree [n]` | 列出对话节点，或从第 n 个节点分支 |
 | `/fork [n]` | 将该会话（第 n 个节点）分叉为新文件 |
 | `/compact [note]` | 摘要较早的上下文 |
+| `/recover` | 恢复被中断的持久化操作 |
 | `/skills` | 列出可用技能 |
 | `/skill:<name>` | 将技能载入对话 |
 | `/prompts` | 列出提示词模板 |

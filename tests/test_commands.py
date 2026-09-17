@@ -260,3 +260,66 @@ def test_match_session_all_digit_id(tmp_path: Path) -> None:
     infos = [numeric, other]
     assert SlashCommands._match_session(infos, "893491") is numeric
     assert SlashCommands._match_session(infos, "2") is other
+
+
+async def test_recover_command_reports_nothing(tmp_path: Path) -> None:
+    commands, emitted, _ = make_commands(tmp_path)
+    await commands.handle("recover")
+    assert "nothing to recover" in emitted[-1]
+
+
+async def test_recover_command_reruns_pending(tmp_path: Path) -> None:
+    from pydantic import BaseModel
+
+    from tm.ai.types import ToolCall
+    from tm.core.operation import Operation, PendingEffect
+    from tm.core.session import SessionManager
+    from tm.core.store import Store
+    from tm.tools.base import Tool, ToolContext, ToolResult, text_result
+
+    class NoParams(BaseModel):
+        pass
+
+    class ReplayTool(Tool[NoParams]):
+        name = "rt"
+        description = "Replay-safe."
+        parameters_model = NoParams
+        replay_safe = True
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def execute(
+            self, call_id: str, args: NoParams, ctx: ToolContext
+        ) -> ToolResult:
+            self.calls += 1
+            return text_result("replayed")
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    session.append(UserMessage(content="go"))
+    session.append(
+        AssistantMessage(
+            tool_calls=[ToolCall(id="c1", name="rt", arguments={})],
+            stop_reason="tool_use",
+        )
+    )
+    store = Store()
+    operation = Operation.accept("op1", store, session_id=session.id)
+    operation.begin_effect(
+        PendingEffect(tool_name="rt", call_id="c1", arguments={}, replay_safe=True), turn=1
+    )
+
+    tool = ReplayTool()
+    agent = make_agent()
+    agent.store = store
+    agent.tools = [tool]
+    agent.resume(session)
+    commands, emitted, _ = make_commands(
+        tmp_path, agent, session=session, session_manager=manager
+    )
+
+    await commands.handle("recover")
+
+    assert "recovered 1 interrupted operation(s)" in emitted[-1]
+    assert tool.calls == 1

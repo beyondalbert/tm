@@ -228,6 +228,7 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 | `/tree [n]` | list conversation points, or branch from point n |
 | `/fork [n]` | fork the session (at point n) into a new file |
 | `/compact [note]` | summarize older context |
+| `/recover` | reconcile interrupted durable operations |
 | `/skills` | list available skills |
 | `/skill:<name>` | load a skill into the conversation |
 | `/prompts` | list prompt templates |
