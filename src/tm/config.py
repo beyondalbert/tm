@@ -40,6 +40,8 @@ class Settings:
     auto_compact: bool = True
     compact_threshold: float = 0.8
     compact_keep_recent: int = 6
+    telemetry: bool = False
+    durable: bool = False
 
 
 def load_settings() -> Settings:
@@ -56,6 +58,23 @@ def load_settings() -> Settings:
     return settings
 
 
+def sanitize_api_key(raw: str) -> str:
+    """Normalize a pasted API key.
+
+    Handles the ways a key can arrive malformed: stray whitespace/newlines and
+    accidental repetition (a terminal that pastes the same key several times
+    yields e.g. 105 chars instead of 35).
+    """
+    key = "".join(raw.split()).strip().strip('"').strip("'")
+    length = len(key)
+    if length >= 8:
+        for period in range(1, length // 2 + 1):
+            if length % period == 0 and key == key[:period] * (length // period):
+                key = key[:period]
+                break
+    return key
+
+
 def load_credentials() -> dict[str, str]:
     """Read stored API keys: ``[providers] provider = "sk-..."``."""
     path = credentials_path()
@@ -69,7 +88,11 @@ def load_credentials() -> dict[str, str]:
     providers = data.get("providers", {})
     if not isinstance(providers, dict):
         return {}
-    return {str(key): str(value) for key, value in providers.items() if isinstance(value, str)}
+    return {
+        str(key): sanitize_api_key(value)
+        for key, value in providers.items()
+        if isinstance(value, str)
+    }
 
 
 def save_credential(provider: str, key: str) -> Path:
@@ -84,7 +107,7 @@ def save_credential(provider: str, key: str) -> Path:
     providers = data.get("providers")
     if not isinstance(providers, dict):
         providers = {}
-    providers[provider] = key
+    providers[provider] = sanitize_api_key(key)
     data["providers"] = providers
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,6 +124,7 @@ __all__ = [
     "credentials_path",
     "load_credentials",
     "load_settings",
+    "sanitize_api_key",
     "save_credential",
     "settings_path",
 ]

@@ -15,6 +15,7 @@ class LsTool(Tool[LsParams]):
     name = "ls"
     description = "List directory entries, marking directories with a trailing slash."
     parameters_model = LsParams
+    replay_safe = True
 
     async def execute(self, call_id: str, args: LsParams, ctx: ToolContext) -> ToolResult:
         path = resolve_path(ctx.cwd, args.path)

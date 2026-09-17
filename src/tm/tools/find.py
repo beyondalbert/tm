@@ -40,6 +40,7 @@ class FindTool(Tool[FindParams]):
     name = "find"
     description = "Find files by glob pattern."
     parameters_model = FindParams
+    replay_safe = True
 
     async def execute(self, call_id: str, args: FindParams, ctx: ToolContext) -> ToolResult:
         base = resolve_path(ctx.cwd, args.path)

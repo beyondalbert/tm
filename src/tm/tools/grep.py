@@ -63,6 +63,7 @@ class GrepTool(Tool[GrepParams]):
     name = "grep"
     description = "Search file contents by regular expression or literal string."
     parameters_model = GrepParams
+    replay_safe = True
 
     async def execute(self, call_id: str, args: GrepParams, ctx: ToolContext) -> ToolResult:
         base = resolve_path(ctx.cwd, args.path)

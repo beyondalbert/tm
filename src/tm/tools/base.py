@@ -61,6 +61,9 @@ class Tool(ABC, Generic[P]):
     description: ClassVar[str]
     parameters_model: ClassVar[type[BaseModel]]
     execution_mode: ClassVar[Literal["parallel", "sequential"]] = "parallel"
+    #: True when re-running the tool after a crash is harmless (read-only tools).
+    #: Recorded in the durable operation's pending-effect intent.
+    replay_safe: ClassVar[bool] = False
 
     @classmethod
     def spec(cls) -> ToolSpec:

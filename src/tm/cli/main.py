@@ -36,7 +36,9 @@ from tm.config import (
 from tm.context import build_context_section, load_context_files
 from tm.core.agent import Agent
 from tm.core.events import AgentEvent
+from tm.core.operation import Operation
 from tm.core.session import Session, SessionInfo, SessionManager
+from tm.core.store import Store
 from tm.core.system_prompt import build_system_prompt
 from tm.extensions import ExtensionAPI, extension_roots, load_extensions
 from tm.permissions import (
@@ -51,6 +53,7 @@ from tm.permissions import (
 )
 from tm.prompts import PromptTemplate, load_prompt_templates, prompt_roots
 from tm.skills import Skill, build_skills_section, load_skills, skill_roots
+from tm.telemetry import FileTelemetry, NoopTelemetry, Telemetry
 from tm.tools import build_default_tools
 
 app = typer.Typer(
@@ -155,6 +158,25 @@ def _make_approver(yolo: bool):
     return AutoDenyApprover()
 
 
+def _make_telemetry(enabled: bool) -> Telemetry:
+    if not enabled:
+        return NoopTelemetry()
+    return FileTelemetry(config_dir() / "telemetry.jsonl")
+
+
+def _make_store(enabled: bool) -> Store | None:
+    if not enabled:
+        return None
+    store = Store.open(config_dir() / "state.jsonl")
+    pending = Operation.pending(store)
+    if pending:
+        console.print(
+            f"[yellow]warning:[/yellow] {len(pending)} operation(s) were interrupted "
+            "mid-effect; a tool may or may not have run."
+        )
+    return store
+
+
 def _load_resources() -> Resources:
     cwd = Path.cwd()
     return Resources(
@@ -189,6 +211,8 @@ def _build_agent(
     no_context_files: bool = False,
     no_auto_compact: bool = False,
     json_output: bool = False,
+    telemetry: Telemetry | None = None,
+    store: Store | None = None,
 ) -> Agent:
     cwd = Path.cwd()
     policy = Policy.load(cwd=cwd, config_dir=config_dir())
@@ -210,6 +234,8 @@ def _build_agent(
         auto_compact=settings.auto_compact and not no_auto_compact,
         compact_threshold=settings.compact_threshold,
         compact_keep_recent=settings.compact_keep_recent,
+        telemetry=telemetry,
+        store=store,
     )
     agent.before_tool_call = build_permission_hook(checker, cwd)
     for listener in resources.extensions.listeners:
@@ -345,6 +371,8 @@ def _run_tui(
     no_context_files: bool,
     no_auto_compact: bool,
     resume_on_start: bool,
+    telemetry: Telemetry,
+    store: Store | None,
 ) -> None:
     from tm.tui import DeferredApprover, TextualApprover, TMPromptApp
 
@@ -359,6 +387,8 @@ def _run_tui(
         resources,
         no_context_files=no_context_files,
         no_auto_compact=no_auto_compact,
+        telemetry=telemetry,
+        store=store,
     )
     prompt_app = TMPromptApp(
         agent, model, banner=_startup_banner(model, resources, no_context_files)
@@ -489,6 +519,14 @@ def main(
     no_auto_compact: bool = typer.Option(
         False, "--no-auto-compact", help="Disable automatic context compaction."
     ),
+    telemetry_flag: bool = typer.Option(
+        False, "--telemetry", help="Write redacted spans to <config>/telemetry.jsonl."
+    ),
+    durable_flag: bool = typer.Option(
+        False,
+        "--durable",
+        help="Persist a durable restart point per run to <config>/state.jsonl.",
+    ),
     login: str | None = typer.Option(
         None, "--login", help="Store an API key for a provider and exit."
     ),
@@ -563,6 +601,9 @@ def main(
         all_sessions=all_sessions,
     )
 
+    telemetry = _make_telemetry(telemetry_flag or settings.telemetry)
+    store = _make_store(durable_flag or settings.durable)
+
     async def run() -> None:
         try:
             if tools:
@@ -577,6 +618,8 @@ def main(
                     no_context_files=no_context_files,
                     no_auto_compact=no_auto_compact,
                     json_output=json_output,
+                    telemetry=telemetry,
+                    store=store,
                 )
                 if text:
                     await agent.prompt(text)
@@ -611,6 +654,8 @@ def main(
                 no_context_files,
                 no_auto_compact,
                 resume_on_start,
+                telemetry,
+                store,
             )
         else:
             asyncio.run(run())

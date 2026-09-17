@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 
 from tm.ai.providers.base import Provider, StreamOptions
 from tm.ai.types import (
+    AssistantMessage,
     Context,
     Message,
     Model,
@@ -24,9 +26,20 @@ from tm.core.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
+    TurnStartEvent,
 )
 from tm.core.loop import LoopHooks, StreamFn, agent_loop
+from tm.core.operation import Operation, OperationStatus, PendingEffect
 from tm.core.session import Session
+from tm.core.store import Store
+from tm.telemetry import (
+    SPAN_OPERATION,
+    SPAN_TOOL,
+    NoopTelemetry,
+    Span,
+    Telemetry,
+    TelemetryContext,
+)
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.utils.abort import AbortSignal
 
@@ -89,6 +102,8 @@ class Agent:
         auto_compact: bool = False,
         compact_threshold: float = 0.8,
         compact_keep_recent: int = 6,
+        telemetry: Telemetry | None = None,
+        store: Store | None = None,
     ) -> None:
         self.model = model
         self.provider = provider
@@ -104,6 +119,11 @@ class Agent:
         self.max_tokens = max_tokens
         self.before_tool_call: BeforeToolCall | None = None
         self.after_tool_call: AfterToolCall | None = None
+        self.telemetry: Telemetry = telemetry or NoopTelemetry()
+        self.store = store
+        self.operation: Operation | None = None
+        self._trace_id = ""
+        self._operation_span_id: str | None = None
 
         if stream_fn is None and provider is None:
             raise ValueError("Agent requires either a provider or a stream_fn")
@@ -178,6 +198,8 @@ class Agent:
         return unsubscribe
 
     async def _emit(self, event: AgentEvent) -> None:
+        if self.operation is not None and isinstance(event, TurnStartEvent):
+            self.operation.set_turn(event.turn)
         for listener in list(self._listeners):
             await listener(event)
 
@@ -220,6 +242,29 @@ class Agent:
             take_steering=self._take_steering,
             take_follow_up=self._take_follow_up,
         )
+        context = TelemetryContext(trace_id=uuid.uuid4().hex)
+        span_id = self.telemetry.start(
+            Span(
+                SPAN_OPERATION,
+                {
+                    "model": f"{self.model.provider}/{self.model.id}",
+                    "new_entries": len(new_messages),
+                },
+            ),
+            context,
+        )
+        self._trace_id = context.trace_id
+        self._operation_span_id = span_id or None
+        child_context = TelemetryContext(
+            trace_id=context.trace_id, parent_id=self._operation_span_id
+        )
+        operation = (
+            Operation.accept(uuid.uuid4().hex[:12], self.store, kind="run")
+            if self.store is not None
+            else None
+        )
+        self.operation = operation
+        status = "ok"
         try:
             self._messages = await agent_loop(
                 messages=self._messages,
@@ -230,13 +275,44 @@ class Agent:
                 options=options,
                 hooks=hooks,
                 max_turns=self.max_turns,
+                telemetry=self.telemetry,
+                context=child_context,
             )
+        except BaseException:
+            status = "error"
+            raise
         finally:
             self._running = False
+            if status == "ok":
+                status = self._final_run_status()
+            self.telemetry.end(span_id, context, status=status)
+            if operation is not None:
+                operation.settle(
+                    self._terminal_status(status), message_count=len(self._messages)
+                )
         if self.session is not None:
             for message in self._messages[persist_from:]:
                 self.session.append(message)
         return new_messages
+
+    def _final_run_status(self) -> str:
+        if self._signal is not None and self._signal.aborted:
+            return "aborted"
+        for message in reversed(self._messages):
+            if isinstance(message, AssistantMessage):
+                if message.stop_reason == "error":
+                    return "error"
+                if message.stop_reason == "aborted":
+                    return "aborted"
+                return "ok"
+        return "ok"
+
+    def _terminal_status(self, status: str) -> OperationStatus:
+        if status == "error":
+            return OperationStatus.FAILED
+        if status == "aborted":
+            return OperationStatus.ABORTED
+        return OperationStatus.COMPLETED
 
     def _provider_stream(self, model: Model, context: Context, options: StreamOptions):
         assert self.provider is not None
@@ -268,6 +344,25 @@ class Agent:
 
     async def _exec_entry(self, entry: _Entry) -> ToolResultMessage:
         call = entry.call
+        context = TelemetryContext(
+            trace_id=self._trace_id or uuid.uuid4().hex,
+            parent_id=self._operation_span_id,
+        )
+        span_id = self.telemetry.start(
+            Span(SPAN_TOOL, {"tool": call.name}),
+            context,
+        )
+        span_status = "ok"
+        try:
+            return await self._exec_entry_inner(entry)
+        except BaseException:
+            span_status = "error"
+            raise
+        finally:
+            self.telemetry.end(span_id, context, status=span_status)
+
+    async def _exec_entry_inner(self, entry: _Entry) -> ToolResultMessage:
+        call = entry.call
         if entry.error is not None or entry.tool is None or entry.args is None:
             result = text_result(entry.error or "Tool unavailable", is_error=True)
             await self._emit(
@@ -298,11 +393,27 @@ class Agent:
                 tool_call_id=call.id, tool_name=call.name, arguments=call.arguments
             )
         )
-        context = ToolContext(cwd=self.cwd, signal=self._signal, on_update=on_update)
+        tool_context = ToolContext(cwd=self.cwd, signal=self._signal, on_update=on_update)
+        operation = self.operation
+        if operation is not None:
+            # Intent before the uncertain effect: if the process dies here, the
+            # durable state says a tool may or may not have run.
+            operation.begin_effect(
+                PendingEffect(
+                    tool_name=call.name,
+                    call_id=call.id,
+                    arguments=call.arguments,
+                    replay_safe=entry.tool.replay_safe,
+                ),
+                turn=operation.state.turn,
+            )
         try:
-            result = await entry.tool.execute(call.id, entry.args, context)
+            result = await entry.tool.execute(call.id, entry.args, tool_context)
         except Exception as exc:  # noqa: BLE001 - tool failures become error results
             result = text_result(f"{type(exc).__name__}: {exc}", is_error=True)
+        finally:
+            if operation is not None:
+                operation.settle_effect(message_count=len(self._messages))
 
         if self.after_tool_call is not None:
             result = await _maybe_await(self.after_tool_call(call, entry.args, result))

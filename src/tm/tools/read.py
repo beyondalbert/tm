@@ -17,6 +17,7 @@ class ReadTool(Tool[ReadParams]):
     name = "read"
     description = "Read a UTF-8 text file, with optional 1-based offset and line limit."
     parameters_model = ReadParams
+    replay_safe = True
 
     async def execute(self, call_id: str, args: ReadParams, ctx: ToolContext) -> ToolResult:
         path = resolve_path(ctx.cwd, args.path)

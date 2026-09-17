@@ -37,6 +37,13 @@ from tm.core.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from tm.telemetry import (
+    SPAN_TURN,
+    NoopTelemetry,
+    Span,
+    Telemetry,
+    TelemetryContext,
+)
 
 StreamFn = Callable[
     [Model, Context, StreamOptions],
@@ -65,16 +72,22 @@ async def agent_loop(
     options: StreamOptions,
     hooks: LoopHooks,
     max_turns: int = 100,
+    telemetry: Telemetry | None = None,
+    context: TelemetryContext | None = None,
 ) -> list[Message]:
+    telemetry = telemetry or NoopTelemetry()
+    context = context or TelemetryContext(trace_id="")
     history = list(messages)
     await hooks.emit(AgentStartEvent())
     turn = 0
     while turn < max_turns:
         turn += 1
         await hooks.emit(TurnStartEvent(turn=turn))
+        turn_span = telemetry.start(Span(SPAN_TURN, {"turn": turn}), context)
+        turn_status = "ok"
 
-        context = Context(system_prompt=system_prompt, messages=history, tools=tools)
-        stream = stream_fn(model, context, options)
+        loop_context = Context(system_prompt=system_prompt, messages=history, tools=tools)
+        stream = stream_fn(model, loop_context, options)
         async for event in stream:
             if isinstance(event, StartEvent) and event.partial is not None:
                 await hooks.emit(MessageStartEvent(message=event.partial))
@@ -86,6 +99,8 @@ async def agent_loop(
         await hooks.emit(MessageEndEvent(message=assistant))
 
         if assistant.stop_reason in ("error", "aborted"):
+            turn_status = "error"
+            telemetry.end(turn_span, context, status=turn_status)
             break
 
         if assistant.tool_calls:
@@ -95,6 +110,7 @@ async def agent_loop(
                 await hooks.emit(MessageStartEvent(message=result))
                 await hooks.emit(MessageEndEvent(message=result))
 
+        telemetry.end(turn_span, context, status=turn_status)
         await hooks.emit(TurnEndEvent(turn=turn))
 
         steering = hooks.take_steering()
