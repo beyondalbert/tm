@@ -447,3 +447,23 @@ async def test_tui_file_autocomplete(tmp_path, monkeypatch) -> None:
         await pilot.press("tab")
         await pilot.pause()
         assert prompt.value.startswith("@hello.txt")
+
+
+async def test_tui_enter_accepts_suggestion(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "/mod"
+        prompt.cursor_position = 4
+        await pilot.pause()
+        assert app.query_one("#suggestions").display is True
+
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert prompt.value.startswith("/model")
+        # accepted, not submitted: the agent never ran a prompt
+        assert agent.messages == []

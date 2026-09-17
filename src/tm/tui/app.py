@@ -314,6 +314,11 @@ class PromptInput(Input):
                 event.prevent_default()
                 app.accept_suggestion()
                 return
+            if event.key == "enter" and app.accepts_enter():
+                event.stop()
+                event.prevent_default()
+                app.accept_suggestion()
+                return
             if event.key == "down":
                 event.stop()
                 event.prevent_default()
@@ -484,6 +489,22 @@ class TMPromptApp(App[None]):
     @property
     def suggestions_active(self) -> bool:
         return bool(self._suggestions)
+
+    def accepts_enter(self) -> bool:
+        """Enter completes only when the suggestion extends the typed token.
+
+        Pressing Enter on an already-complete token (e.g. ``/new``) submits it
+        instead of replacing it.
+        """
+        if not self._suggestions or self._suggestion_span is None:
+            return False
+        options = self.query_one("#suggestions", OptionList)
+        index = options.highlighted if options.highlighted is not None else 0
+        if not 0 <= index < len(self._suggestions):
+            return False
+        value = self._suggestions[index].value
+        token = self._suggestion_span.token
+        return value.startswith(token) and value != token
 
     def _file_index_for_cwd(self) -> FileIndex:
         if self._file_index is None:
