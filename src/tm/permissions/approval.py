@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from rich.console import Console
 
-from tm.permissions.actions import Action
+from tm.permissions.actions import Action, ActionKind
 
 
 @dataclass
@@ -32,17 +33,31 @@ class AutoAllowApprover:
 
 
 class ConsoleApprover:
-    """Ask the user on the terminal. 'always' remembers the decision."""
+    """Ask the user on the terminal. 'always' remembers a scope (a folder for
+    file actions, the exact command/host otherwise)."""
 
     def __init__(self, console: Console | None = None) -> None:
         self.console = console or Console()
+
+    @staticmethod
+    def _scope(action: Action) -> str:
+        if action.kind in (ActionKind.FILE_READ, ActionKind.FILE_WRITE):
+            path = Path(action.target).expanduser()
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            folder = path if path.is_dir() else path.parent
+            return f"this folder ({folder})"
+        if action.kind is ActionKind.SHELL:
+            return "this command"
+        return "this host"
 
     async def request(self, action: Action, reason: str) -> ApprovalOutcome:
         self.console.print(
             f"[bold yellow]permission[/bold yellow] {action.describe()} [dim]({reason})[/dim]"
         )
+        prompt = f"  allow? [y]es once / [a]lways {self._scope(action)} / [n]o: "
         try:
-            answer = await asyncio.to_thread(input, "  allow? [y]es/[n]o/[a]lways: ")
+            answer = await asyncio.to_thread(input, prompt)
         except EOFError:
             return ApprovalOutcome(allowed=False)
         normalized = answer.strip().lower()

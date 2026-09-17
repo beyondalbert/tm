@@ -157,3 +157,68 @@ async def test_permission_hook_allows(tmp_path: Path) -> None:
 
     call = ToolCall(id="1", name="read", arguments={"path": "x.txt"})
     assert await hook(call, None) is None
+
+
+def test_folder_rule_covers_subtree(tmp_path: Path) -> None:
+    policy = Policy.from_dict({"files": {"write": {"allow": ["src"]}}}, cwd=tmp_path)
+    assert policy.evaluate(Action(ActionKind.FILE_WRITE, "src/a/b.txt", "write"))[0] is Decision.ALLOW
+    assert policy.evaluate(Action(ActionKind.FILE_WRITE, "src", "write"))[0] is Decision.ALLOW
+    assert policy.evaluate(Action(ActionKind.FILE_WRITE, "other/b.txt", "write"))[0] is Decision.ASK
+
+
+def test_folder_rule_with_glob_forms(tmp_path: Path) -> None:
+    for pattern in ("src", "src/", "src/**"):
+        policy = Policy.from_dict({"files": {"read": {"allow": [pattern]}}}, cwd=tmp_path)
+        assert policy.evaluate(Action(ActionKind.FILE_READ, "src/a/b.txt", "read"))[0] is Decision.ALLOW
+
+
+def test_folder_deny_covers_subtree(tmp_path: Path) -> None:
+    policy = Policy.from_dict(
+        {"default": "allow", "files": {"read": {"deny": ["secrets"]}}}, cwd=tmp_path
+    )
+    assert policy.evaluate(Action(ActionKind.FILE_READ, "secrets/token.txt", "read"))[0] is Decision.DENY
+    assert policy.evaluate(Action(ActionKind.FILE_READ, "src/app.py", "read"))[0] is Decision.ALLOW
+
+
+async def test_always_allows_remember_the_folder(tmp_path: Path) -> None:
+    policy = Policy.from_dict({"default": "ask"}, cwd=tmp_path)
+
+    class RememberOnce:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request(self, action, reason) -> ApprovalOutcome:
+            self.calls += 1
+            return ApprovalOutcome(allowed=True, remember=True)
+
+    approver = RememberOnce()
+    checker = PermissionChecker(policy, approver=approver)
+
+    assert await checker.authorize(Action(ActionKind.FILE_READ, "src/a/f1.txt")) is True
+    # same folder: remembered, no second prompt
+    assert await checker.authorize(Action(ActionKind.FILE_READ, "src/a/f2.txt")) is True
+    assert approver.calls == 1
+    # different folder: prompt again
+    assert await checker.authorize(Action(ActionKind.FILE_READ, "other/f.txt")) is True
+    assert approver.calls == 2
+
+
+async def test_always_command_remembers_exact_command(tmp_path: Path) -> None:
+    policy = Policy.from_dict({"default": "ask"}, cwd=tmp_path)
+
+    class RememberOnce:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request(self, action, reason) -> ApprovalOutcome:
+            self.calls += 1
+            return ApprovalOutcome(allowed=True, remember=True)
+
+    approver = RememberOnce()
+    checker = PermissionChecker(policy, approver=approver)
+
+    assert await checker.authorize(Action(ActionKind.SHELL, "git status")) is True
+    assert await checker.authorize(Action(ActionKind.SHELL, "git status")) is True
+    assert approver.calls == 1
+    assert await checker.authorize(Action(ActionKind.SHELL, "git push")) is True
+    assert approver.calls == 2

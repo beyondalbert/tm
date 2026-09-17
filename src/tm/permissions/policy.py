@@ -46,6 +46,31 @@ def _match_any(patterns: list[str], candidates: list[str]) -> bool:
     return False
 
 
+def _pattern_forms(pattern: str) -> list[str]:
+    """Expand a rule into the forms that make it folder-aware.
+
+    A rule naming a directory (``src`` or ``src/**``) should cover the whole
+    subtree, so ``src`` also matches ``src/a/b.txt``. ``**`` already matches
+    across separators.
+    """
+    base = _posix(pattern).rstrip("/")
+    if not base:
+        base = _posix(pattern)
+    forms = {base, f"{base}/**"}
+    if base.endswith("/**"):
+        forms.add(base[:-3].rstrip("/"))
+    return [form for form in forms if form]
+
+
+def _file_matches(patterns: list[str], candidates: list[str]) -> bool:
+    for pattern in patterns:
+        for form in _pattern_forms(pattern):
+            for candidate in candidates:
+                if fnmatch.fnmatch(candidate, form):
+                    return True
+    return False
+
+
 def _command_candidates(command: str) -> list[str]:
     tokens = command.strip().split()
     candidates = {command.strip()}
@@ -105,7 +130,7 @@ class Policy(BaseModel):
         if not patterns:
             return False
         if action.kind in (ActionKind.FILE_READ, ActionKind.FILE_WRITE):
-            return _match_any(patterns, _path_candidates(action.target, self.cwd))
+            return _file_matches(patterns, _path_candidates(action.target, self.cwd))
         if action.kind is ActionKind.SHELL:
             return _match_any(patterns, _command_candidates(action.target))
         return _match_any([p.lower() for p in patterns], [_posix(action.target).lower()])

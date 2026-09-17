@@ -34,11 +34,35 @@ class PermissionChecker:
         self.policy = policy
         self.approver: Approver = approver or AutoDenyApprover()
         self.audit = audit or AuditLog(None)
-        self._remembered: set[str] = set()
+        # "Always allow" remembers a scope: the containing folder for file
+        # actions, the exact command/host otherwise.
+        self._remembered_folders: set[Path] = set()
+        self._remembered_keys: set[str] = set()
+
+    def _absolute(self, action: Action) -> Path:
+        path = Path(action.target).expanduser()
+        if not path.is_absolute():
+            path = self.policy.cwd / path
+        return path.resolve()
+
+    def _is_remembered(self, action: Action) -> bool:
+        if action.kind in (ActionKind.FILE_READ, ActionKind.FILE_WRITE):
+            path = self._absolute(action)
+            return any(path == folder or folder in path.parents for folder in self._remembered_folders)
+        return action.key in self._remembered_keys
+
+    def _remember(self, action: Action) -> str:
+        if action.kind in (ActionKind.FILE_READ, ActionKind.FILE_WRITE):
+            path = self._absolute(action)
+            folder = path if path.is_dir() else path.parent
+            self._remembered_folders.add(folder)
+            return str(folder)
+        self._remembered_keys.add(action.key)
+        return action.key
 
     async def authorize(self, action: Action) -> bool:
         decision, reason = self.policy.evaluate(action)
-        if decision is Decision.ASK and action.key in self._remembered:
+        if decision is Decision.ASK and self._is_remembered(action):
             decision, reason = Decision.ALLOW, "remembered decision"
 
         if decision is Decision.ALLOW:
@@ -50,12 +74,15 @@ class PermissionChecker:
 
         outcome = await self.approver.request(action, reason)
         if outcome.remember and outcome.allowed:
-            self._remembered.add(action.key)
+            scope = self._remember(action)
+            reason = f"user decision (remembered {scope})"
+        else:
+            reason = "user decision"
         self.audit.record(
             action=action,
             decision=Decision.ALLOW if outcome.allowed else Decision.DENY,
             allowed=outcome.allowed,
-            reason="user decision",
+            reason=reason,
         )
         return outcome.allowed
 
