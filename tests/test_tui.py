@@ -261,6 +261,24 @@ async def test_tui_renders_provider_error_without_start_event() -> None:
         assert "Error: boom" in str(errors.first().render())
 
 
+def test_tui_has_copy_binding() -> None:
+    from textual.binding import Binding
+
+    keys = {
+        binding.key if isinstance(binding, Binding) else binding[0]
+        for binding in TMPromptApp.BINDINGS
+    }
+    assert "ctrl+shift+c" in keys
+
+
+async def test_copy_selection_action_is_safe_without_selection() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.action_copy_selection()  # no selection: must not raise
+
+
 def test_tool_title_formats() -> None:
     from tm.tui.app import tool_title
 

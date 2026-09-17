@@ -82,11 +82,14 @@ async def test_model_switch(tmp_path: Path) -> None:
     commands, emitted, _ = make_commands(tmp_path, agent)
 
     await commands.handle("model")
-    assert "providers:" in emitted[-1]
+    assert "deepseek: deepseek-v4-pro, deepseek-flash" in emitted[-1]
 
     await commands.handle("model deepseek-v4-pro")
     assert agent.model.id == "deepseek-v4-pro"
     assert agent.provider is not None and agent.provider.id == "deepseek"
+
+    await commands.handle("model deepseek-flash")
+    assert agent.model.id == "deepseek-flash"
 
 
 async def test_skill_and_skills(tmp_path: Path) -> None:

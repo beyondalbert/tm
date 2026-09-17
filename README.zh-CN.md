@@ -147,6 +147,34 @@ Anthropic 与 Google 使用官方 SDK；其余使用 OpenAI 兼容适配器。`o
 
 列出模型：`tm --list-models`。
 
+### 自定义 Provider 与模型
+
+在 `<config>/models.toml`（Windows：`%APPDATA%\the-machine\models.toml`）里定义自己的
+provider（任意 OpenAI 兼容、Anthropic 或 Google 端点）或额外模型。它会合并到内置目录之上，
+`tm --list-models` 与 `/model` 会直接生效，无需改代码。
+
+```toml
+[providers.myprovider]
+name = "My Provider"
+api = "openai-completions"          # 或 anthropic-messages / google-generative-ai
+base_url = "https://api.example.com/v1"
+api_key_env = "MYPROVIDER_API_KEY"  # 名字，或名字列表
+default_model = "my-model"
+
+[[providers.myprovider.models]]
+id = "my-model"
+context_window = 32768
+max_tokens = 4096
+
+# 给内置 provider 追加或覆盖模型
+[[providers.deepseek.models]]
+id = "deepseek-v4-lite"
+context_window = 65536
+```
+
+用 `tm --login myprovider` 保存密钥，或设置上面命名的环境变量。
+用 `/model my-model` 或 `tm --model my-model` 切换到自定义模型。
+
 ## 运行模式
 
 | 命令 | 行为 |
@@ -166,11 +194,17 @@ Anthropic 与 Google 使用官方 SDK；其余使用 OpenAI 兼容适配器。`o
 | `tm --no-auto-compact` | 关闭自动上下文压缩 |
 | `tm --telemetry` | 将脱敏 span 写入 `<config>/telemetry.jsonl` |
 | `tm --durable` | 为每次运行在 `<config>/state.jsonl` 持久化重启点 |
+| `tm --no-mouse` | 让终端接管鼠标选择/复制 |
 
 上下文文件（`AGENTS.md` / `CLAUDE.md`，从当前目录向上查找，外加全局配置目录）会追加到
 系统提示词。用 `--no-context-files` 关闭。
 
 当 stdout 不是终端（被管道/重定向）或未安装 `textual` 时，`tm` 会自动回退为控制台 REPL。
+
+**复制文本。** TUI 会捕获鼠标以便内置选择与滚动。按住拖动选中文字后按 `Ctrl+C`（或
+`Ctrl+Shift+C`）复制；Textual 通过 OSC52 写入剪贴板，多数终端支持。如果没有效果，用
+`--no-mouse` 启动 TUI，改用终端自带的选择（多数终端为 Shift+拖动）。可在 settings 里设
+`mouse = false` 使其成为默认。
 
 ## 权限
 
@@ -214,7 +248,7 @@ allow = ["api.deepseek.com"]
 | 命令 | 说明 |
 |---|---|
 | `/help` | 列出命令 |
-| `/model [pattern]` | 列出 Provider 或切换模型 |
+| `/model [pattern]` | 列出模型或切换模型 |
 | `/new` | 新建会话 |
 | `/session` | 显示当前会话 id/路径 |
 | `/resume [n\|id]` | 恢复已保存会话（不带参数弹出选择器） |

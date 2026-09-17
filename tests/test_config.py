@@ -26,6 +26,12 @@ def test_load_settings_reads_toml(tmp_path: Path, monkeypatch) -> None:
     assert settings.model == "qwen-max"
 
 
+def test_load_settings_tolerates_bom(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "settings.toml").write_bytes(b'\xef\xbb\xbfprovider = "qwen"\n')
+    assert load_settings().provider == "qwen"
+
+
 def test_save_and_load_credentials(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
     assert load_credentials() == {}

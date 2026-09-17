@@ -60,7 +60,7 @@ class CommandContext:
 
 HELP = """commands:
   /help                 show this help
-  /model [pattern]      list or switch models
+  /model [pattern]      list models or switch model
   /new                  start a new session
   /session              show current session info
   /resume [n|id]        resume a saved session (picker when no argument)
@@ -288,8 +288,11 @@ class SlashCommands:
     def _model(self, argument: str) -> None:
         registry = self.ctx.registry
         if not argument:
-            lines = [f"{preset.id}: {preset.default_model}" for preset in registry.presets()]
-            self._emit("providers:\n" + "\n".join(lines))
+            lines = []
+            for preset in registry.presets():
+                models = ", ".join(model.id for model in preset.models)
+                lines.append(f"{preset.id}: {models or '(none)'}")
+            self._emit("models (/model <id> to switch):\n" + "\n".join(lines))
             return
         try:
             provider, model = registry.resolve(argument, None)

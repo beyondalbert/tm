@@ -26,6 +26,17 @@ def settings_path() -> Path:
     return config_dir() / "settings.toml"
 
 
+def read_toml(path: Path) -> dict:
+    """Parse a TOML file, tolerating a UTF-8 BOM (common from Windows editors)."""
+    data = path.read_bytes()
+    if data.startswith(b"\xef\xbb\xbf"):
+        data = data[3:]
+    parsed = tomllib.loads(data.decode("utf-8"))
+    if not isinstance(parsed, dict):  # tomllib always returns a dict; guard for mypy
+        return {}
+    return parsed
+
+
 def credentials_path() -> Path:
     return config_dir() / "credentials.toml"
 
@@ -42,6 +53,7 @@ class Settings:
     compact_keep_recent: int = 6
     telemetry: bool = False
     durable: bool = False
+    mouse: bool = True
 
 
 def load_settings() -> Settings:
@@ -49,8 +61,7 @@ def load_settings() -> Settings:
     settings = Settings()
     if not path.exists():
         return settings
-    with path.open("rb") as handle:
-        data = tomllib.load(handle)
+    data = read_toml(path)
     known = {f.name for f in fields(Settings)}
     for key, value in data.items():
         if key in known:
@@ -81,8 +92,7 @@ def load_credentials() -> dict[str, str]:
     if not path.exists():
         return {}
     try:
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
+        data = read_toml(path)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
     providers = data.get("providers", {})
@@ -124,6 +134,7 @@ __all__ = [
     "credentials_path",
     "load_credentials",
     "load_settings",
+    "read_toml",
     "sanitize_api_key",
     "save_credential",
     "settings_path",

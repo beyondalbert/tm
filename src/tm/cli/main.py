@@ -23,6 +23,7 @@ from tm.ai.types import (
     ThinkingDeltaEvent,
     UserMessage,
 )
+from tm.ai.user_models import UserModelError, load_presets
 from tm.cli.commands import CommandContext, ExitSignal, SlashCommands, _format_time
 from tm.cli.console_ui import ConsoleAgentUI
 from tm.config import (
@@ -155,6 +156,15 @@ def _make_approver(yolo: bool):
     if sys.stdin.isatty():
         return ConsoleApprover(console)
     return AutoDenyApprover()
+
+
+def _make_registry() -> Registry:
+    try:
+        presets = load_presets(config_dir())
+    except UserModelError as exc:
+        console.print(f"[red]models.toml: {exc}[/red]")
+        presets = None
+    return Registry(presets=presets, api_keys=load_credentials())
 
 
 def _make_telemetry(enabled: bool) -> Telemetry:
@@ -374,6 +384,7 @@ def _run_tui(
     resume_on_start: bool,
     telemetry: Telemetry,
     store: Store | None,
+    mouse: bool,
 ) -> None:
     from tm.tui import DeferredApprover, TextualApprover, TMPromptApp
 
@@ -398,7 +409,7 @@ def _run_tui(
     prompt_app.recover_on_start = bool(agent.pending_recovery())
     commands = _command_context(
         agent,
-        Registry(api_keys=load_credentials()),
+        _make_registry(),
         session,
         session_manager,
         resources,
@@ -407,7 +418,7 @@ def _run_tui(
     )
     prompt_app.command_handler = commands.handle
     deferred.set(TextualApprover(prompt_app))
-    prompt_app.run()
+    prompt_app.run(mouse=mouse)
 
 
 async def _agent_repl(
@@ -529,6 +540,11 @@ def main(
         "--durable",
         help="Persist a durable restart point per run to <config>/state.jsonl.",
     ),
+    no_mouse: bool = typer.Option(
+        False,
+        "--no-mouse",
+        help="Let the terminal handle mouse selection/copy (disables in-app mouse).",
+    ),
     login: str | None = typer.Option(
         None, "--login", help="Store an API key for a provider and exit."
     ),
@@ -540,7 +556,7 @@ def main(
         raise typer.Exit()
 
     settings = load_settings()
-    registry = Registry(api_keys=load_credentials())
+    registry = _make_registry()
 
     if login is not None:
         known = {preset.id for preset in registry.presets()}
@@ -607,6 +623,7 @@ def main(
 
     telemetry = _make_telemetry(telemetry_flag or settings.telemetry)
     store = _make_store(durable_flag or settings.durable)
+    mouse = settings.mouse and not no_mouse
 
     async def run() -> None:
         try:
@@ -662,6 +679,7 @@ def main(
                 resume_on_start,
                 telemetry,
                 store,
+                mouse,
             )
         else:
             asyncio.run(run())

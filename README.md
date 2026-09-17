@@ -152,6 +152,35 @@ adapter. `ollama` and other local servers need no key.
 
 List models: `tm --list-models`.
 
+### Custom providers and models
+
+Define your own provider (any OpenAI-compatible, Anthropic, or Google endpoint)
+or extra models in `<config>/models.toml` (Windows:
+`%APPDATA%\the-machine\models.toml`). It is merged over the built-in catalog, so
+`tm --list-models` and `/model` pick it up without editing code.
+
+```toml
+[providers.myprovider]
+name = "My Provider"
+api = "openai-completions"          # or anthropic-messages / google-generative-ai
+base_url = "https://api.example.com/v1"
+api_key_env = "MYPROVIDER_API_KEY"  # a name, or a list of names
+default_model = "my-model"
+
+[[providers.myprovider.models]]
+id = "my-model"
+context_window = 32768
+max_tokens = 4096
+
+# add or override models on a built-in provider
+[[providers.deepseek.models]]
+id = "deepseek-v4-lite"
+context_window = 65536
+```
+
+Store the key with `tm --login myprovider`, or set the env var named above.
+Switch to a custom model with `/model my-model` or `tm --model my-model`.
+
 ## Modes
 
 | Command | Behavior |
@@ -171,12 +200,19 @@ List models: `tm --list-models`.
 | `tm --no-auto-compact` | Disable automatic context compaction |
 | `tm --telemetry` | Write redacted spans to `<config>/telemetry.jsonl` |
 | `tm --durable` | Persist a durable restart point per run to `<config>/state.jsonl` |
+| `tm --no-mouse` | Let the terminal handle mouse selection/copy |
 
 Context files (`AGENTS.md` / `CLAUDE.md`, walking up from cwd, plus the global
 config dir) are appended to the system prompt. Disable with `--no-context-files`.
 
 When stdout is not a terminal (piped or redirected) or `textual` is not
 installed, `tm` falls back to the console REPL automatically.
+
+**Copying text.** The TUI captures the mouse for in-app selection and scrolling.
+Drag to select text and press `Ctrl+C` (or `Ctrl+Shift+C`) to copy it; Textual
+copies via OSC52, which most terminals support. If copying does nothing, start
+the TUI with `--no-mouse` and use the terminal's own selection (Shift+drag on
+most terminals). Set `mouse = false` in settings to make that the default.
 
 ## Permissions
 
@@ -224,7 +260,7 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 | Command | Description |
 |---|---|
 | `/help` | list commands |
-| `/model [pattern]` | list providers or switch model |
+| `/model [pattern]` | list models or switch model |
 | `/new` | start a new session |
 | `/session` | show current session id/path |
 | `/resume [n\|id]` | resume a saved session (`/resume` opens a picker) |

@@ -322,6 +322,7 @@ class TMPromptApp(App[None]):
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+o", "toggle_tools", "Expand tools"),
+        Binding("ctrl+shift+c", "copy_selection", "Copy selection", show=False),
     ]
 
     def __init__(self, agent: Agent, model: Model, *, banner: str | None = None) -> None:
@@ -383,6 +384,12 @@ class TMPromptApp(App[None]):
         self._expanded = not self._expanded
         for widget in self.query(ToolWidget):
             widget.set_expanded(self._expanded)
+
+    def action_copy_selection(self) -> None:
+        """Copy the current mouse selection (Ctrl+C / Ctrl+Shift+C)."""
+        selection = self.screen.get_selected_text()
+        if selection:
+            self.copy_to_clipboard(selection)
 
     # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
