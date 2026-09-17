@@ -381,3 +381,32 @@ async def test_auto_command_toggles_the_session_approver(tmp_path: Path) -> None
 
     await commands.handle("auto")
     assert approver.auto is False
+
+
+async def test_copy_command_copies_the_last_reply(tmp_path: Path, monkeypatch) -> None:
+    copied: list[str] = []
+
+    def fake(text: str) -> bool:
+        copied.append(text)
+        return True
+
+    monkeypatch.setattr("tm.cli.commands.copy_to_clipboard", fake)
+    messages = [
+        AssistantMessage(content=[TextContent(text="first")], stop_reason="stop"),
+        AssistantMessage(content=[TextContent(text="second")], stop_reason="stop"),
+    ]
+    commands, emitted, _ = make_commands(tmp_path, make_agent(messages))
+
+    await commands.handle("copy")
+    assert copied == ["second"]
+    assert "copied" in emitted[-1]
+
+    await commands.handle("copy 2")
+    assert copied[-1] == "first"
+
+
+async def test_copy_command_with_no_replies(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("tm.cli.commands.copy_to_clipboard", lambda text: True)
+    commands, emitted, _ = make_commands(tmp_path)
+    await commands.handle("copy")
+    assert "nothing to copy" in emitted[-1]

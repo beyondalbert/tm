@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import io
 import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from rich.markdown import Markdown
+from rich.console import Console
+from rich.markdown import Markdown as RichMarkdown
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.content import Content
 from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widget import Widget
@@ -28,6 +31,7 @@ from tm.cli.autocomplete import (
     detect,
 )
 from tm.cli.commands import COMMAND_SPECS, ExitSignal
+from tm.clipboard import copy_to_clipboard
 from tm.core.agent import Agent
 from tm.core.compaction import estimate_tokens
 from tm.core.events import (
@@ -117,11 +121,45 @@ def tool_title(name: str, arguments: dict) -> Text:
     return text
 
 
+def render_markdown(markdown: str, width: int) -> Content:
+    """Render Markdown to a Rich-styled ``Content``.
+
+    Textual can only select text from ``Text``/``Content`` visuals, so a plain
+    ``Markdown`` renderable is not copyable. Rendering it to ``Content`` keeps
+    the styling and makes the block selectable with correct offsets.
+    """
+    width = max(width, 1)
+    console = Console(
+        width=width,
+        file=io.StringIO(),
+        force_terminal=True,
+        color_system="truecolor",
+    )
+    text = Text()
+    for segment in console.render(RichMarkdown(markdown), console.options.update_width(width)):
+        text.append(segment.text, segment.style)
+    return Content.from_rich_text(text)
+
+
 class UserMessageWidget(Static):
     """User text on a full-width background block with vertical padding."""
 
     def __init__(self, text: str) -> None:
-        super().__init__(Markdown(text.strip(), style=_TEXT), classes="user")
+        super().__init__(classes="user")
+        self._text = text.strip()
+
+    def on_mount(self) -> None:
+        self._render_markdown()
+
+    def on_resize(self) -> None:
+        self._render_markdown()
+
+    def _render_markdown(self) -> None:
+        if not self._text:
+            return
+        width = self.size.width or self.app.size.width - 2
+        if width > 0:
+            self.update(render_markdown(self._text, width))
 
 
 class AssistantMessageWidget(Vertical):
@@ -132,6 +170,7 @@ class AssistantMessageWidget(Vertical):
         self._thinking = Static(Text(""), classes="thinking")
         self._body = Static(Text(""), classes="body")
         self._error = Static(Text(""), classes="error")
+        self._text = ""
         for widget in (self._thinking, self._body, self._error):
             widget.display = False
 
@@ -147,8 +186,9 @@ class AssistantMessageWidget(Vertical):
         else:
             self._thinking.display = False
 
-        if text.strip():
-            self._body.update(Markdown(text.strip()))
+        self._text = text.strip()
+        if self._text:
+            self._render_body()
             self._body.display = True
         else:
             self._body.display = False
@@ -158,6 +198,16 @@ class AssistantMessageWidget(Vertical):
             self._error.display = True
         else:
             self._error.display = False
+
+    def on_resize(self) -> None:
+        self._render_body()
+
+    def _render_body(self) -> None:
+        if not self._text:
+            return
+        width = self._body.size.width or self.size.width or self.app.size.width - 2
+        if width > 0:
+            self._body.update(render_markdown(self._text, width))
 
 
 class ToolWidget(Vertical):
@@ -490,10 +540,32 @@ class TMPromptApp(App[None]):
         self._update_footer()
 
     def action_copy_selection(self) -> None:
-        """Copy the current mouse selection (Ctrl+C / Ctrl+Shift+C)."""
+        """Copy the mouse selection, or the last reply, to the system clipboard."""
         selection = self.screen.get_selected_text()
         if selection:
-            self.copy_to_clipboard(selection)
+            self._copy(selection, "selection")
+            return
+        reply = self._last_reply()
+        if reply:
+            self._copy(reply, "last reply")
+            return
+        self.notify("nothing to copy")
+
+    def _copy(self, text: str, label: str) -> None:
+        if copy_to_clipboard(text):
+            self.notify(f"copied {label}")
+            return
+        # Fall back to OSC 52 for terminals that support it.
+        self.copy_to_clipboard(text)
+        self.notify(f"copied {label} (OSC52)")
+
+    def _last_reply(self) -> str:
+        for message in reversed(self._agent.messages):
+            if isinstance(message, AssistantMessage):
+                text = message.text()
+                if text:
+                    return text
+        return ""
 
     # -- autocomplete -----------------------------------------------------
     @property

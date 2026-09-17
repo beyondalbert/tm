@@ -279,6 +279,49 @@ async def test_copy_selection_action_is_safe_without_selection() -> None:
         app.action_copy_selection()  # no selection: must not raise
 
 
+async def test_markdown_content_is_selectable() -> None:
+    from textual.widgets import Static
+
+    from tm.tui.app import render_markdown
+
+    class Harness(App):
+        def compose(self):
+            yield Static(render_markdown("hello **world**", 80), id="md")
+
+    harness = Harness()
+    async with harness.run_test() as pilot:
+        await pilot.pause()
+        widget = harness.query_one("#md")
+        await pilot.mouse_down(widget, offset=(0, 0))
+        await pilot.hover(widget, offset=(5, 0))
+        await pilot.mouse_up(widget, offset=(5, 0))
+        await pilot.pause()
+        selected = harness.screen.get_selected_text()
+        assert selected
+        assert selected.strip().startswith("hello")
+
+
+async def test_assistant_reply_body_is_selectable() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
+        prompt.value = "hi"
+        await pilot.pause()
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        body = app.query_one(".assistant .body")
+        await pilot.mouse_down(body, offset=(0, 0))
+        await pilot.hover(body, offset=(5, 0))
+        await pilot.mouse_up(body, offset=(5, 0))
+        await pilot.pause()
+        selected = app.screen.get_selected_text()
+        assert selected
+        assert selected.strip().startswith("hello")
+
+
 def test_tool_title_formats() -> None:
     from tm.tui.app import tool_title
 

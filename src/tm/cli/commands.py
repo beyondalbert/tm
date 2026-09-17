@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from tm.ai.registry import Registry, RegistryError
 from tm.ai.types import AssistantMessage, Message, ToolResultMessage, UserMessage
+from tm.clipboard import copy_to_clipboard
 from tm.core.agent import Agent
 from tm.core.session import Session, SessionInfo, SessionManager
 from tm.extensions import ExtensionAPI
@@ -79,6 +80,7 @@ COMMAND_SPECS: list[tuple[str, str]] = [
     ("compact", "summarize older context"),
     ("recover", "reconcile interrupted durable operations"),
     ("undo", "roll back the last change(s)"),
+    ("copy", "copy the last reply to the clipboard"),
     ("auto", "toggle auto-approve for this session"),
     ("trust", "trust or untrust this project"),
     ("skills", "list available skills"),
@@ -97,6 +99,7 @@ HELP = """commands:
   /compact [note]       summarize older context
   /recover              reconcile interrupted durable operations
   /undo [n]             roll back the last n reversible changes
+  /copy [n]             copy the nth-from-last reply to the clipboard
   /auto [on|off]        toggle auto-approve for this session
   /trust [off]          trust (or untrust) this project for future sessions
   /skills               list available skills
@@ -164,6 +167,9 @@ class SlashCommands:
             return None
         if command == "auto":
             self._auto(argument)
+            return None
+        if command == "copy":
+            self._copy(argument)
             return None
         if command == "trust":
             self._trust(argument)
@@ -427,6 +433,28 @@ class SlashCommands:
         else:
             approver.auto = not approver.auto
         self._emit(f"auto-approve {'on' if approver.auto else 'off'}")
+
+    def _copy(self, argument: str) -> None:
+        count = int(argument) if argument.strip().isdigit() else 1
+        replies = [
+            message
+            for message in self.ctx.agent.messages
+            if isinstance(message, AssistantMessage) and message.text()
+        ]
+        if not replies:
+            self._emit("nothing to copy")
+            return
+        if count < 1 or count > len(replies):
+            self._emit(f"only {len(replies)} assistant message(s)")
+            return
+        text = replies[-count].text()
+        if copy_to_clipboard(text):
+            self._emit(f"copied assistant message (-{count}) to the clipboard")
+        else:
+            self._emit(
+                "could not access the system clipboard; use --no-mouse and the "
+                "terminal's native copy instead"
+            )
 
     def _trust(self, argument: str) -> None:
         manager = self.ctx.trust_manager
