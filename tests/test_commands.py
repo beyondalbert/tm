@@ -277,7 +277,6 @@ async def test_recover_command_reruns_pending(tmp_path: Path) -> None:
     from tm.ai.types import ToolCall
     from tm.core.operation import Operation, PendingEffect
     from tm.core.session import SessionManager
-    from tm.core.store import Store
     from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 
     class NoParams(BaseModel):
@@ -307,7 +306,7 @@ async def test_recover_command_reruns_pending(tmp_path: Path) -> None:
             stop_reason="tool_use",
         )
     )
-    store = Store()
+    store = session.storage
     operation = Operation.accept("op1", store, session_id=session.id)
     operation.begin_effect(
         PendingEffect(tool_name="rt", call_id="c1", arguments={}, replay_safe=True), turn=1

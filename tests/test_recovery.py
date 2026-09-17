@@ -22,7 +22,7 @@ from tm.ai.types import (
 from tm.core.agent import Agent
 from tm.core.operation import Operation, OperationStatus, PendingEffect
 from tm.core.session import Session, SessionManager
-from tm.core.store import Store, operation_result
+from tm.core.store import operation_result
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 
 MODEL = Model(id="fake", provider="fake")
@@ -88,16 +88,16 @@ def _session_with_call(tmp_path: Path, tool_name: str, call_id: str) -> Session:
 
 def _store_with_pending(
     session: Session, tool_name: str, call_id: str, *, replay_safe: bool
-) -> Store:
-    store = Store()
-    operation = Operation.accept("op1", store, session_id=session.id)
+):
+    """Record an effect_pending operation in the session's own storage."""
+    operation = Operation.accept("op1", session.storage, session_id=session.id)
     operation.begin_effect(
         PendingEffect(
             tool_name=tool_name, call_id=call_id, arguments={}, replay_safe=replay_safe
         ),
         turn=1,
     )
-    return store
+    return session.storage
 
 
 def _tool_results(messages: list) -> list[ToolResultMessage]:
@@ -166,15 +166,14 @@ async def test_recover_does_not_rerun_non_replay_safe_effect(tmp_path: Path) -> 
 
 async def test_recover_settles_open_operation_as_aborted(tmp_path: Path) -> None:
     session = _session_with_call(tmp_path, "rt", "c1")
-    store = Store()
-    Operation.accept("op1", store, session_id=session.id)  # accepted, never settled
+    Operation.accept("op1", session.storage, session_id=session.id)  # accepted, never settled
     agent = Agent(
-        MODEL, stream_fn=_final("done"), tools=[], store=store, session=session
+        MODEL, stream_fn=_final("done"), tools=[], store=session.storage, session=session
     )
 
     assert await agent.recover() is True
 
-    result = store.get_value(operation_result("op1"))
+    result = session.storage.get_value(operation_result("op1"))
     assert result is not None and result["status"] == OperationStatus.ABORTED.value
     # no effect to reconcile, so the run is not resumed
     assert agent.messages[-1].role == "assistant"

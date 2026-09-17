@@ -484,11 +484,15 @@ class TMPromptApp(App[None]):
             cwd = f"{cwd} ({branch})"
 
         total_in = total_out = cache_read = 0
-        for message in self._agent.messages:
-            if isinstance(message, AssistantMessage) and message.usage:
-                total_in += message.usage.input
-                total_out += message.usage.output
-                cache_read += message.usage.cache_read
+        if self._agent.session is not None:
+            totals = self._agent.session.usage_totals()
+            total_in, total_out, cache_read = totals.input, totals.output, totals.cache_read
+        else:
+            for message in self._agent.messages:
+                if isinstance(message, AssistantMessage) and message.usage:
+                    total_in += message.usage.input
+                    total_out += message.usage.output
+                    cache_read += message.usage.cache_read
         used = estimate_tokens(self._agent.messages, self._agent.system_prompt)
         window = model.context_window or 0
 

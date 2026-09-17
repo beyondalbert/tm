@@ -1,9 +1,9 @@
-"""JSONL session persistence with branching.
+"""Sessions: a conversation tree, bound values, and a usage ledger.
 
-Sessions are append-only JSONL files. Each entry points at its parent, so a
-single file can hold a branching conversation tree. The active branch is the
-chain of entries from the current leaf back to the root; ``branch_from`` moves
-the leaf so later messages continue from another point.
+A session is one :class:`~tm.core.storage.Storage` instance (entries + values +
+ledger). This module adds the conversation-tree semantics on top: entries carry a
+``parent_id``, the active branch is the chain from the current leaf back to the
+root, and ``branch_from`` moves the leaf so later appends continue elsewhere.
 """
 
 from __future__ import annotations
@@ -12,21 +12,21 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import TypeAdapter
 
-from tm.ai.types import Message, now_ms
+from tm.ai.types import Message, Usage, now_ms
+from tm.core.storage import Storage, StoredEntry
 
 _MESSAGE_ADAPTER: TypeAdapter[Message] = TypeAdapter(Message)
 
 
-class SessionEntry(BaseModel):
+@dataclass
+class SessionEntry:
     id: str
-    parent_id: str | None = None
+    parent_id: str | None
     type: str
     timestamp: int
-    message: dict | None = None
-    name: str | None = None
-    cwd: str | None = None
+    message: Message | None = None
 
 
 @dataclass
@@ -41,55 +41,68 @@ class SessionInfo:
     preview: str = ""
 
 
-def _preview_of(message: dict | None) -> str:
-    if not isinstance(message, dict) or message.get("role") != "user":
+def _to_entry(stored: StoredEntry) -> SessionEntry:
+    raw = stored.payload.get("message")
+    message = _MESSAGE_ADAPTER.validate_python(raw) if raw is not None else None
+    return SessionEntry(
+        id=stored.id,
+        parent_id=stored.parent_id,
+        type=stored.type,
+        timestamp=stored.timestamp,
+        message=message,
+    )
+
+
+def _preview_of(message: Message | None) -> str:
+    from tm.ai.types import TextContent, UserMessage
+
+    if not isinstance(message, UserMessage):
         return ""
-    content = message.get("content")
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        text = " ".join(
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
+    if isinstance(message.content, str):
+        text = message.content
     else:
-        text = ""
-    text = " ".join(text.split())
-    return text[:60]
+        text = " ".join(b.text for b in message.content if isinstance(b, TextContent))
+    return " ".join(text.split())[:60]
 
 
 class Session:
-    def __init__(self, path: Path, entries: list[SessionEntry] | None = None) -> None:
+    def __init__(self, path: Path, storage: Storage) -> None:
         self.path = path
-        self._entries: list[SessionEntry] = list(entries or [])
-        self._leaf_id: str | None = self._entries[-1].id if self._entries else None
+        self.storage = storage
+        self._leaf_id: str | None = None
+        entries = storage.entries()
+        if entries:
+            self._leaf_id = entries[-1].id
 
+    # -- identity ---------------------------------------------------------
     @property
     def id(self) -> str:
-        return self._entries[0].id if self._entries else ""
+        return str(self.storage.header.get("id", ""))
 
     @property
     def name(self) -> str | None:
-        return self._entries[0].name if self._entries else None
+        return self.storage.header.get("name")
 
     @property
     def cwd(self) -> str | None:
-        return self._entries[0].cwd if self._entries else None
+        return self.storage.header.get("cwd")
 
     @property
     def leaf_id(self) -> str | None:
         return self._leaf_id
 
-    def _by_id(self) -> dict[str, SessionEntry]:
-        return {entry.id: entry for entry in self._entries}
+    # -- tree -------------------------------------------------------------
+    def _entry(self, entry_id: str) -> SessionEntry | None:
+        stored = self.storage.get_entry(entry_id)
+        return None if stored is None else _to_entry(stored)
 
     def path_to(self, entry_id: str) -> list[SessionEntry]:
-        by_id = self._by_id()
         chain: list[SessionEntry] = []
         current: str | None = entry_id
-        while current is not None and current in by_id:
-            entry = by_id[current]
+        while current is not None:
+            entry = self._entry(current)
+            if entry is None:
+                break
             chain.append(entry)
             current = entry.parent_id
         chain.reverse()
@@ -109,87 +122,112 @@ class Session:
         ]
 
     def messages(self) -> list[Message]:
-        return [
-            _MESSAGE_ADAPTER.validate_python(entry.message)
-            for entry in self.points()
-            if entry.message is not None
-        ]
+        return [entry.message for entry in self.points() if entry.message is not None]
 
     def append(self, message: Message, parent_id: str | None = None) -> SessionEntry:
         parent = parent_id if parent_id is not None else self._leaf_id
-        entry = SessionEntry(
-            id=uuid.uuid4().hex[:12],
-            parent_id=parent,
-            type="message",
-            timestamp=now_ms(),
-            message=message.model_dump(mode="json"),
+        entry_id = uuid.uuid4().hex[:12]
+        self.storage.insert_entry(
+            entry_id,
+            parent,
+            "message",
+            {"message": message.model_dump(mode="json")},
         )
-        self._entries.append(entry)
-        self._leaf_id = entry.id
-        self._write_entry(entry)
+        self._leaf_id = entry_id
+        entry = self._entry(entry_id)
+        assert entry is not None
         return entry
 
+    def append_messages(self, messages: list[Message]) -> None:
+        """Append a turn's messages (and their usage) in one atomic commit."""
+        from tm.ai.types import AssistantMessage
+        from tm.core.storage import EntryWrite, UsageWrite, Write
+
+        if not messages:
+            return
+        writes: list[Write] = []
+        parent = self._leaf_id
+        last_id = parent
+        for message in messages:
+            entry_id = uuid.uuid4().hex[:12]
+            writes.append(
+                EntryWrite(
+                    {
+                        "id": entry_id,
+                        "parent_id": parent,
+                        "type": "message",
+                        "payload": {"message": message.model_dump(mode="json")},
+                    }
+                )
+            )
+            if isinstance(message, AssistantMessage) and message.usage:
+                writes.append(UsageWrite(usage=message.usage, entry_id=entry_id))
+            parent = entry_id
+            last_id = entry_id
+        self.storage.commit(writes)
+        self._leaf_id = last_id
+
     def branch_from(self, entry_id: str) -> None:
-        if entry_id not in self._by_id():
+        if self.storage.get_entry(entry_id) is None:
             raise KeyError(f"Unknown session entry: {entry_id}")
         self._leaf_id = entry_id
 
-    def _write_entry(self, entry: SessionEntry) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(entry.model_dump_json() + "\n")
+    # -- usage ledger -----------------------------------------------------
+    def add_usage(self, usage: Usage, entry_id: str | None = None) -> None:
+        self.storage.insert_usage(usage, entry_id)
+
+    def usage_totals(self) -> Usage:
+        return self.storage.stats().usage
 
 
 class SessionManager:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
 
+    def _new_path(self, session_id: str) -> Path:
+        return self.directory / f"{now_ms()}-{session_id}.jsonl"
+
     def create(self, *, cwd: Path, name: str | None = None) -> Session:
         session_id = uuid.uuid4().hex[:12]
-        path = self.directory / f"{now_ms()}-{session_id}.jsonl"
-        meta = SessionEntry(
-            id=session_id,
-            type="meta",
-            timestamp=now_ms(),
-            name=name,
-            cwd=str(cwd),
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(meta.model_dump_json() + "\n", encoding="utf-8")
-        return Session(path, [meta])
+        path = self._new_path(session_id)
+        header = {
+            "v": 4,
+            "kind": "header",
+            "id": session_id,
+            "createdAt": now_ms(),
+            "cwd": str(cwd),
+            "name": name,
+        }
+        storage = Storage.create(path, header=header)
+        return Session(path, storage)
 
     def open(self, path: Path) -> Session:
-        entries: list[SessionEntry] = []
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if line:
-                    entries.append(SessionEntry.model_validate_json(line))
-        return Session(path, entries)
+        return Session(path, Storage.open(path))
 
     def fork(self, source: Session, entry_id: str, *, cwd: Path) -> Session:
-        """Create a new session file containing the branch up to ``entry_id``."""
+        """Copy the branch up to ``entry_id`` into a new session file."""
         session_id = uuid.uuid4().hex[:12]
-        path = self.directory / f"{now_ms()}-{session_id}.jsonl"
-        meta = SessionEntry(
-            id=session_id,
-            type="meta",
-            timestamp=now_ms(),
-            name=source.name,
-            cwd=str(cwd),
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(meta.model_dump_json() + "\n", encoding="utf-8")
-
-        entries = [meta]
-        with path.open("a", encoding="utf-8") as handle:
-            for entry in source.path_to(entry_id):
-                if entry.type == "meta":
-                    continue
-                copied = entry.model_copy(deep=True)
-                entries.append(copied)
-                handle.write(copied.model_dump_json() + "\n")
-        return Session(path, entries)
+        path = self._new_path(session_id)
+        header = {
+            "v": 4,
+            "kind": "header",
+            "id": session_id,
+            "createdAt": now_ms(),
+            "cwd": str(cwd),
+            "name": source.name,
+            "parent_session_id": source.id,
+        }
+        storage = Storage.create(path, header=header)
+        for entry in source.path_to(entry_id):
+            if entry.message is None:
+                continue
+            storage.insert_entry(
+                entry.id,
+                entry.parent_id,
+                entry.type,
+                {"message": entry.message.model_dump(mode="json")},
+            )
+        return Session(path, storage)
 
     def list(self) -> list[SessionInfo]:
         if not self.directory.exists():
@@ -197,36 +235,30 @@ class SessionManager:
         infos: list[SessionInfo] = []
         for path in sorted(self.directory.glob("*.jsonl")):
             try:
-                with path.open("r", encoding="utf-8") as handle:
-                    lines = [line.strip() for line in handle if line.strip()]
-                if not lines:
-                    continue
-                meta = SessionEntry.model_validate_json(lines[0])
-            except (OSError, ValueError):
+                storage = Storage.open(path)
+            except Exception:  # noqa: BLE001 - unreadable session files are skipped
                 continue
-
-            count = 0
-            updated = meta.timestamp
+            header = storage.header
+            entries = storage.entries()
+            created = int(header.get("createdAt", entries[0].timestamp if entries else 0))
+            updated = entries[-1].timestamp if entries else created
             preview = ""
-            for line in lines[1:]:
-                try:
-                    entry = SessionEntry.model_validate_json(line)
-                except ValueError:
-                    continue
+            for entry in entries:
                 if entry.type != "message":
                     continue
-                count += 1
-                updated = entry.timestamp
-                if not preview:
-                    preview = _preview_of(entry.message)
+                candidate = _to_entry(entry).message
+                text = _preview_of(candidate)
+                if text:
+                    preview = text
+                    break
             infos.append(
                 SessionInfo(
-                    id=meta.id,
+                    id=str(header.get("id") or path.stem),
                     path=path,
-                    name=meta.name,
-                    cwd=meta.cwd,
-                    created=meta.timestamp,
-                    message_count=count,
+                    name=header.get("name"),
+                    cwd=header.get("cwd"),
+                    created=created,
+                    message_count=storage.stats().message_count,
                     updated=updated,
                     preview=preview,
                 )

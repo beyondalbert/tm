@@ -281,6 +281,12 @@ Sessions are appended to JSONL files under `<config>/sessions/`, tagged with the
 working directory. `tm` **continues the most recent session for the current
 directory by default** (in the TUI, its history is rendered on startup).
 
+Each session file is a full store with three durable forms — an append-only
+**entry tree**, bound **values/lists**, and an append-only **usage ledger**.
+Writes commit **atomically** (one transaction per JSONL line; a torn final line
+is discarded whole), and the durable operation restart point from `--durable`
+lives in the same store.
+
 - `tm` — continue the most recent session for this directory.
 - `tm --new-session` — start a fresh session (also `/new` inside a session).
 - `tm -c` — explicit form of the default.

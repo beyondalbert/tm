@@ -22,6 +22,7 @@ from tm.ai.types import (
     UserMessage,
 )
 from tm.core.events import (
+    AgentEndEvent,
     AgentEvent,
     MessageEndEvent,
     ToolExecutionEndEvent,
@@ -134,7 +135,14 @@ class Agent:
         self._listeners: list[Listener] = []
         self._steering: list[Message] = []
         self._follow_up: list[Message] = []
+        self._pending_messages: list[Message] = []
         self._signal: AbortSignal | None = None
+
+    def _storage(self) -> Store | None:
+        """The store for operation state: the session's storage when there is one."""
+        if self.session is not None:
+            return self.session.storage
+        return self.store
 
     # -- state ------------------------------------------------------------
     @property
@@ -203,12 +211,20 @@ class Agent:
             self.operation.set_turn(event.turn)
         if isinstance(event, MessageEndEvent):
             self._persist_message(event.message)
+        if isinstance(event, AgentEndEvent):
+            self._flush_messages()
         for listener in list(self._listeners):
             await listener(event)
 
     def _persist_message(self, message: Message) -> None:
-        if self.session is not None:
-            self.session.append(message)
+        self._pending_messages.append(message)
+
+    def _flush_messages(self) -> None:
+        """Commit the accumulated turn messages (and usage) atomically."""
+        if self.session is None or not self._pending_messages:
+            return
+        self.session.append_messages(self._pending_messages)
+        self._pending_messages = []
 
     # -- queueing ---------------------------------------------------------
     def steer(self, content: str | Message) -> None:
@@ -235,8 +251,9 @@ class Agent:
         if self.auto_compact:
             await self._maybe_auto_compact()
         self._messages.extend(new_messages)
-        for message in new_messages:
-            self._persist_message(message)
+        if self.session is not None:
+            # Persist the user turn before the request so it is durable.
+            self.session.append_messages(new_messages)
         return await self._run_loop(new_messages)
 
     async def _run_loop(self, new_messages: list[Message]) -> list[Message]:
@@ -270,11 +287,12 @@ class Agent:
             trace_id=context.trace_id, parent_id=self._operation_span_id
         )
         session_id = self.session.id if self.session is not None else None
+        storage = self._storage()
         operation = (
             Operation.accept(
-                uuid.uuid4().hex[:12], self.store, kind="run", session_id=session_id
+                uuid.uuid4().hex[:12], storage, kind="run", session_id=session_id
             )
-            if self.store is not None
+            if storage is not None
             else None
         )
         self.operation = operation
@@ -297,6 +315,7 @@ class Agent:
             raise
         finally:
             self._running = False
+            self._flush_messages()
             if status == "ok":
                 status = self._final_run_status()
             self.telemetry.end(span_id, context, status=status)
@@ -309,10 +328,11 @@ class Agent:
     # -- recovery ---------------------------------------------------------
     def pending_recovery(self) -> list[OperationState]:
         """Interrupted operations for this session that recovery would reconcile."""
-        if self.store is None:
+        storage = self._storage()
+        if storage is None:
             return []
         session_id = self.session.id if self.session is not None else None
-        return Operation.unsettled(self.store, session_id)
+        return Operation.unsettled(storage, session_id)
 
     async def recover(self) -> bool:
         """Reconcile interrupted operations and continue the run.
@@ -321,14 +341,15 @@ class Agent:
         effect is surfaced as an error result without re-running, because it may or
         may not have happened. Returns True if any interrupted operation was found.
         """
-        if self.store is None:
+        storage = self._storage()
+        if storage is None:
             return False
         states = self.pending_recovery()
         if not states:
             return False
         resume = False
         for state in states:
-            operation = Operation(state.operation_id, self.store)
+            operation = Operation(state.operation_id, storage)
             if state.status is OperationStatus.EFFECT_PENDING and state.pending is not None:
                 recovered = await self._recover_effect(state)
                 if recovered is not None:

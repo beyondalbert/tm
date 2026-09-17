@@ -180,7 +180,6 @@ def test_points_and_path_to(tmp_path: Path) -> None:
     points = session.points()
     assert len(points) == 2
     assert [entry.id for entry in session.path_to(points[-1].id)] == [
-        session._entries[0].id,  # meta
         first.id,
         points[-1].id,
     ]
