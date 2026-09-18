@@ -162,7 +162,13 @@ def run_update(
         out("could not reach PyPI to check for updates")
         return 1
     if not is_newer(latest, current):
-        out(f"TM {current} is up to date (latest {latest})")
+        if parse_version(current) > parse_version(latest):
+            out(
+                f"TM {current} is up to date "
+                f"(the PyPI index still reports {latest}; it can lag briefly)"
+            )
+        else:
+            out(f"TM {current} is up to date (latest {latest})")
         return 0
 
     argv = upgrade_argv(prefix)
