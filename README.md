@@ -540,6 +540,11 @@ python -m uv build                                 # wheel + sdist
 Before a release, `scripts/release-smoke.ps1` builds, validates metadata in a
 throwaway venv, and runs `tm --version` / `tm --list-models`.
 
+**Secret scanning.** CI runs gitleaks (`.github/workflows/secret-scan.yml`,
+configured by `.gitleaks.toml`), and `tests/test_no_secrets.py` fails the suite
+if a tracked file looks like it contains a committed secret. Never put real keys
+in tests, docs, or fixtures; use an obvious placeholder such as `sk-xxxx`.
+
 Notes:
 
 - The live DeepSeek test only runs when `DEEPSEEK_API_KEY` is set;

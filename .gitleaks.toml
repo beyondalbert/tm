@@ -1,0 +1,15 @@
+# gitleaks configuration: keep the default rules and allow known-safe values.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test values and vendored reference code"
+paths = [
+  '''^pi/''',
+]
+regexes = [
+  # Synthetic provider key used in tests/test_cli.py
+  '''sk-0{32}''',
+  '''sk-x{4,}''',
+]
