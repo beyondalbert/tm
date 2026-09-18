@@ -296,6 +296,9 @@ allow = ["api.deepseek.com"]
 **补全。** TUI 中按 `Tab` 接受候选：输入 `/` 补全命令，输入 `@` 模糊搜索文件路径。
 `Up`/`Down` 移动选择，`Escape` 关闭候选。
 
+**输入。** TUI 输入框支持多行：`Enter` 发送，`Shift+Enter`（或 `Ctrl+J`）插入换行；
+粘贴会保留每一行。
+
 ## 会话
 
 会话以 JSONL 追加写入 `<config>/sessions/`，并标注工作目录。`tm` **默认继续本目录最近的

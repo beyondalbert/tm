@@ -318,6 +318,9 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 complete a command, or `@` to fuzzy-search a file path. `Up`/`Down` move the
 selection and `Escape` dismisses it.
 
+**Input.** The TUI prompt is multi-line: `Enter` submits, `Shift+Enter` (or
+`Ctrl+J`) inserts a newline, and pasting keeps every line.
+
 ## Sessions
 
 Sessions are appended to JSONL files under `<config>/sessions/`, tagged with the

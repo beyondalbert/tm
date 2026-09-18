@@ -6,7 +6,7 @@ pytest.importorskip("textual")
 
 from pydantic import BaseModel  # noqa: E402
 from textual.app import App  # noqa: E402
-from textual.widgets import Input  # noqa: E402
+from textual.widgets import TextArea  # noqa: E402
 
 from tm.ai.event_stream import EventStream  # noqa: E402
 from tm.ai.types import (  # noqa: E402
@@ -110,8 +110,9 @@ async def test_tm_app_runs_a_prompt() -> None:
     agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
     app = TMPromptApp(agent, FAKE_MODEL)
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "do something"
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "do something"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         await pilot.press("enter")
         await app.workers.wait_for_complete()
@@ -135,8 +136,9 @@ async def test_tui_slash_command_forwards_expanded_prompt() -> None:
 
     app.command_handler = handler
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "/greet"
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "/greet"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         await pilot.press("enter")
         await app.workers.wait_for_complete()
@@ -231,8 +233,9 @@ async def test_tui_does_not_render_empty_assistant_block() -> None:
     app = TMPromptApp(agent, FAKE_MODEL)
 
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "go"
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "go"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         await pilot.press("enter")
         await app.workers.wait_for_complete()
@@ -249,8 +252,9 @@ async def test_tui_renders_provider_error_without_start_event() -> None:
     app = TMPromptApp(agent, FAKE_MODEL)
 
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "go"
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "go"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         await pilot.press("enter")
         await app.workers.wait_for_complete()
@@ -305,8 +309,9 @@ async def test_assistant_reply_body_is_selectable() -> None:
     agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
     app = TMPromptApp(agent, FAKE_MODEL)
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "hi"
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "hi"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         await pilot.press("enter")
         await app.workers.wait_for_complete()
@@ -373,8 +378,9 @@ async def test_footer_refreshes_after_model_command() -> None:
 
     app.command_handler = handler
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "/model glm-4-plus"
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "/model glm-4-plus"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -391,8 +397,9 @@ async def test_tool_output_truncates_and_ctrl_o_expands() -> None:
     app = TMPromptApp(agent, FAKE_MODEL)
 
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "go"
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "go"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         await pilot.press("enter")
         await app.workers.wait_for_complete()
@@ -448,8 +455,9 @@ async def test_new_command_clears_rendered_history(tmp_path) -> None:
         await app.workers.wait_for_complete()
         assert len(app.query(".user")) == 1
 
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "/new"
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "/new"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         await pilot.press("enter")
         await app.workers.wait_for_complete()
@@ -463,15 +471,15 @@ async def test_tui_command_autocomplete(tmp_path, monkeypatch) -> None:
     app = TMPromptApp(agent, FAKE_MODEL)
 
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "/mod"
-        prompt.cursor_position = 4
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "/mod"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         assert app.query_one("#suggestions").display is True
 
         await pilot.press("tab")
         await pilot.pause()
-        assert prompt.value.startswith("/model")
+        assert prompt.text.startswith("/model")
 
 
 async def test_tui_file_autocomplete(tmp_path, monkeypatch) -> None:
@@ -481,15 +489,15 @@ async def test_tui_file_autocomplete(tmp_path, monkeypatch) -> None:
     app = TMPromptApp(agent, FAKE_MODEL)
 
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "@hel"
-        prompt.cursor_position = 4
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "@hel"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         assert app.query_one("#suggestions").display is True
 
         await pilot.press("tab")
         await pilot.pause()
-        assert prompt.value.startswith("@hello.txt")
+        assert prompt.text.startswith("@hello.txt")
 
 
 async def test_tui_enter_accepts_suggestion(tmp_path, monkeypatch) -> None:
@@ -498,15 +506,70 @@ async def test_tui_enter_accepts_suggestion(tmp_path, monkeypatch) -> None:
     app = TMPromptApp(agent, FAKE_MODEL)
 
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
-        prompt.value = "/mod"
-        prompt.cursor_position = 4
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "/mod"
+        prompt.move_cursor(prompt.document.end)
         await pilot.pause()
         assert app.query_one("#suggestions").display is True
 
         await pilot.press("enter")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert prompt.value.startswith("/model")
+        assert prompt.text.startswith("/model")
         # accepted, not submitted: the agent never ran a prompt
         assert agent.messages == []
+
+
+async def test_prompt_paste_keeps_every_line() -> None:
+    from textual import events
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.focus()
+        # Exercise the paste handler directly (Textual's Input would keep only
+        # the first line here).
+        await prompt._on_paste(events.Paste("line one\nline two\nline three"))
+        await pilot.pause()
+        assert prompt.text == "line one\nline two\nline three"
+
+
+async def test_multiline_prompt_is_submitted_whole() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "first line\nsecond line"
+        prompt.move_cursor(prompt.document.end)
+        await pilot.pause()
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    assert any(
+        isinstance(message, UserMessage)
+        and message.content == "first line\nsecond line"
+        for message in agent.messages
+    )
+
+
+async def test_shift_enter_inserts_a_newline() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.focus()
+        await pilot.press("a")
+        await pilot.press("shift+enter")
+        await pilot.press("b")
+        await pilot.pause()
+        assert prompt.text == "a\nb"
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    assert any(
+        isinstance(message, UserMessage) and message.content == "a\nb"
+        for message in agent.messages
+    )

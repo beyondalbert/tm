@@ -15,10 +15,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widget import Widget
-from textual.widgets import Button, Input, Label, OptionList, Static
+from textual.widgets import Button, Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
 from tm.ai.types import AssistantMessage, Model, TextContent, ToolResultMessage, Usage, UserMessage
@@ -353,8 +354,25 @@ class DeferredApprover:
         return await self._inner.request(action, reason)
 
 
-class PromptInput(Input):
-    """Input that routes suggestion keys to the app while suggestions are open."""
+def _cursor_offset(area: TextArea) -> int:
+    """The cursor's character offset in a TextArea's document."""
+    row, column = area.cursor_location
+    lines = area.document.lines
+    return sum(len(line) + 1 for line in lines[:row]) + column
+
+
+class PromptArea(TextArea):
+    """Multi-line prompt editor.
+
+    Pasting keeps every line (unlike Textual's single-line ``Input``). Enter
+    submits; Shift+Enter or Ctrl+J insert a newline. While the completion list
+    is open, Tab/Up/Down/Escape/Enter drive it as before.
+    """
+
+    class Submitted(Message):
+        def __init__(self, value: str) -> None:
+            self.value = value
+            super().__init__()
 
     async def _on_key(self, event: events.Key) -> None:
         app = self.app
@@ -384,6 +402,16 @@ class PromptInput(Input):
                 event.prevent_default()
                 app.close_suggestions()
                 return
+        if event.key == "enter":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.Submitted(self.text))
+            return
+        if event.key in ("shift+enter", "ctrl+j"):
+            event.stop()
+            event.prevent_default()
+            self.insert("\n")
+            return
         await super()._on_key(event)
 
 
@@ -403,7 +431,7 @@ class TMPromptApp(App[None]):
     #messages {{ height: 1fr; }}
     #editor-status {{ height: 1; }}
     #suggestions {{ display: none; height: auto; max-height: 8; border: round {_ACCENT}; }}
-    #prompt {{ border: none; background: {_INPUT_BG}; }}
+    #prompt {{ height: auto; max-height: 8; border: none; background: {_INPUT_BG}; padding: 0 1; }}
     #footer {{ height: 2; padding: 0 1; }}
     #perm-box {{ width: 60%; height: auto; padding: 1 2; background: $panel; border: round {_WARNING}; }}
     #perm-title {{ text-style: bold; padding-bottom: 1; }}
@@ -456,14 +484,17 @@ class TMPromptApp(App[None]):
         yield VerticalScroll(id="messages")
         yield Static("", id="editor-status")
         yield OptionList(id="suggestions")
-        yield PromptInput(placeholder="Ask TM to do something, then Enter.", id="prompt")
+        yield PromptArea(
+            placeholder="Ask TM to do something, then Enter. Shift+Enter for a new line.",
+            id="prompt",
+        )
         yield Static("", id="footer")
 
     def on_mount(self) -> None:
         self._agent.subscribe(self._on_agent_event)
         self._update_editor_status()
         self._update_footer()
-        self.query_one("#prompt", Input).focus()
+        self.query_one("#prompt", TextArea).focus()
         self.run_worker(self._startup(), exclusive=True, exit_on_error=False)
 
     async def _startup(self) -> None:
@@ -593,12 +624,12 @@ class TMPromptApp(App[None]):
             self._file_index = FileIndex(Path.cwd())
         return self._file_index
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
         self._refresh_suggestions()
 
     def _refresh_suggestions(self) -> None:
-        inp = self.query_one("#prompt", Input)
-        span = detect(inp.value, inp.cursor_position)
+        inp = self.query_one("#prompt", TextArea)
+        span = detect(inp.text, _cursor_offset(inp))
         if span is None:
             self.close_suggestions()
             return
@@ -647,12 +678,12 @@ class TMPromptApp(App[None]):
         index = options.highlighted if options.highlighted is not None else 0
         if not 0 <= index < len(self._suggestions):
             return
-        inp = self.query_one("#prompt", Input)
+        inp = self.query_one("#prompt", TextArea)
         new_value = apply_completion(
-            inp.value, self._suggestion_span, self._suggestions[index].value
+            inp.text, self._suggestion_span, self._suggestions[index].value
         )
-        inp.value = new_value
-        inp.cursor_position = len(new_value)
+        inp.text = new_value
+        inp.move_cursor(inp.document.end)
         self.close_suggestions()
         inp.focus()
 
@@ -821,9 +852,9 @@ class TMPromptApp(App[None]):
             self.query_one("#messages", VerticalScroll).scroll_end(animate=False)
 
     # -- input ------------------------------------------------------------
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
+    def on_prompt_area_submitted(self, event: PromptArea.Submitted) -> None:
         text = event.value.strip()
-        event.input.value = ""
+        self.query_one("#prompt", TextArea).text = ""
         if not text:
             return
         self.close_suggestions()
@@ -832,7 +863,7 @@ class TMPromptApp(App[None]):
 
     async def _handle_input(self, text: str) -> None:
         await self._mount(UserMessageWidget(text))
-        if text.startswith("/"):
+        if text.startswith("/") and "\n" not in text:
             if self.command_handler is None:
                 return
             command = text[1:].split(None, 1)[0].lower()
@@ -841,7 +872,7 @@ class TMPromptApp(App[None]):
             except ExitSignal:
                 self.exit()
                 return
-            self.query_one("#prompt", Input).focus()
+            self.query_one("#prompt", TextArea).focus()
             self._update_footer()
             if command in ("resume", "new", "tree", "fork"):
                 await self._reload_history()
@@ -856,7 +887,7 @@ class TMPromptApp(App[None]):
         except Exception as exc:  # noqa: BLE001 - surface failures in the UI
             await self._mount(SystemNote(f"error: {exc}", _ERROR))
         finally:
-            self.query_one("#prompt", Input).focus()
+            self.query_one("#prompt", TextArea).focus()
 
 
 __all__ = [
