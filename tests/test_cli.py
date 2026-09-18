@@ -4,9 +4,10 @@ from tm.cli.main import _mask_key, _resolve_session
 
 
 def test_mask_key_hides_the_middle() -> None:
-    masked = _mask_key("sk-00000000000000000000000000000000")
+    key = "sk-" + "0" * 32
+    masked = _mask_key(key)
     assert masked == "sk-000...0000 (35 chars)"
-    assert "0000000000" not in masked
+    assert key not in masked
 
 
 def test_mask_key_short_values_are_fully_masked() -> None:
