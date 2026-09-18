@@ -61,6 +61,7 @@ from tm.skills import Skill, build_skills_section, load_skills, skill_roots
 from tm.telemetry import FileTelemetry, NoopTelemetry, Telemetry
 from tm.tools import build_default_tools
 from tm.trust import TrustManager, project_resources
+from tm.update import run_update
 
 app = typer.Typer(
     add_completion=False,
@@ -668,11 +669,17 @@ def main(
         None, "--login", help="Store an API key for a provider and exit."
     ),
     list_models: bool = typer.Option(False, "--list-models", help="List known models."),
+    update: bool = typer.Option(
+        False, "--update", help="Upgrade TM from PyPI to the latest release and exit."
+    ),
     version: bool = typer.Option(False, "--version", "-v", help="Show version."),
 ) -> None:
     if version:
         console.print(__version__)
         raise typer.Exit()
+
+    if update:
+        raise typer.Exit(code=run_update())
 
     settings = load_settings()
     registry = _make_registry()

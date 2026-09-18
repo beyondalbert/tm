@@ -75,6 +75,16 @@ tm "list the files in this folder"
 
 需要 Python 3.11+，uv 会自动安装合适的解释器。
 
+### 更新
+
+```bash
+tm --update
+```
+
+`tm --update` 会检查 PyPI 并原地升级。它使用当前环境对应的安装器（uv tool、pipx 或 pip），
+**不依赖 uv**。Windows 上运行中的 `tm.exe` 无法替换自身，因此升级会在一个分离的后台助手进程里
+执行（日志：`<config>/update.log`）；退出 tm，完成后再启动即可。
+
 ## Provider
 
 多 Provider 通过官方 SDK 适配。优先支持国内厂商（DeepSeek、Qwen、Kimi、智谱 GLM），

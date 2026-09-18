@@ -76,6 +76,17 @@ tm "list the files in this folder"
 
 Requires Python 3.11+. uv installs a suitable interpreter automatically.
 
+### Updating
+
+```bash
+tm --update
+```
+
+`tm --update` checks PyPI and upgrades in place. It uses whichever installer owns
+the environment (uv tool, pipx, or pip), so uv is not required. On Windows the
+running `tm.exe` cannot replace itself, so the upgrade runs in a small detached
+helper (log: `<config>/update.log`); exit tm and start it again when it finishes.
+
 ## Providers
 
 Multi-provider via official SDK adapters. Domestic providers first (DeepSeek,
