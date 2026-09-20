@@ -55,6 +55,15 @@ class LongTool(Tool[LongParams]):
         return text_result("\n".join(f"line {i}" for i in range(40)))
 
 
+class FailTool(Tool[LongParams]):
+    name = "fail"
+    description = "Return an error."
+    parameters_model = LongParams
+
+    async def execute(self, call_id: str, args: LongParams, ctx: ToolContext) -> ToolResult:
+        return text_result("first error line\nsecond error line", is_error=True)
+
+
 def fake_stream_fn(model, context, options) -> EventStream:
     message = AssistantMessage(content=[TextContent(text="hello from fake")], stop_reason="stop")
     stream: EventStream = EventStream()
@@ -387,7 +396,7 @@ async def test_footer_refreshes_after_model_command() -> None:
         assert "glm-4-plus" in str(app.query_one("#footer").render())
 
 
-async def test_tool_output_truncates_and_ctrl_o_expands() -> None:
+async def test_tool_output_is_folded_and_ctrl_o_expands() -> None:
     tool_turn = AssistantMessage(
         tool_calls=[ToolCall(id="t1", name="long", arguments={})],
         stop_reason="tool_use",
@@ -405,16 +414,46 @@ async def test_tool_output_truncates_and_ctrl_o_expands() -> None:
         await app.workers.wait_for_complete()
         await pilot.pause()
 
+        title = str(app.query_one(".tool .tool-title").render())
+        assert "\u25b8" in title  # folded marker
+        assert "40 lines, ctrl+o" in title
         body = app.query_one(".tool .tool-body")
-        assert "ctrl+o to expand" in str(body.render())
-        assert "line 19" in str(body.render())
-        assert "line 20" not in str(body.render())
+        assert body.display is False
 
         app.action_toggle_tools()
         await pilot.pause()
+        title = str(app.query_one(".tool .tool-title").render())
+        assert "\u25be" in title
+        assert "ctrl+o to collapse" in title
         body = app.query_one(".tool .tool-body")
-        assert "ctrl+o to expand" not in str(body.render())
+        assert body.display is True
         assert "line 39" in str(body.render())
+
+
+async def test_folded_error_still_shows_its_first_line() -> None:
+    tool_turn = AssistantMessage(
+        tool_calls=[ToolCall(id="t1", name="fail", arguments={})],
+        stop_reason="tool_use",
+    )
+    final = AssistantMessage(content=[TextContent(text="ok")], stop_reason="stop")
+    agent = Agent(FAKE_MODEL, stream_fn=scripted([tool_turn, final]), tools=[FailTool()])
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "go"
+        prompt.move_cursor(prompt.document.end)
+        await pilot.pause()
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        title = str(app.query_one(".tool .tool-title").render())
+        assert "[error]" in title
+        body = app.query_one(".tool .tool-body")
+        assert body.display is True
+        assert "first error line" in str(body.render())
+        assert "second error line" not in str(body.render())
 
 
 async def test_tui_renders_resumed_history(tmp_path) -> None:

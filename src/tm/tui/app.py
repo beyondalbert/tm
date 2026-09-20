@@ -212,49 +212,73 @@ class AssistantMessageWidget(Vertical):
 
 
 class ToolWidget(Vertical):
-    """Tool call: a title line, then the output on a coloured background block."""
+    """A tool call, folded to its title line.
 
-    MAX_LINES = 20
+    Collapsed by default so the conversation stays readable; ``ctrl+o`` expands
+    or collapses every tool call. A collapsed error still shows its first line.
+    """
 
     def __init__(self, name: str, arguments: dict, *, expanded: bool = False) -> None:
         super().__init__(classes="tool")
-        self._title = Static(tool_title(name, arguments), classes="tool-title")
+        self._base_title = tool_title(name, arguments)
+        self._title = Static(self._base_title, classes="tool-title")
         self._body = Static(Text(""), classes="tool-body")
         self._body.display = False
         self._output = ""
         self._is_error = False
         self._expanded = expanded
+        self._finished = False
 
     def compose(self) -> ComposeResult:
         yield self._title
         yield self._body
 
+    def on_mount(self) -> None:
+        self._render_title()
+
     def set_result(self, output: str, is_error: bool) -> None:
         self._output = output.rstrip()
         self._is_error = is_error
+        self._finished = True
         self.set_class(True, "error" if is_error else "success")
+        self._render_title()
         self._render_body()
 
     def set_expanded(self, expanded: bool) -> None:
         if expanded != self._expanded:
             self._expanded = expanded
+            self._render_title()
             self._render_body()
+
+    def _render_title(self) -> None:
+        text = Text()
+        text.append("\u25be " if self._expanded else "\u25b8 ", style=_MUTED)
+        text.append_text(self._base_title)
+        if self._finished:
+            lines = len(self._output.splitlines()) if self._output else 0
+            if self._is_error:
+                text.append("  [error]", style=_ERROR)
+            if lines:
+                hint = "(ctrl+o to collapse)" if self._expanded else f"({lines} lines, ctrl+o)"
+                text.append(f"  {hint}", style=_MUTED)
+            elif not self._is_error:
+                text.append("  (no output)", style=_MUTED)
+        self._title.update(text)
 
     def _render_body(self) -> None:
         if not self._output:
             self._body.display = False
             return
-        style = _ERROR if self._is_error else _MUTED
-        lines = self._output.splitlines()
-        body = Text()
-        if not self._expanded and len(lines) > self.MAX_LINES:
-            body.append("\n".join(lines[: self.MAX_LINES]), style=style)
-            remaining = len(lines) - self.MAX_LINES
-            body.append(f"\n... ({remaining} more lines, ctrl+o to expand)", style=_MUTED)
-        else:
-            body.append(self._output, style=style)
-        self._body.update(body)
-        self._body.display = True
+        if self._expanded:
+            self._body.update(Text(self._output, style=_MUTED))
+            self._body.display = True
+            return
+        if self._is_error:
+            # Keep failures visible even while folded.
+            self._body.update(Text(self._output.splitlines()[0], style=_ERROR))
+            self._body.display = True
+            return
+        self._body.display = False
 
 
 class SystemNote(Static):
