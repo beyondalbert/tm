@@ -32,6 +32,23 @@ def test_tool_call_without_result_is_trimmed() -> None:
     assert kept.text() == "calling"
 
 
+def test_empty_assistant_is_dropped() -> None:
+    empty = AssistantMessage(content=[], stop_reason="error")
+    repaired = repair_tool_messages([UserMessage(content="hi"), empty])
+    assert repaired == [UserMessage(content="hi")]
+
+
+def test_assistant_trimmed_to_empty_is_dropped() -> None:
+    # a tool-only assistant whose result was compacted away must not become an
+    # assistant with neither content nor tool_calls
+    assistant = AssistantMessage(
+        content=[],
+        tool_calls=[ToolCall(id="t1", name="read", arguments={})],
+    )
+    repaired = repair_tool_messages([UserMessage(content="q"), assistant])
+    assert repaired == [UserMessage(content="q")]
+
+
 def test_valid_sequence_is_unchanged() -> None:
     messages: list[Message] = [
         UserMessage(content="q"),

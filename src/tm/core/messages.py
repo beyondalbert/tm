@@ -32,10 +32,16 @@ def repair_tool_messages(messages: list[Message]) -> list[Message]:
             if message.tool_call_id in requested:
                 repaired.append(message)
             continue
-        if isinstance(message, AssistantMessage) and message.tool_calls:
-            remaining = [call for call in message.tool_calls if call.id in keep]
-            if len(remaining) != len(message.tool_calls):
-                message = message.model_copy(update={"tool_calls": remaining})
+        if isinstance(message, AssistantMessage):
+            if message.tool_calls:
+                remaining = [call for call in message.tool_calls if call.id in keep]
+                if len(remaining) != len(message.tool_calls):
+                    message = message.model_copy(update={"tool_calls": remaining})
+            if not message.tool_calls and not message.text():
+                # An assistant message must have content or tool_calls; a
+                # trimmed tool call, or a persisted error/abort turn, can leave
+                # it empty. Drop it.
+                continue
         repaired.append(message)
     return repaired
 
