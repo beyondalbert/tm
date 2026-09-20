@@ -31,6 +31,7 @@ from tm.core.events import (
     TurnStartEvent,
 )
 from tm.core.loop import LoopHooks, StreamFn, agent_loop
+from tm.core.messages import repair_tool_messages
 from tm.core.operation import Operation, OperationState, OperationStatus, PendingEffect
 from tm.core.session import Session
 from tm.core.store import Store
@@ -178,8 +179,15 @@ class Agent:
 
         if len(self._messages) <= keep_recent:
             return False
-        older = self._messages[:-keep_recent]
-        recent = self._messages[-keep_recent:]
+        index = len(self._messages) - keep_recent
+        # Never start the retained tail with a tool result: include the assistant
+        # that requested it, so the provider sees a valid tool call sequence.
+        while index > 0 and isinstance(self._messages[index], ToolResultMessage):
+            index -= 1
+        older = self._messages[:index]
+        recent = repair_tool_messages(self._messages[index:])
+        if not older:
+            return False
         if self.before_compact is not None:
             await _maybe_await(self.before_compact(older))
         summary = await summarize_messages(self._stream_fn, self.model, older, instructions)
@@ -335,7 +343,7 @@ class Agent:
         try:
             while True:
                 self._messages = await agent_loop(
-                    messages=self._messages,
+                    messages=repair_tool_messages(self._messages),
                     system_prompt=self.system_prompt,
                     tools=[tool.spec() for tool in self.tools],
                     model=self.model,

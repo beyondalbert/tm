@@ -192,3 +192,57 @@ async def test_overflow_recovery_compacts_and_retries() -> None:
     assert isinstance(last, AssistantMessage)
     assert last.text() == "done"
 
+
+async def test_compact_keeps_tool_call_with_its_result() -> None:
+    agent = Agent(MODEL, stream_fn=summary_stream("summary"))
+    agent.set_messages(
+        [
+            UserMessage(content="q"),
+            AssistantMessage(
+                content=[TextContent(text="call")],
+                tool_calls=[ToolCall(id="t1", name="read", arguments={})],
+            ),
+            ToolResultMessage(
+                tool_call_id="t1", tool_name="read", content=[TextContent(text="data")]
+            ),
+            UserMessage(content="next"),
+            AssistantMessage(content=[TextContent(text="done")]),
+        ]
+    )
+
+    assert await agent.compact(keep_recent=3) is True
+    messages = agent.messages
+    # summary first; the retained tail must not start with an orphan tool result
+    assert isinstance(messages[0], UserMessage)
+    assert not isinstance(messages[1], ToolResultMessage)
+    # the tool call and its result are both retained
+    assert any(isinstance(m, AssistantMessage) and m.tool_calls for m in messages)
+    assert any(isinstance(m, ToolResultMessage) for m in messages)
+
+
+async def test_orphan_tool_result_is_not_sent_to_the_provider() -> None:
+    seen: dict[str, list[Message]] = {}
+
+    def stream_fn(model, context, options) -> EventStream:
+        seen["messages"] = list(context.messages)
+        message = AssistantMessage(content=[TextContent(text="ok")], stop_reason="stop")
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn)
+    agent.set_messages(
+        [
+            ToolResultMessage(
+                tool_call_id="ghost", tool_name="read", content=[TextContent(text="stale")]
+            ),
+            UserMessage(content="hi"),
+        ]
+    )
+
+    await agent.prompt("go")
+
+    assert not any(isinstance(m, ToolResultMessage) for m in seen["messages"])
+
