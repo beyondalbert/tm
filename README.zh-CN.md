@@ -208,6 +208,7 @@ context_window = 65536
 | `tm -r` | 选择已保存的会话恢复（`--all-sessions` 含其它目录） |
 | `tm --no-extensions` | 不加载 `.aiagent/extensions` |
 | `tm --no-auto-compact` | 关闭自动上下文压缩 |
+| `tm --max-turns N` | 每次提示的最大回合数（默认 100） |
 | `tm --telemetry` | 将脱敏 span 写入 `<config>/telemetry.jsonl` |
 | `tm --durable` | 为每次运行在 `<config>/state.jsonl` 持久化重启点 |
 | `tm --no-mouse` | 让终端接管鼠标选择/复制 |
@@ -273,7 +274,8 @@ allow = ["api.deepseek.com"]
 `.aiagent/SYSTEM.md`）只有在信任该目录后才会加载。首次使用时 TM 会询问，决定保存在
 `<config>/trust.json`，并支持 `--approve`/`--no-approve`、`/trust [off]` 以及
 `default_project_trust`（`ask` | `always` | `never`）。`AGENTS.md` 等上下文文件不受信任门限制。
-非交互模式（`-p`、`--json`、`--mode rpc`）不询问，默认拒绝。
+非交互模式（`-p`、`--json`、`--mode rpc`）不询问，默认拒绝；请在 `policy.toml` 里放行所需
+操作，或用 `--yolo` 启动。
 
 **变更与撤销。** 会产生变更的工具会向 `<config>/changes/changes.jsonl` 追加记录：文件
 写入/编辑会快照旧内容，包安装与服务启停会记录足以回退的信息，因此 `/undo [n]` 可恢复
@@ -307,7 +309,7 @@ allow = ["api.deepseek.com"]
 `Up`/`Down` 移动选择，`Escape` 关闭候选。
 
 **输入。** TUI 输入框支持多行：`Enter` 发送，`Shift+Enter`（或 `Ctrl+J`）插入换行；
-粘贴会保留每一行。
+粘贴会保留每一行。运行中按 `Esc` 可停止当前回合。
 
 ## 会话
 
@@ -345,6 +347,7 @@ system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true      # summarize older context when nearing the limit
 compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
+max_turns = 100          # 每次提示的最大回合数（也可 `tm --max-turns N`）
 default_project_trust = "ask"  # ask | always | never
 cache_retention = "short"      # short | long（provider 提示缓存；TM_CACHE_RETENTION 可覆盖）
 env_probe = true               # 在系统提示词中加入本机摘要

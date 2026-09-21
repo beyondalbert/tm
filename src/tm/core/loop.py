@@ -52,6 +52,13 @@ StreamFn = Callable[
 
 
 @dataclass
+class LoopResult:
+    messages: list[Message]
+    #: "stop" (model finished), "max_turns", "error", or "aborted".
+    stop_reason: str
+
+
+@dataclass
 class LoopHooks:
     emit: Callable[[AgentEvent], Awaitable[None]]
     execute_tools: Callable[[list[ToolCall]], Awaitable[list[ToolResultMessage]]]
@@ -74,12 +81,13 @@ async def agent_loop(
     max_turns: int = 100,
     telemetry: Telemetry | None = None,
     context: TelemetryContext | None = None,
-) -> list[Message]:
+) -> LoopResult:
     telemetry = telemetry or NoopTelemetry()
     context = context or TelemetryContext(trace_id="")
     history = list(messages)
     await hooks.emit(AgentStartEvent())
     turn = 0
+    end_reason = "stop"
     while turn < max_turns:
         turn += 1
         await hooks.emit(TurnStartEvent(turn=turn))
@@ -100,6 +108,7 @@ async def agent_loop(
 
         if assistant.stop_reason in ("error", "aborted"):
             turn_status = "error"
+            end_reason = assistant.stop_reason
             telemetry.end(turn_span, context, status=turn_status)
             break
 
@@ -125,9 +134,12 @@ async def agent_loop(
             history.extend(follow_up)
             continue
         break
+    else:
+        # The turn limit was reached while more work was pending.
+        end_reason = "max_turns"
 
-    await hooks.emit(AgentEndEvent(messages=history))
-    return history
+    await hooks.emit(AgentEndEvent(messages=history, stop_reason=end_reason))
+    return LoopResult(history, end_reason)
 
 
-__all__ = ["LoopHooks", "StreamFn", "agent_loop"]
+__all__ = ["LoopHooks", "LoopResult", "StreamFn", "agent_loop"]

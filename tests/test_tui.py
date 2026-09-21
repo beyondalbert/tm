@@ -612,3 +612,39 @@ async def test_shift_enter_inserts_a_newline() -> None:
         isinstance(message, UserMessage) and message.content == "a\nb"
         for message in agent.messages
     )
+
+
+async def test_escape_aborts_a_running_turn(monkeypatch) -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    aborted: list[bool] = []
+    monkeypatch.setattr(agent, "abort", lambda: aborted.append(True))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._status = "working"
+        app.action_dismiss_suggestions()
+        await pilot.pause()
+
+    assert aborted == [True]
+
+
+async def test_escape_closes_suggestions_instead_of_aborting(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    aborted: list[bool] = []
+    monkeypatch.setattr(agent, "abort", lambda: aborted.append(True))
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "/mod"
+        prompt.move_cursor(prompt.document.end)
+        await pilot.pause()
+        assert app.query_one("#suggestions").display is True
+
+        app.action_dismiss_suggestions()
+        await pilot.pause()
+
+    assert app.suggestions_active is False
+    assert aborted == []

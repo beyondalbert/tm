@@ -67,6 +67,8 @@ class TurnEndEvent(AgentEvent):
 class AgentEndEvent(AgentEvent):
     type: Literal["agent_end"] = "agent_end"
     messages: list[Message]
+    #: Why the run ended: "stop", "max_turns", "error", or "aborted".
+    stop_reason: str | None = None
 
 
 __all__ = [

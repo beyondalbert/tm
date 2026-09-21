@@ -277,6 +277,7 @@ def _build_agent(
     cache_retention: str | None = None,
     journal: Journal | None = None,
     dry_run: bool = False,
+    max_turns: int | None = None,
 ) -> Agent:
     cwd = Path.cwd()
     policy = Policy.load(cwd=cwd, config_dir=config_dir(), include_project=trusted)
@@ -302,6 +303,7 @@ def _build_agent(
         auto_compact=settings.auto_compact and not no_auto_compact,
         compact_threshold=settings.compact_threshold,
         compact_keep_recent=settings.compact_keep_recent,
+        max_turns=max_turns if max_turns is not None else settings.max_turns,
         telemetry=telemetry,
         store=store,
         cache_retention=cache_retention,
@@ -472,6 +474,7 @@ def _run_tui(
     journal: Journal | None = None,
     dry_run: bool = False,
     yolo: bool = False,
+    max_turns: int | None = None,
 ) -> None:
     from tm.tui import DeferredApprover, TextualApprover, TMPromptApp
 
@@ -493,6 +496,7 @@ def _run_tui(
         cache_retention=cache_retention,
         journal=journal,
         dry_run=dry_run,
+        max_turns=max_turns,
     )
     registry = _make_registry()
     _restore_session_model(agent, session, registry)
@@ -646,6 +650,9 @@ def main(
     no_auto_compact: bool = typer.Option(
         False, "--no-auto-compact", help="Disable automatic context compaction."
     ),
+    max_turns: int | None = typer.Option(
+        None, "--max-turns", help="Max agent turns per prompt (default from settings)."
+    ),
     telemetry_flag: bool = typer.Option(
         False, "--telemetry", help="Write redacted spans to <config>/telemetry.jsonl."
     ),
@@ -781,6 +788,7 @@ def main(
                     cache_retention=cache_retention,
                     journal=journal,
                     dry_run=dry_run,
+                    max_turns=max_turns,
                 )
                 _restore_session_model(agent, session, registry)
                 if store is not None and await agent.recover():
@@ -827,6 +835,7 @@ def main(
                 journal,
                 dry_run,
                 yolo,
+                max_turns,
             )
         else:
             asyncio.run(run())

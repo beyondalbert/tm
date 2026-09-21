@@ -721,7 +721,17 @@ class TMPromptApp(App[None]):
         self.move_suggestion(-1)
 
     def action_dismiss_suggestions(self) -> None:
-        self.close_suggestions()
+        if self.suggestions_active:
+            self.close_suggestions()
+            return
+        self._abort_run()
+
+    def _abort_run(self) -> None:
+        """Esc while a turn is running asks the agent to stop."""
+        if self._status == "idle":
+            return
+        self._agent.abort()
+        self.notify("aborting…")
 
     # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
@@ -746,11 +756,13 @@ class TMPromptApp(App[None]):
             line.append("─" * width, style=_BORDER_MUTED)
         else:
             label = f"{_SPINNER[self._spin_index]} Working"
+            hint = "  Esc to stop"
             head = f"── {label} "
-            tail = "─" * max(0, width - len(head))
+            tail = "─" * max(0, width - len(head) - len(hint))
             line.append(head, style=_BORDER_MUTED)
             line.append(label, style=_TEXT)
             line.append(tail, style=_BORDER_MUTED)
+            line.append(hint, style=_DIM)
         self.query_one("#editor-status", Static).update(line)
 
     def _git_branch(self) -> str | None:
@@ -823,6 +835,14 @@ class TMPromptApp(App[None]):
         elif isinstance(event, AgentEndEvent):
             self._set_status("idle")
             self._update_footer()
+            if event.stop_reason == "max_turns":
+                await self._mount(
+                    SystemNote(
+                        f"Stopped after {self._agent.max_turns} turns "
+                        "(raise it with --max-turns). Send another message to continue.",
+                        _WARNING,
+                    )
+                )
         elif isinstance(event, MessageStartEvent) and isinstance(
             event.message, AssistantMessage
         ):

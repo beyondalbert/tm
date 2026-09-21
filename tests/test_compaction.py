@@ -246,3 +246,35 @@ async def test_orphan_tool_result_is_not_sent_to_the_provider() -> None:
 
     assert not any(isinstance(m, ToolResultMessage) for m in seen["messages"])
 
+
+async def test_overflow_recovers_more_than_once() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        index = calls["n"]
+        if index in (1, 3):
+            message = AssistantMessage(content=[TextContent(text="partial")], stop_reason="length")
+        elif index in (2, 4):
+            message = AssistantMessage(
+                content=[TextContent(text="summary")], stop_reason="stop"
+            )
+        else:
+            message = AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn)
+    agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
+
+    await agent.prompt("go")
+
+    # length -> compact -> length -> compact -> done
+    assert calls["n"] == 5
+    last = agent.messages[-1]
+    assert isinstance(last, AssistantMessage)
+    assert last.text() == "done"
+

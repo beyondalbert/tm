@@ -8,6 +8,7 @@ from rich.console import Console
 
 from tm.ai.types import AssistantMessage
 from tm.core.events import (
+    AgentEndEvent,
     AgentEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -61,6 +62,11 @@ class ConsoleAgentUI:
                 output = output[:_MAX_TOOL_OUTPUT] + "\n... (trimmed)"
             style = "red" if event.is_error else "dim"
             self.console.print(f"[{style}]{output}[/{style}]")
+        elif isinstance(event, AgentEndEvent) and event.stop_reason == "max_turns":
+            self.console.print(
+                "[yellow]stopped at the turn limit (--max-turns); "
+                "send another message to continue[/yellow]"
+            )
 
     def _render_assistant(self, message: AssistantMessage) -> None:
         thinking = message.thinking()

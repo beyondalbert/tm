@@ -136,6 +136,8 @@ class Agent:
         self.operation: Operation | None = None
         self._trace_id = ""
         self._operation_span_id: str | None = None
+        #: Why the last run ended: "stop", "max_turns", "error", or "aborted".
+        self.last_stop_reason: str | None = None
 
         if stream_fn is None and provider is None:
             raise ValueError("Agent requires either a provider or a stream_fn")
@@ -300,6 +302,7 @@ class Agent:
     async def _run_loop(self, new_messages: list[Message]) -> list[Message]:
         self._signal = AbortSignal()
         self._running = True
+        self.last_stop_reason = None
         options = StreamOptions(
             temperature=self.temperature,
             max_tokens=self.max_tokens,
@@ -340,9 +343,10 @@ class Agent:
         self.operation = operation
         status = "ok"
         recovery_attempts = 0
+        max_recoveries = 5
         try:
             while True:
-                self._messages = await agent_loop(
+                result = await agent_loop(
                     messages=repair_tool_messages(self._messages),
                     system_prompt=self.system_prompt,
                     tools=[tool.spec() for tool in self.tools],
@@ -354,12 +358,14 @@ class Agent:
                     telemetry=self.telemetry,
                     context=child_context,
                 )
+                self._messages = result.messages
+                self.last_stop_reason = result.stop_reason
                 if (
-                    recovery_attempts == 0
+                    recovery_attempts < max_recoveries
                     and self._context_overflowed()
                     and len(self._messages) > self.compact_keep_recent
                 ):
-                    # Context overflowed: persist what we have, compact, retry once.
+                    # Context overflowed: persist what we have, compact, retry.
                     self._flush_messages()
                     recovery_attempts += 1
                     if await self.compact(keep_recent=self.compact_keep_recent):

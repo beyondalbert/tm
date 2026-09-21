@@ -15,6 +15,7 @@ from tm.ai.types import (
 )
 from tm.core.agent import Agent
 from tm.core.events import (
+    AgentEndEvent,
     AgentEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
@@ -172,3 +173,39 @@ async def test_steering_message_is_delivered_after_turn() -> None:
 
 async def _record(events: list[AgentEvent], event: AgentEvent) -> None:
     events.append(event)
+
+
+async def test_max_turns_stops_with_a_reason() -> None:
+    def always_tool(model, context, options) -> EventStream:
+        return make_stream(
+            AssistantMessage(
+                tool_calls=[ToolCall(id="t", name="echo", arguments={"text": "x"})],
+                stop_reason="tool_use",
+            )
+        )
+
+    agent = Agent(MODEL, stream_fn=always_tool, tools=[EchoTool()], max_turns=2)
+    events: list[AgentEvent] = []
+    agent.subscribe(lambda event: _record(events, event))
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "max_turns"
+    ends = [e for e in events if isinstance(e, AgentEndEvent)]
+    assert ends and ends[-1].stop_reason == "max_turns"
+
+
+async def test_max_turns_is_overridable_per_agent() -> None:
+    def always_tool(model, context, options) -> EventStream:
+        return make_stream(
+            AssistantMessage(
+                tool_calls=[ToolCall(id="t", name="echo", arguments={"text": "x"})],
+                stop_reason="tool_use",
+            )
+        )
+
+    agent = Agent(MODEL, stream_fn=always_tool, tools=[EchoTool()], max_turns=1)
+    await agent.prompt("go")
+    assert agent.last_stop_reason == "max_turns"
+    # one turn ran: a tool-call assistant plus its result
+    assert sum(1 for m in agent.messages if m.role == "assistant") == 1

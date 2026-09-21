@@ -215,6 +215,7 @@ Switch to a custom model with `/model my-model` or `tm --model my-model`.
 | `tm -r` | Pick a saved session to resume (`--all-sessions` to include other dirs) |
 | `tm --no-extensions` | Skip loading `.aiagent/extensions` |
 | `tm --no-auto-compact` | Disable automatic context compaction |
+| `tm --max-turns N` | Max agent turns per prompt (default 100) |
 | `tm --telemetry` | Write redacted spans to `<config>/telemetry.jsonl` |
 | `tm --durable` | Persist a durable restart point per run to `<config>/state.jsonl` |
 | `tm --no-mouse` | Let the terminal handle mouse selection/copy |
@@ -293,7 +294,8 @@ directory. TM asks on first use, remembers the decision in `<config>/trust.json`
 and honors `--approve`/`--no-approve`, `/trust [off]`, and the
 `default_project_trust` setting (`ask` | `always` | `never`). Context files such
 as `AGENTS.md` are not gated. Non-interactive runs (`-p`, `--json`, `--mode rpc`)
-do not prompt and decline by default.
+do not prompt and decline by default, so allowlist what they may do in
+`policy.toml` or start them with `--yolo`.
 
 **Changes and undo.** Mutating tools append to `<config>/changes/changes.jsonl`.
 File writes/edits snapshot the previous content; package installs and service
@@ -330,7 +332,8 @@ complete a command, or `@` to fuzzy-search a file path. `Up`/`Down` move the
 selection and `Escape` dismisses it.
 
 **Input.** The TUI prompt is multi-line: `Enter` submits, `Shift+Enter` (or
-`Ctrl+J`) inserts a newline, and pasting keeps every line.
+`Ctrl+J`) inserts a newline, and pasting keeps every line. Press `Esc` while a
+turn is running to stop it.
 
 ## Sessions
 
@@ -373,6 +376,7 @@ system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true      # summarize older context when nearing the limit
 compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
+max_turns = 100          # max agent turns per prompt (also `tm --max-turns N`)
 default_project_trust = "ask"  # ask | always | never
 cache_retention = "short"      # short | long (provider prompt cache; TM_CACHE_RETENTION overrides)
 env_probe = true               # add a machine summary to the system prompt
