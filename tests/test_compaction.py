@@ -14,6 +14,7 @@ from tm.ai.types import (
 )
 from tm.core.agent import Agent
 from tm.core.compaction import format_transcript
+from tm.core.events import AgentNoticeEvent
 
 MODEL = Model(id="fake", provider="fake")
 
@@ -277,4 +278,27 @@ async def test_overflow_recovers_more_than_once() -> None:
     last = agent.messages[-1]
     assert isinstance(last, AssistantMessage)
     assert last.text() == "done"
+
+
+async def test_auto_compact_emits_a_notice() -> None:
+    small = Model(id="fake", provider="fake", context_window=100)
+    agent = Agent(
+        small,
+        stream_fn=summary_stream("summary"),
+        auto_compact=True,
+        compact_threshold=0.5,
+        compact_keep_recent=4,
+    )
+    notices: list[str] = []
+
+    async def listener(event) -> None:
+        if isinstance(event, AgentNoticeEvent):
+            notices.append(event.text)
+
+    agent.subscribe(listener)
+    agent.set_messages([UserMessage(content="word " * 20) for _ in range(20)])
+
+    await agent.prompt("q")
+
+    assert any("compacting" in text for text in notices)
 

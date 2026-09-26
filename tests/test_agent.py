@@ -17,6 +17,7 @@ from tm.core.agent import Agent
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
+    AgentNoticeEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
@@ -209,3 +210,58 @@ async def test_max_turns_is_overridable_per_agent() -> None:
     assert agent.last_stop_reason == "max_turns"
     # one turn ran: a tool-call assistant plus its result
     assert sum(1 for m in agent.messages if m.role == "assistant") == 1
+
+
+async def test_transient_network_error_is_retried(monkeypatch) -> None:
+    import tm.core.loop as loop
+
+    monkeypatch.setattr(loop, "_retry_delay", lambda attempt: 0.0)
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                model="fake",
+                content=[],
+                stop_reason="error",
+                error_message="Connection error: timed out",
+            )
+        else:
+            message = AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+        return make_stream(message)
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_retries=2)
+    notices: list[AgentNoticeEvent] = []
+
+    async def listener(event: AgentEvent) -> None:
+        if isinstance(event, AgentNoticeEvent):
+            notices.append(event)
+
+    agent.subscribe(listener)
+    await agent.prompt("go")
+
+    assert calls["n"] == 2
+    assert agent.last_stop_reason == "stop"
+    assert notices and "retrying" in notices[0].text
+
+
+async def test_auth_error_is_not_retried() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        return make_stream(
+            AssistantMessage(
+                model="fake",
+                content=[],
+                stop_reason="error",
+                error_message="401 Unauthorized",
+            )
+        )
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_retries=3)
+    await agent.prompt("go")
+
+    assert calls["n"] == 1
+    assert agent.last_stop_reason == "error"

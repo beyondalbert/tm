@@ -24,6 +24,7 @@ from tm.ai.types import (
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
+    AgentNoticeEvent,
     MessageEndEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
@@ -46,6 +47,7 @@ from tm.telemetry import (
 )
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.utils.abort import AbortSignal
+from tm.utils.pause import PauseController
 
 Listener = Callable[[AgentEvent], Awaitable[None]]
 
@@ -100,7 +102,8 @@ class Agent:
         stream_fn: StreamFn | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        max_turns: int = 100,
+        max_turns: int = 300,
+        max_retries: int = 3,
         cwd: Path | None = None,
         session: Session | None = None,
         auto_compact: bool = False,
@@ -117,6 +120,7 @@ class Agent:
         self.tools: list[Tool] = list(tools or [])
         self.system_prompt = system_prompt
         self.max_turns = max_turns
+        self.max_retries = max_retries
         self.cwd = cwd or Path.cwd()
         self.session = session
         self.auto_compact = auto_compact
@@ -149,6 +153,7 @@ class Agent:
         self._follow_up: list[Message] = []
         self._pending_messages: list[Message] = []
         self._signal: AbortSignal | None = None
+        self.pause = PauseController()
 
     def _storage(self) -> Store | None:
         """The store for operation state: the session's storage when there is one."""
@@ -175,7 +180,12 @@ class Agent:
     def set_messages(self, messages: list[Message]) -> None:
         self._messages = list(messages)
 
-    async def compact(self, instructions: str | None = None, keep_recent: int = 6) -> bool:
+    async def compact(
+        self,
+        instructions: str | None = None,
+        keep_recent: int = 6,
+        signal: AbortSignal | None = None,
+    ) -> bool:
         """Summarize older messages. Persists a compaction entry when possible."""
         from tm.core.compaction import summarize_messages
 
@@ -192,7 +202,9 @@ class Agent:
             return False
         if self.before_compact is not None:
             await _maybe_await(self.before_compact(older))
-        summary = await summarize_messages(self._stream_fn, self.model, older, instructions)
+        summary = await summarize_messages(
+            self._stream_fn, self.model, older, instructions, signal
+        )
         if not summary:
             return False
         if self.session is not None:
@@ -232,7 +244,11 @@ class Agent:
         limit = int(self.model.context_window * self.compact_threshold)
         if estimated < limit:
             return False
-        return await self.compact(keep_recent=self.compact_keep_recent)
+        await self._notice(
+            f"context is large (~{estimated} tokens); compacting before responding…",
+            "info",
+        )
+        return await self.compact(keep_recent=self.compact_keep_recent, signal=self._signal)
 
     @property
     def is_running(self) -> bool:
@@ -248,6 +264,26 @@ class Agent:
                 self._listeners.remove(listener)
 
         return unsubscribe
+
+    async def _notice(self, text: str, level: str = "info") -> None:
+        await self._emit(AgentNoticeEvent(text=text, level=level))
+
+    async def _wait_if_paused(self) -> None:
+        """Block while paused, but wake immediately if the run is aborted."""
+        if not self.pause.paused:
+            return
+        pause_task = asyncio.create_task(self.pause.wait_if_paused())
+        if self._signal is None:
+            await pause_task
+            return
+        abort_task = asyncio.create_task(self._signal.wait())
+        try:
+            await asyncio.wait(
+                {pause_task, abort_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for task in (pause_task, abort_task):
+                task.cancel()
 
     async def _emit(self, event: AgentEvent) -> None:
         if self.operation is not None and isinstance(event, TurnStartEvent):
@@ -287,10 +323,13 @@ class Agent:
     def abort(self) -> None:
         if self._signal is not None:
             self._signal.abort()
+        # A stopped run must not stay paused (it would block the next one).
+        self.pause.resume()
 
     # -- run --------------------------------------------------------------
     async def prompt(self, content: str | Message | list[Message]) -> list[Message]:
         new_messages = _normalize(content)
+        self._signal = AbortSignal()
         if self.auto_compact:
             await self._maybe_auto_compact()
         self._messages.extend(new_messages)
@@ -300,7 +339,8 @@ class Agent:
         return await self._run_loop(new_messages)
 
     async def _run_loop(self, new_messages: list[Message]) -> list[Message]:
-        self._signal = AbortSignal()
+        if self._signal is None:
+            self._signal = AbortSignal()
         self._running = True
         self.last_stop_reason = None
         options = StreamOptions(
@@ -314,6 +354,8 @@ class Agent:
             execute_tools=self._execute_tools,
             take_steering=self._take_steering,
             take_follow_up=self._take_follow_up,
+            pause=self._wait_if_paused,
+            notice=self._notice,
         )
         context = TelemetryContext(trace_id=uuid.uuid4().hex)
         span_id = self.telemetry.start(
@@ -355,6 +397,7 @@ class Agent:
                     options=options,
                     hooks=hooks,
                     max_turns=self.max_turns,
+                    max_retries=self.max_retries,
                     telemetry=self.telemetry,
                     context=child_context,
                 )
@@ -368,7 +411,14 @@ class Agent:
                     # Context overflowed: persist what we have, compact, retry.
                     self._flush_messages()
                     recovery_attempts += 1
-                    if await self.compact(keep_recent=self.compact_keep_recent):
+                    await self._notice(
+                        f"context overflowed; compacting and retrying "
+                        f"({recovery_attempts}/{max_recoveries})…",
+                        "warning",
+                    )
+                    if await self.compact(
+                        keep_recent=self.compact_keep_recent, signal=self._signal
+                    ):
                         continue
                 break
         except BaseException:

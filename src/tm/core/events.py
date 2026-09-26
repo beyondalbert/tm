@@ -71,9 +71,19 @@ class AgentEndEvent(AgentEvent):
     stop_reason: str | None = None
 
 
+class AgentNoticeEvent(AgentEvent):
+    """A user-facing notice from the runtime (e.g. a retry)."""
+
+    type: Literal["agent_notice"] = "agent_notice"
+    text: str
+    #: "info", "warning", or "error".
+    level: str = "info"
+
+
 __all__ = [
     "AgentEndEvent",
     "AgentEvent",
+    "AgentNoticeEvent",
     "AgentStartEvent",
     "MessageEndEvent",
     "MessageStartEvent",

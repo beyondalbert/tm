@@ -7,6 +7,7 @@ import json
 from tm.ai.providers.base import StreamOptions
 from tm.ai.types import AssistantMessage, Context, Message, ToolResultMessage, UserMessage
 from tm.core.loop import StreamFn
+from tm.utils.abort import AbortSignal
 
 DEFAULT_INSTRUCTIONS = (
     "Summarize the conversation. Preserve decisions, file paths, commands run, "
@@ -58,6 +59,7 @@ async def summarize_messages(
     model,
     messages: list[Message],
     instructions: str | None = None,
+    signal: AbortSignal | None = None,
 ) -> str:
     prompt = (
         f"{instructions or DEFAULT_INSTRUCTIONS}\n\n"
@@ -67,7 +69,7 @@ async def summarize_messages(
         system_prompt="You compact conversations into concise, factual summaries.",
         messages=[UserMessage(content=prompt)],
     )
-    stream = stream_fn(model, context, StreamOptions())
+    stream = stream_fn(model, context, StreamOptions(signal=signal))
     final = await stream.result()
     return final.text().strip()
 

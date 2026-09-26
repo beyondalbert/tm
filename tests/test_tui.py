@@ -648,3 +648,36 @@ async def test_escape_closes_suggestions_instead_of_aborting(tmp_path, monkeypat
 
     assert app.suggestions_active is False
     assert aborted == []
+
+
+async def test_ctrl_p_pauses_and_resumes() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._status = "working"
+
+        app.action_toggle_pause()
+        assert agent.pause.paused is True
+        assert app._status == "paused"
+
+        app.action_toggle_pause()
+        assert agent.pause.paused is False
+        assert app._status == "working"
+
+
+async def test_ctrl_c_stops_a_running_turn(monkeypatch) -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    aborted: list[bool] = []
+    monkeypatch.setattr(agent, "abort", lambda: aborted.append(True))
+
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.focus()
+        app._status = "working"
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+
+    assert aborted == [True]

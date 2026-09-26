@@ -208,7 +208,8 @@ context_window = 65536
 | `tm -r` | 选择已保存的会话恢复（`--all-sessions` 含其它目录） |
 | `tm --no-extensions` | 不加载 `.aiagent/extensions` |
 | `tm --no-auto-compact` | 关闭自动上下文压缩 |
-| `tm --max-turns N` | 每次提示的最大回合数（默认 100） |
+| `tm --max-turns N` | 每次提示的最大回合数（默认 300） |
+| `tm --max-retries N` | 瞬时网络错误的重试次数（默认 3） |
 | `tm --telemetry` | 将脱敏 span 写入 `<config>/telemetry.jsonl` |
 | `tm --durable` | 为每次运行在 `<config>/state.jsonl` 持久化重启点 |
 | `tm --no-mouse` | 让终端接管鼠标选择/复制 |
@@ -309,7 +310,11 @@ allow = ["api.deepseek.com"]
 `Up`/`Down` 移动选择，`Escape` 关闭候选。
 
 **输入。** TUI 输入框支持多行：`Enter` 发送，`Shift+Enter`（或 `Ctrl+J`）插入换行；
-粘贴会保留每一行。运行中按 `Esc` 可停止当前回合。
+粘贴会保留每一行。运行中按 `Esc` 或 `Ctrl+C` 停止当前回合，按 `Ctrl+P` 暂停/恢复（状态行会显示）。
+停止会同时终止正在运行的 shell/python 命令。
+
+**网络错误。** 瞬时 provider 故障（超时、连接重置、429/5xx）会按 `max_retries` 自动重试，并显示
+“network problem: retrying …” 提示；非瞬时错误（鉴权、请求非法）会直接停止。
 
 ## 会话
 
@@ -347,7 +352,8 @@ system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true      # summarize older context when nearing the limit
 compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
-max_turns = 100          # 每次提示的最大回合数（也可 `tm --max-turns N`）
+max_turns = 300          # 每次提示的最大回合数（也可 `tm --max-turns N`）
+max_retries = 3          # 瞬时网络错误的重试次数（也可 `--max-retries N`）
 default_project_trust = "ask"  # ask | always | never
 cache_retention = "short"      # short | long（provider 提示缓存；TM_CACHE_RETENTION 可覆盖）
 env_probe = true               # 在系统提示词中加入本机摘要

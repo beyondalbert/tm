@@ -10,6 +10,7 @@ from tm.ai.types import AssistantMessage
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
+    AgentNoticeEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -62,6 +63,9 @@ class ConsoleAgentUI:
                 output = output[:_MAX_TOOL_OUTPUT] + "\n... (trimmed)"
             style = "red" if event.is_error else "dim"
             self.console.print(f"[{style}]{output}[/{style}]")
+        elif isinstance(event, AgentNoticeEvent):
+            style = "yellow" if event.level in ("warning", "error") else "dim"
+            self.console.print(f"[{style}]{event.text}[/{style}]")
         elif isinstance(event, AgentEndEvent) and event.stop_reason == "max_turns":
             self.console.print(
                 "[yellow]stopped at the turn limit (--max-turns); "

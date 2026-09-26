@@ -51,7 +51,8 @@ class Settings:
     auto_compact: bool = True
     compact_threshold: float = 0.8
     compact_keep_recent: int = 6
-    max_turns: int = 100
+    max_turns: int = 300
+    max_retries: int = 3
     telemetry: bool = False
     durable: bool = False
     mouse: bool = True

@@ -278,6 +278,7 @@ def _build_agent(
     journal: Journal | None = None,
     dry_run: bool = False,
     max_turns: int | None = None,
+    max_retries: int | None = None,
 ) -> Agent:
     cwd = Path.cwd()
     policy = Policy.load(cwd=cwd, config_dir=config_dir(), include_project=trusted)
@@ -304,6 +305,7 @@ def _build_agent(
         compact_threshold=settings.compact_threshold,
         compact_keep_recent=settings.compact_keep_recent,
         max_turns=max_turns if max_turns is not None else settings.max_turns,
+        max_retries=max_retries if max_retries is not None else settings.max_retries,
         telemetry=telemetry,
         store=store,
         cache_retention=cache_retention,
@@ -475,6 +477,7 @@ def _run_tui(
     dry_run: bool = False,
     yolo: bool = False,
     max_turns: int | None = None,
+    max_retries: int | None = None,
 ) -> None:
     from tm.tui import DeferredApprover, TextualApprover, TMPromptApp
 
@@ -497,6 +500,7 @@ def _run_tui(
         journal=journal,
         dry_run=dry_run,
         max_turns=max_turns,
+        max_retries=max_retries,
     )
     registry = _make_registry()
     _restore_session_model(agent, session, registry)
@@ -653,6 +657,9 @@ def main(
     max_turns: int | None = typer.Option(
         None, "--max-turns", help="Max agent turns per prompt (default from settings)."
     ),
+    max_retries: int | None = typer.Option(
+        None, "--max-retries", help="Retries for transient network errors (default from settings)."
+    ),
     telemetry_flag: bool = typer.Option(
         False, "--telemetry", help="Write redacted spans to <config>/telemetry.jsonl."
     ),
@@ -789,6 +796,7 @@ def main(
                     journal=journal,
                     dry_run=dry_run,
                     max_turns=max_turns,
+                    max_retries=max_retries,
                 )
                 _restore_session_model(agent, session, registry)
                 if store is not None and await agent.recover():
@@ -836,6 +844,7 @@ def main(
                 dry_run,
                 yolo,
                 max_turns,
+                max_retries,
             )
         else:
             asyncio.run(run())

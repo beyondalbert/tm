@@ -38,6 +38,7 @@ from tm.core.compaction import estimate_tokens
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
+    AgentNoticeEvent,
     AgentStartEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -400,6 +401,15 @@ class PromptArea(TextArea):
 
     async def _on_key(self, event: events.Key) -> None:
         app = self.app
+        if (
+            event.key == "ctrl+c"
+            and isinstance(app, TMPromptApp)
+            and app.is_working
+        ):
+            event.stop()
+            event.prevent_default()
+            app.action_abort_run()
+            return
         if isinstance(app, TMPromptApp) and app.suggestions_active:
             if event.key == "tab":
                 event.stop()
@@ -469,6 +479,7 @@ class TMPromptApp(App[None]):
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+o", "toggle_tools", "Expand tools"),
         Binding("ctrl+y", "toggle_auto", "Auto-approve"),
+        Binding("ctrl+p", "toggle_pause", "Pause"),
         Binding("ctrl+shift+c", "copy_selection", "Copy selection", show=False),
         Binding("tab", "accept_suggestion", "Complete", show=False),
         Binding("down", "suggestion_down", "Next suggestion", show=False),
@@ -593,6 +604,18 @@ class TMPromptApp(App[None]):
         approver.auto = not approver.auto
         self.notify(f"auto-approve {'on' if approver.auto else 'off'}")
         self._update_footer()
+
+    def action_toggle_pause(self) -> None:
+        if self._status == "idle":
+            return
+        if self._agent.pause.paused:
+            self._agent.pause.resume()
+            self._set_status("working")
+            self.notify("resumed")
+        else:
+            self._agent.pause.pause()
+            self._set_status("paused")
+            self.notify("paused")
 
     def action_copy_selection(self) -> None:
         """Copy the mouse selection, or the last reply, to the system clipboard."""
@@ -724,20 +747,24 @@ class TMPromptApp(App[None]):
         if self.suggestions_active:
             self.close_suggestions()
             return
-        self._abort_run()
+        self.action_abort_run()
 
-    def _abort_run(self) -> None:
-        """Esc while a turn is running asks the agent to stop."""
-        if self._status == "idle":
+    @property
+    def is_working(self) -> bool:
+        return self._status != "idle"
+
+    def action_abort_run(self) -> None:
+        """Stop the current turn (Esc, or Ctrl+C in the prompt)."""
+        if not self.is_working:
             return
         self._agent.abort()
-        self.notify("aborting…")
+        self.notify("stopping…")
 
     # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
         self._status = status
         self.sub_title = status
-        if status == "idle":
+        if status in ("idle", "paused"):
             if self._spinner_timer is not None:
                 self._spinner_timer.stop()
                 self._spinner_timer = None
@@ -754,9 +781,14 @@ class TMPromptApp(App[None]):
         line = Text()
         if self._status == "idle":
             line.append("─" * width, style=_BORDER_MUTED)
+        elif self._status == "paused":
+            label = "Paused  Ctrl+P to resume"
+            line.append("── ", style=_BORDER_MUTED)
+            line.append(label, style=_WARNING)
+            line.append(" " + "─" * max(0, width - len(label) - 3), style=_BORDER_MUTED)
         else:
             label = f"{_SPINNER[self._spin_index]} Working"
-            hint = "  Esc to stop"
+            hint = "  Esc/Ctrl+C stop  ·  Ctrl+P pause"
             head = f"── {label} "
             tail = "─" * max(0, width - len(head) - len(hint))
             line.append(head, style=_BORDER_MUTED)
@@ -843,6 +875,9 @@ class TMPromptApp(App[None]):
                         _WARNING,
                     )
                 )
+        elif isinstance(event, AgentNoticeEvent):
+            style = _WARNING if event.level in ("warning", "error") else _DIM
+            await self._mount(SystemNote(event.text, style))
         elif isinstance(event, MessageStartEvent) and isinstance(
             event.message, AssistantMessage
         ):
@@ -926,6 +961,8 @@ class TMPromptApp(App[None]):
         await self._prompt(text)
 
     async def _prompt(self, text: str) -> None:
+        # Show activity immediately: auto-compaction may run before the first token.
+        self._set_status("working")
         try:
             await self._agent.prompt(text)
         except Exception as exc:  # noqa: BLE001 - surface failures in the UI
