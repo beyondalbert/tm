@@ -293,7 +293,10 @@ class Agent:
         if isinstance(event, AgentEndEvent):
             self._flush_messages()
         for listener in list(self._listeners):
-            await listener(event)
+            try:
+                await listener(event)
+            except Exception:  # noqa: BLE001 - an observer must not abort the run
+                continue
 
     def _persist_message(self, message: Message) -> None:
         self._pending_messages.append(message)

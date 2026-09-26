@@ -265,3 +265,24 @@ async def test_auth_error_is_not_retried() -> None:
 
     assert calls["n"] == 1
     assert agent.last_stop_reason == "error"
+
+
+async def test_a_broken_listener_does_not_abort_the_run() -> None:
+    final = AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+    agent = Agent(MODEL, stream_fn=scripted([final]))
+
+    async def boom(event: AgentEvent) -> None:
+        raise RuntimeError("listener boom")
+
+    collected: list[AgentEvent] = []
+
+    async def collect(event: AgentEvent) -> None:
+        collected.append(event)
+
+    agent.subscribe(boom)
+    agent.subscribe(collect)
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "stop"
+    assert any(isinstance(event, AgentEndEvent) for event in collected)

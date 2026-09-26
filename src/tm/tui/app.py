@@ -968,6 +968,8 @@ class TMPromptApp(App[None]):
         except Exception as exc:  # noqa: BLE001 - surface failures in the UI
             await self._mount(SystemNote(f"error: {exc}", _ERROR))
         finally:
+            self._set_status("idle")
+            self._update_footer()
             self.query_one("#prompt", TextArea).focus()
 
 

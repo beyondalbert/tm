@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from rich.console import Console
+from rich.text import Text
 
 from tm.ai.types import AssistantMessage
 from tm.core.events import (
@@ -44,39 +45,50 @@ class ConsoleAgentUI:
                     self.console.print()
                 if message.stop_reason == "error":
                     self.console.print(
-                        f"[red]error: {message.error_message or 'unknown error'}[/red]"
+                        f"error: {message.error_message or 'unknown error'}",
+                        style="red",
+                        markup=False,
+                        highlight=False,
                     )
                 elif message.stop_reason == "aborted":
-                    self.console.print("[yellow]aborted[/yellow]")
+                    self.console.print("aborted", style="yellow", markup=False)
                 if message.usage and (message.usage.input or message.usage.output):
                     self.console.print(
-                        f"[dim]tokens: in={message.usage.input} out={message.usage.output}[/dim]"
+                        f"tokens: in={message.usage.input} out={message.usage.output}",
+                        style="dim",
+                        markup=False,
                     )
         elif isinstance(event, ToolExecutionStartEvent):
             arguments = json.dumps(event.arguments, ensure_ascii=False)
             if len(arguments) > 200:
                 arguments = arguments[:200] + "..."
-            self.console.print(f"[yellow]> {event.tool_name}[/yellow] [dim]{arguments}[/dim]")
+            line = Text()
+            line.append("> " + event.tool_name, style="yellow")
+            line.append(" " + arguments, style="dim")
+            self.console.print(line)
         elif isinstance(event, ToolExecutionEndEvent):
             output = event.output
             if len(output) > _MAX_TOOL_OUTPUT:
                 output = output[:_MAX_TOOL_OUTPUT] + "\n... (trimmed)"
-            style = "red" if event.is_error else "dim"
-            self.console.print(f"[{style}]{output}[/{style}]")
+            self.console.print(
+                output, style="red" if event.is_error else "dim", markup=False, highlight=False
+            )
         elif isinstance(event, AgentNoticeEvent):
             style = "yellow" if event.level in ("warning", "error") else "dim"
-            self.console.print(f"[{style}]{event.text}[/{style}]")
+            self.console.print(event.text, style=style, markup=False, highlight=False)
         elif isinstance(event, AgentEndEvent) and event.stop_reason == "max_turns":
             self.console.print(
-                "[yellow]stopped at the turn limit (--max-turns); "
-                "send another message to continue[/yellow]"
+                "stopped at the turn limit (--max-turns); "
+                "send another message to continue",
+                style="yellow",
+                markup=False,
             )
 
     def _render_assistant(self, message: AssistantMessage) -> None:
         thinking = message.thinking()
         if len(thinking) > self._thinking_printed:
             if self._thinking_printed == 0 and not self._text_started:
-                self.console.print("[dim]thinking[/dim]")
+                self.console.print("thinking", style="dim", markup=False)
             self.console.print(
                 thinking[self._thinking_printed :],
                 end="",

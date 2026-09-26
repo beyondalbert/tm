@@ -695,3 +695,21 @@ async def test_aborted_end_shows_a_note() -> None:
         notes = app.query(".system")
         assert notes
         assert "Stopped" in str(notes.first().render())
+
+
+async def test_prompt_error_resets_status(monkeypatch) -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async def boom(text: str) -> None:
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(agent, "prompt", boom)
+
+    async with app.run_test() as pilot:
+        await app._prompt("go")
+        await pilot.pause()
+        assert app._status == "idle"
+        notes = app.query(".system")
+        assert notes
+        assert "kaboom" in str(notes.first().render())

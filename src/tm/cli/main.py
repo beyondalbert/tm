@@ -279,6 +279,7 @@ def _build_agent(
     dry_run: bool = False,
     max_turns: int | None = None,
     max_retries: int | None = None,
+    console_ui: bool = True,
 ) -> Agent:
     cwd = Path.cwd()
     policy = Policy.load(cwd=cwd, config_dir=config_dir(), include_project=trusted)
@@ -315,7 +316,10 @@ def _build_agent(
     agent.before_tool_call = build_permission_hook(checker, cwd)
     for listener in resources.extensions.listeners:
         agent.subscribe(listener)
-    agent.subscribe(_json_listener if json_output else ConsoleAgentUI(console).handle)
+    if json_output:
+        agent.subscribe(_json_listener)
+    elif console_ui:
+        agent.subscribe(ConsoleAgentUI(console).handle)
     return agent
 
 
@@ -501,6 +505,7 @@ def _run_tui(
         dry_run=dry_run,
         max_turns=max_turns,
         max_retries=max_retries,
+        console_ui=False,
     )
     registry = _make_registry()
     _restore_session_model(agent, session, registry)
