@@ -335,7 +335,8 @@ selection and `Escape` dismisses it.
 **Input.** The TUI prompt is multi-line: `Enter` submits, `Shift+Enter` (or
 `Ctrl+J`) inserts a newline, and pasting keeps every line. While a turn is
 running, `Esc` or `Ctrl+C` stops it and `Ctrl+P` pauses/resumes it (the status
-line shows which). Stopping also kills a running shell/python command.
+line shows which). Stopping cancels the in-flight model request and kills a
+running shell/python command.
 
 **Network errors.** Transient provider failures (timeouts, connection resets,
 429/5xx) are retried up to `max_retries` times with a visible "network problem:

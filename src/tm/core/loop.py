@@ -143,12 +143,30 @@ async def agent_loop(
         while True:
             loop_context = Context(system_prompt=system_prompt, messages=history, tools=tools)
             stream = stream_fn(model, loop_context, options)
-            async for event in stream:
-                if isinstance(event, StartEvent) and event.partial is not None:
-                    await hooks.emit(MessageStartEvent(message=event.partial))
-                elif isinstance(event, _UPDATE_EVENTS) and event.partial is not None:
-                    await hooks.emit(MessageUpdateEvent(message=event.partial))
-            assistant = await stream.result()
+            watcher: asyncio.Task[None] | None = None
+            if options.signal is not None:
+                abort_signal = options.signal
+
+                async def _abort_stream(stream=stream, signal=abort_signal) -> None:
+                    await signal.wait()
+                    # Cancel the in-flight request and finish the stream so a
+                    # stalled or slow response stops immediately.
+                    stream.cancel()
+                    stream.end(
+                        AssistantMessage(model=model.id, content=[], stop_reason="aborted")
+                    )
+
+                watcher = asyncio.create_task(_abort_stream())
+            try:
+                async for event in stream:
+                    if isinstance(event, StartEvent) and event.partial is not None:
+                        await hooks.emit(MessageStartEvent(message=event.partial))
+                    elif isinstance(event, _UPDATE_EVENTS) and event.partial is not None:
+                        await hooks.emit(MessageUpdateEvent(message=event.partial))
+                assistant = await stream.result()
+            finally:
+                if watcher is not None:
+                    watcher.cancel()
             if (
                 assistant.stop_reason == "error"
                 and attempt < max_retries

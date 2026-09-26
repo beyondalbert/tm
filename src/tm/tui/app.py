@@ -875,6 +875,8 @@ class TMPromptApp(App[None]):
                         _WARNING,
                     )
                 )
+            elif event.stop_reason == "aborted":
+                await self._mount(SystemNote("Stopped by user.", _WARNING))
         elif isinstance(event, AgentNoticeEvent):
             style = _WARNING if event.level in ("warning", "error") else _DIM
             await self._mount(SystemNote(event.text, style))
@@ -900,8 +902,6 @@ class TMPromptApp(App[None]):
             error = None
             if message.stop_reason == "error":
                 error = f"Error: {message.error_message or 'unknown error'}"
-            elif message.stop_reason == "aborted":
-                error = "Operation aborted"
             thinking = message.thinking()
             text = message.text()
             # A provider may fail before emitting a start event, in which case no

@@ -311,7 +311,7 @@ allow = ["api.deepseek.com"]
 
 **输入。** TUI 输入框支持多行：`Enter` 发送，`Shift+Enter`（或 `Ctrl+J`）插入换行；
 粘贴会保留每一行。运行中按 `Esc` 或 `Ctrl+C` 停止当前回合，按 `Ctrl+P` 暂停/恢复（状态行会显示）。
-停止会同时终止正在运行的 shell/python 命令。
+停止会取消进行中的模型请求，并终止正在运行的 shell/python 命令。
 
 **网络错误。** 瞬时 provider 故障（超时、连接重置、429/5xx）会按 `max_retries` 自动重试，并显示
 “network problem: retrying …” 提示；非瞬时错误（鉴权、请求非法）会直接停止。

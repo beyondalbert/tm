@@ -681,3 +681,17 @@ async def test_ctrl_c_stops_a_running_turn(monkeypatch) -> None:
         await pilot.pause()
 
     assert aborted == [True]
+
+
+async def test_aborted_end_shows_a_note() -> None:
+    from tm.core.events import AgentEndEvent
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        await app._on_agent_event(AgentEndEvent(messages=[], stop_reason="aborted"))
+        await pilot.pause()
+        notes = app.query(".system")
+        assert notes
+        assert "Stopped" in str(notes.first().render())
