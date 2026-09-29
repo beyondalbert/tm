@@ -10,10 +10,18 @@ from tm.ai.types import (
     TextContent,
     ToolCall,
     ToolResultMessage,
+    Usage,
     UserMessage,
 )
 from tm.core.agent import Agent
-from tm.core.compaction import format_transcript
+from tm.core.compaction import (
+    DEFAULT_INSTRUCTIONS,
+    SUMMARY_PREFIX,
+    estimate_context_tokens,
+    extract_file_operations,
+    format_file_operations,
+    format_transcript,
+)
 from tm.core.events import AgentNoticeEvent
 
 MODEL = Model(id="fake", provider="fake")
@@ -326,4 +334,141 @@ async def test_overflow_compaction_shrinks_the_retained_tail(monkeypatch) -> Non
 
     assert keeps[0] == 2
     assert keeps[-1] == 0
+
+
+def test_format_transcript_truncates_to_budget() -> None:
+    messages: list[Message] = [UserMessage(content="x" * 100) for _ in range(10)]
+    text = format_transcript(messages, max_chars=100)
+    assert text.startswith("... (earlier part truncated)")
+    assert len(text) <= len("... (earlier part truncated)\n") + 100
+
+
+def test_estimate_context_tokens_prefers_provider_usage() -> None:
+    messages: list[Message] = [
+        UserMessage(content="x" * 400),
+        AssistantMessage(
+            content=[TextContent(text="hi")],
+            stop_reason="stop",
+            usage=Usage(input=1000, output=50, total=1050),
+        ),
+        UserMessage(content="y" * 400),
+    ]
+    total = estimate_context_tokens(messages)
+    assert total >= 1050
+    assert total <= 1050 + 200
+
+
+def test_estimate_context_tokens_ignores_failed_usage() -> None:
+    messages: list[Message] = [
+        AssistantMessage(
+            content=[TextContent(text="boom")],
+            stop_reason="error",
+            usage=Usage(input=9999, output=1, total=10000),
+        ),
+    ]
+    # No successful usage: falls back to the char heuristic (far below 10000).
+    assert estimate_context_tokens(messages) < 10
+
+
+def test_structured_summary_prompt_has_the_expected_sections() -> None:
+    for heading in ("## Goal", "## Progress", "## Next Steps", "## Critical Context"):
+        assert heading in DEFAULT_INSTRUCTIONS
+
+
+def test_extract_and_format_file_operations() -> None:
+    messages: list[Message] = [
+        AssistantMessage(
+            tool_calls=[ToolCall(id="1", name="read", arguments={"path": "a.py"})],
+            stop_reason="tool_use",
+        ),
+        AssistantMessage(
+            tool_calls=[ToolCall(id="2", name="edit", arguments={"path": "b.py"})],
+            stop_reason="tool_use",
+        ),
+        AssistantMessage(
+            tool_calls=[ToolCall(id="3", name="read", arguments={"path": "b.py"})],
+            stop_reason="tool_use",
+        ),
+    ]
+    read_files, modified_files = extract_file_operations(messages)
+    assert read_files == ["a.py"]
+    assert modified_files == ["b.py"]
+
+    text = format_file_operations(read_files, modified_files)
+    assert "<read-files>" in text and "a.py" in text
+    assert "<modified-files>" in text and "b.py" in text
+
+
+async def test_compact_reuses_the_previous_summary(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_summarize(
+        stream_fn, model, messages, instructions=None, signal=None, previous_summary=None
+    ) -> str:
+        captured["previous"] = previous_summary
+        captured["messages"] = list(messages)
+        return "updated summary"
+
+    monkeypatch.setattr("tm.core.compaction.summarize_messages", fake_summarize)
+
+    agent = Agent(MODEL, stream_fn=summary_stream("x"))
+    agent.set_messages(
+        [
+            UserMessage(content=f"{SUMMARY_PREFIX}old summary"),
+            UserMessage(content="m1"),
+            UserMessage(content="m2"),
+            UserMessage(content="m3"),
+        ]
+    )
+
+    assert await agent.compact(keep_recent=1) is True
+    assert captured["previous"] == "old summary"
+    summarized = captured["messages"]
+    assert isinstance(summarized, list)
+    assert all(
+        not (isinstance(m.content, str) and "old summary" in m.content) for m in summarized
+    )
+
+
+def test_trim_oldest_halves_the_history() -> None:
+    agent = Agent(MODEL, stream_fn=summary_stream("s"))
+    agent.set_messages([UserMessage(content=str(i)) for i in range(10)])
+
+    assert agent._trim_oldest() is True
+    assert len(agent.messages) <= 6
+
+
+async def test_overflow_falls_back_to_trimming_when_compaction_fails(monkeypatch) -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            message = AssistantMessage(
+                content=[TextContent(text="partial")], stop_reason="length"
+            )
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn)
+
+    async def fail_compact(*, keep_recent: int = 6, signal=None) -> bool:
+        return False
+
+    monkeypatch.setattr(agent, "compact", fail_compact)
+    agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
+
+    await agent.prompt("go")
+
+    last = agent.messages[-1]
+    assert isinstance(last, AssistantMessage)
+    assert last.text() == "done"
+    assert len(agent.messages) < 12
 

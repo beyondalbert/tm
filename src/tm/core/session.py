@@ -15,6 +15,7 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from tm.ai.types import Message, Usage, UserMessage, now_ms
+from tm.core.compaction import SUMMARY_PREFIX
 from tm.core.storage import (
     Storage,
     StoredEntry,
@@ -134,7 +135,7 @@ class Session:
         for entry in self.active_entries():
             if entry.type == "compaction":
                 summary = str(entry.payload.get("summary", ""))
-                result = [UserMessage(content=f"Summary of earlier conversation:\n{summary}")]
+                result = [UserMessage(content=f"{SUMMARY_PREFIX}{summary}")]
             elif entry.type == "message" and entry.message is not None:
                 result.append(entry.message)
         return result

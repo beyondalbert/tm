@@ -401,9 +401,12 @@ language = "auto"              # UI language: en | zh | auto (also --lang, /lang
 Automatic compaction runs before a prompt when the estimated context exceeds
 `context_window * compact_threshold`. Disable per run with `--no-auto-compact`.
 If a turn ends truncated or with an overflow error, TM compacts and retries,
-keeping a smaller tail each attempt (down to just the summary) until it fits.
-Compaction is stored as a durable entry, so the summarized context survives a
-restart.
+keeping a smaller tail each attempt (down to just the summary) until it fits;
+the summarizer itself gets a size-bounded transcript, and if it still fails TM
+drops the oldest messages. Summaries are structured (goal, progress, decisions,
+next steps) and updated incrementally on each compaction, and list the files that
+were read or modified. Compaction is stored as a durable entry, so the summarized
+context survives a restart.
 
 Per-model pricing (`input_cost`, `output_cost`, `cache_read_cost`, USD per 1M
 tokens) can be set in `models.toml`; the footer then shows `$cost` and the cache

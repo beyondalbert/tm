@@ -21,6 +21,7 @@ from tm.ai.types import (
     ToolResultMessage,
     UserMessage,
 )
+from tm.core.compaction import SUMMARY_PREFIX
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
@@ -200,13 +201,22 @@ class Agent:
         ):
             index -= 1
         older = self._messages[:index]
+        previous_summary: str | None = None
+        if (
+            older
+            and isinstance(older[0], UserMessage)
+            and isinstance(older[0].content, str)
+            and older[0].content.startswith(SUMMARY_PREFIX)
+        ):
+            previous_summary = older[0].content[len(SUMMARY_PREFIX) :].strip() or None
+            older = older[1:]
         recent = repair_tool_messages(self._messages[index:])
         if not older:
             return False
         if self.before_compact is not None:
             await _maybe_await(self.before_compact(older))
         summary = await summarize_messages(
-            self._stream_fn, self.model, older, instructions, signal
+            self._stream_fn, self.model, older, instructions, signal, previous_summary
         )
         if not summary:
             return False
@@ -216,11 +226,31 @@ class Agent:
             self._messages = self.session.messages()
         else:
             self._messages = [
-                UserMessage(content=f"Summary of earlier conversation:\n{summary}"),
+                UserMessage(content=f"{SUMMARY_PREFIX}{summary}"),
                 *recent,
             ]
         if self.after_compact is not None:
             await _maybe_await(self.after_compact(summary))
+        return True
+
+    def _trim_oldest(self) -> bool:
+        """Last resort when summarization cannot shrink enough: drop older messages.
+
+        Keeps at least the most recent message and a valid tool sequence, so the
+        next request is far smaller instead of failing outright.
+        """
+        if len(self._messages) <= 1:
+            return False
+        keep = max(1, len(self._messages) // 2)
+        tail = repair_tool_messages(self._messages[-keep:])
+        if not tail:
+            return False
+        note = f"{SUMMARY_PREFIX}(older messages dropped to fit the context)"
+        if self.session is not None:
+            self.session.append_compaction(note, tail)
+            self._messages = self.session.messages()
+        else:
+            self._messages = [UserMessage(content=note), *tail]
         return True
 
     def _context_overflowed(self) -> bool:
@@ -239,11 +269,11 @@ class Agent:
         return False
 
     async def _maybe_auto_compact(self) -> bool:
-        from tm.core.compaction import estimate_tokens
+        from tm.core.compaction import estimate_context_tokens
 
         if len(self._messages) <= self.compact_keep_recent:
             return False
-        estimated = estimate_tokens(self._messages, self.system_prompt)
+        estimated = estimate_context_tokens(self._messages, self.system_prompt)
         limit = int(self.model.context_window * self.compact_threshold)
         if estimated < limit:
             return False
@@ -388,7 +418,7 @@ class Agent:
         self.operation = operation
         status = "ok"
         recovery_attempts = 0
-        max_recoveries = self.compact_keep_recent + 2
+        max_recoveries = self.compact_keep_recent + 8
         try:
             while True:
                 result = await agent_loop(
@@ -420,6 +450,9 @@ class Agent:
                         "warning",
                     )
                     if await self.compact(keep_recent=keep, signal=self._signal):
+                        continue
+                    # Summarization failed or was not enough: drop the oldest half.
+                    if self._trim_oldest():
                         continue
                 break
         except BaseException:

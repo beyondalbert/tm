@@ -35,7 +35,7 @@ from tm.cli.autocomplete import (
 from tm.cli.commands import ExitSignal, command_specs
 from tm.clipboard import copy_to_clipboard
 from tm.core.agent import Agent
-from tm.core.compaction import estimate_tokens
+from tm.core.compaction import estimate_context_tokens
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
@@ -857,7 +857,7 @@ class TMPromptApp(App[None]):
                     total_in += message.usage.input
                     total_out += message.usage.output
                     cache_read += message.usage.cache_read
-        used = estimate_tokens(self._agent.messages, self._agent.system_prompt)
+        used = estimate_context_tokens(self._agent.messages, self._agent.system_prompt)
         window = model.context_window or 0
 
         stats = f"↑{format_tokens(total_in)} ↓{format_tokens(total_out)}"
