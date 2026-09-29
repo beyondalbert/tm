@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tm.i18n import t as _t
+
 _CAPABILITIES = """\
 How to accomplish a goal:
 1. Inspect the environment first (system_info) instead of assuming what the machine has.
@@ -28,6 +30,7 @@ def build_system_prompt(
         "run shell commands and Python on the user's machine.",
         f"Current working directory: {cwd}",
         _CAPABILITIES,
+        _t("prompt.language"),
     ]
     if environment:
         parts.append(environment)

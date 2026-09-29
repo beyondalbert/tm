@@ -18,6 +18,7 @@ from tm.core.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
+from tm.i18n import t as _t
 
 _MAX_TOOL_OUTPUT = 4000
 
@@ -45,16 +46,20 @@ class ConsoleAgentUI:
                     self.console.print()
                 if message.stop_reason == "error":
                     self.console.print(
-                        f"error: {message.error_message or 'unknown error'}",
+                        _t("console.error", message=message.error_message or "unknown error"),
                         style="red",
                         markup=False,
                         highlight=False,
                     )
                 elif message.stop_reason == "aborted":
-                    self.console.print("aborted", style="yellow", markup=False)
+                    self.console.print(_t("console.aborted"), style="yellow", markup=False)
                 if message.usage and (message.usage.input or message.usage.output):
                     self.console.print(
-                        f"tokens: in={message.usage.input} out={message.usage.output}",
+                        _t(
+                            "console.tokens",
+                            input=message.usage.input,
+                            output=message.usage.output,
+                        ),
                         style="dim",
                         markup=False,
                     )
@@ -78,8 +83,7 @@ class ConsoleAgentUI:
             self.console.print(event.text, style=style, markup=False, highlight=False)
         elif isinstance(event, AgentEndEvent) and event.stop_reason == "max_turns":
             self.console.print(
-                "stopped at the turn limit (--max-turns); "
-                "send another message to continue",
+                _t("console.turn_limit"),
                 style="yellow",
                 markup=False,
             )
@@ -88,7 +92,7 @@ class ConsoleAgentUI:
         thinking = message.thinking()
         if len(thinking) > self._thinking_printed:
             if self._thinking_printed == 0 and not self._text_started:
-                self.console.print("thinking", style="dim", markup=False)
+                self.console.print(_t("console.thinking"), style="dim", markup=False)
             self.console.print(
                 thinking[self._thinking_printed :],
                 end="",

@@ -302,3 +302,28 @@ async def test_auto_compact_emits_a_notice() -> None:
 
     assert any("compacting" in text for text in notices)
 
+
+async def test_overflow_compaction_shrinks_the_retained_tail(monkeypatch) -> None:
+    def always_length(model, context, options) -> EventStream:
+        message = AssistantMessage(content=[TextContent(text="partial")], stop_reason="length")
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=always_length, compact_keep_recent=3)
+    keeps: list[int] = []
+
+    async def spy(*, keep_recent: int = 6, signal=None) -> bool:
+        keeps.append(keep_recent)
+        return True
+
+    monkeypatch.setattr(agent, "compact", spy)
+    agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
+
+    await agent.prompt("go")
+
+    assert keeps[0] == 2
+    assert keeps[-1] == 0
+

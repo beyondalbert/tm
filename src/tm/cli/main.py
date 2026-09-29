@@ -43,6 +43,8 @@ from tm.core.store import Store
 from tm.core.system_prompt import build_system_prompt
 from tm.extensions import ExtensionAPI, extension_roots, load_extensions
 from tm.host import detect_host, render_environment
+from tm.i18n import set_language
+from tm.i18n import t as _t
 from tm.permissions import (
     READ_TOOLS,
     ApprovalMemory,
@@ -228,12 +230,10 @@ def _resolve_trust(settings: Settings, approve: bool, no_approve: bool) -> bool:
         return False
     if not sys.stdin.isatty():
         return False
-    console.print(
-        f"[yellow]{cwd} has project-local resources that can run code or change permissions:[/yellow]"
-    )
+    console.print(_t("cli.trust_prompt", cwd=cwd), style="yellow")
     for path in resources:
         console.print(f"  [dim]{path}[/dim]")
-    answer = input("Load them? [y]es / [n]o / [a]lways: ").strip().lower()
+    answer = input(_t("cli.trust_ask")).strip().lower()
     if answer in ("a", "always"):
         manager.save(cwd, True)
         return True
@@ -414,8 +414,8 @@ def _startup_banner(model: Model, resources: Resources, no_context_files: bool) 
     cwd = Path.cwd()
     lines = [
         f"TM v{__version__}",
-        "escape to interrupt  ·  / for commands  ·  ! to run a shell command  ·  ctrl+q to quit",
-        "Ask TM to explain its features, or type /help.",
+        _t("cli.banner_hint"),
+        _t("cli.banner_ask"),
     ]
     if not no_context_files:
         files = load_context_files(cwd, config_dir())
@@ -569,7 +569,7 @@ async def _agent_repl(
             await agent.prompt(line)
         except KeyboardInterrupt:
             agent.abort()
-            console.print("[yellow]aborted[/yellow]")
+            console.print(_t("cli.aborted"), style="yellow")
         console.print()
 
 
@@ -605,7 +605,7 @@ def _resolve_session(
         existing = manager.continue_recent(Path.cwd())
         if existing is not None:
             if continue_session:
-                console.print(f"[dim]resuming session {existing.id}[/dim]")
+                console.print(_t("cli.resuming", id=existing.id), style="dim")
             return existing, manager, False
     return manager.create(cwd=Path.cwd()), manager, False
 
@@ -688,6 +688,9 @@ def main(
         None, "--login", help="Store an API key for a provider and exit."
     ),
     list_models: bool = typer.Option(False, "--list-models", help="List known models."),
+    lang: str | None = typer.Option(
+        None, "--lang", help="UI language: en, zh, or auto (default from settings)."
+    ),
     update: bool = typer.Option(
         False, "--update", help="Upgrade TM from PyPI to the latest release and exit."
     ),
@@ -701,6 +704,7 @@ def main(
         raise typer.Exit(code=run_update())
 
     settings = load_settings()
+    set_language(lang if lang is not None else settings.language)
     registry = _make_registry()
 
     if login is not None:
@@ -742,10 +746,7 @@ def main(
     tools = _select_tools(no_tools, read_only, no_python=no_python)
     trusted = _resolve_trust(settings, approve, no_approve)
     if not trusted:
-        console.print(
-            "[dim]project-local extensions/skills/prompts/policy ignored (untrusted); "
-            "use --approve or /trust[/dim]"
-        )
+        console.print(_t("cli.untrusted_note"), style="dim")
     resources = Resources() if no_extensions else _load_resources(trusted)
     text = " ".join(prompt) if prompt else None
     if text is None and (print_mode or json_output) and not sys.stdin.isatty():

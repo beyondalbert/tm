@@ -410,3 +410,15 @@ async def test_copy_command_with_no_replies(tmp_path: Path, monkeypatch) -> None
     commands, emitted, _ = make_commands(tmp_path)
     await commands.handle("copy")
     assert "nothing to copy" in emitted[-1]
+
+
+async def test_lang_command_switches_language(tmp_path: Path) -> None:
+    from tm.i18n import get_language, set_language
+
+    try:
+        commands, emitted, _ = make_commands(tmp_path)
+        await commands.handle("lang zh")
+        assert get_language() == "zh"
+        assert "zh" in emitted[-1]
+    finally:
+        set_language("en")

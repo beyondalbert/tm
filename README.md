@@ -217,6 +217,7 @@ Switch to a custom model with `/model my-model` or `tm --model my-model`.
 | `tm --no-auto-compact` | Disable automatic context compaction |
 | `tm --max-turns N` | Max agent turns per prompt (default 300) |
 | `tm --max-retries N` | Retries for transient network errors (default 3) |
+| `tm --lang en\|zh\|auto` | UI language (default: settings) |
 | `tm --telemetry` | Write redacted spans to `<config>/telemetry.jsonl` |
 | `tm --durable` | Persist a durable restart point per run to `<config>/state.jsonl` |
 | `tm --no-mouse` | Let the terminal handle mouse selection/copy |
@@ -322,6 +323,7 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 | `/recover` | reconcile interrupted durable operations |
 | `/undo [n]` | roll back the last n reversible changes |
 | `/copy [n]` | copy the nth-from-last reply to the clipboard |
+| `/lang [en\|zh\|auto]` | set the UI language |
 | `/skills` | list available skills |
 | `/skill:<name>` | load a skill into the conversation |
 | `/prompts` | list prompt templates |
@@ -336,7 +338,8 @@ selection and `Escape` dismisses it.
 `Ctrl+J`) inserts a newline, and pasting keeps every line. While a turn is
 running, `Esc` or `Ctrl+C` stops it and `Ctrl+P` pauses/resumes it (the status
 line shows which). Stopping cancels the in-flight model request and kills a
-running shell/python command.
+running shell/python command. Reasoning output and tool results are folded to
+one line by default; `Ctrl+O` expands/collapses them.
 
 **Network errors.** Transient provider failures (timeouts, connection resets,
 429/5xx) are retried up to `max_retries` times with a visible "network problem:
@@ -392,11 +395,13 @@ python_executable = ""         # interpreter for the python tool (default: the o
 python_timeout = 120           # seconds per python script
 workspace_dir = ""             # where python scripts are saved (default: <config>/workspace)
 auto_install = true            # install missing pip packages declared by the python tool
+language = "auto"              # UI language: en | zh | auto (also --lang, /lang)
 ```
 
 Automatic compaction runs before a prompt when the estimated context exceeds
 `context_window * compact_threshold`. Disable per run with `--no-auto-compact`.
-If a turn ends truncated or with an overflow error, TM compacts and retries once.
+If a turn ends truncated or with an overflow error, TM compacts and retries,
+keeping a smaller tail each attempt (down to just the summary) until it fits.
 Compaction is stored as a durable entry, so the summarized context survives a
 restart.
 

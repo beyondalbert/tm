@@ -210,6 +210,7 @@ context_window = 65536
 | `tm --no-auto-compact` | 关闭自动上下文压缩 |
 | `tm --max-turns N` | 每次提示的最大回合数（默认 300） |
 | `tm --max-retries N` | 瞬时网络错误的重试次数（默认 3） |
+| `tm --lang en\|zh\|auto` | 界面语言（默认取设置） |
 | `tm --telemetry` | 将脱敏 span 写入 `<config>/telemetry.jsonl` |
 | `tm --durable` | 为每次运行在 `<config>/state.jsonl` 持久化重启点 |
 | `tm --no-mouse` | 让终端接管鼠标选择/复制 |
@@ -300,6 +301,7 @@ allow = ["api.deepseek.com"]
 | `/recover` | 恢复被中断的持久化操作 |
 | `/undo [n]` | 回退最近 n 个可逆变更 |
 | `/copy [n]` | 复制倒数第 n 条回复到剪贴板 |
+| `/lang [en\|zh\|auto]` | 设置界面语言 |
 | `/skills` | 列出可用技能 |
 | `/skill:<name>` | 将技能载入对话 |
 | `/prompts` | 列出提示词模板 |
@@ -311,7 +313,8 @@ allow = ["api.deepseek.com"]
 
 **输入。** TUI 输入框支持多行：`Enter` 发送，`Shift+Enter`（或 `Ctrl+J`）插入换行；
 粘贴会保留每一行。运行中按 `Esc` 或 `Ctrl+C` 停止当前回合，按 `Ctrl+P` 暂停/恢复（状态行会显示）。
-停止会取消进行中的模型请求，并终止正在运行的 shell/python 命令。
+停止会取消进行中的模型请求，并终止正在运行的 shell/python 命令。思考内容与工具输出默认折叠为
+一行，按 `Ctrl+O` 展开/折叠。
 
 **网络错误。** 瞬时 provider 故障（超时、连接重置、429/5xx）会按 `max_retries` 自动重试，并显示
 “network problem: retrying …” 提示；非瞬时错误（鉴权、请求非法）会直接停止。
@@ -361,11 +364,13 @@ python_executable = ""         # python 工具使用的解释器（默认：运�
 python_timeout = 120           # 每个 python 脚本的超时秒数
 workspace_dir = ""             # python 脚本保存目录（默认 <config>/workspace）
 auto_install = true            # 自动安装 python 工具声明的缺失 pip 包
+language = "auto"              # 界面语言：en | zh | auto（也可 --lang、/lang）
 ```
 
 当估算上下文超过 `context_window * compact_threshold` 时，会在发送提示词前自动压缩。
-单次运行可用 `--no-auto-compact` 关闭。若某回合被截断或报上下文溢出，TM 会压缩并重试一次。
-压缩会作为持久化条目存储，因此摘要后的上下文在重启后仍然保留。
+单次运行可用 `--no-auto-compact` 关闭。若某回合被截断或报上下文溢出，TM 会压缩并重试，且每次
+保留更小的尾部（最终只留摘要）直到放得下。压缩会作为持久化条目存储，因此摘要后的上下文在重启后
+仍然保留。
 
 可在 `models.toml` 里为模型设置价格（`input_cost`、`output_cost`、`cache_read_cost`，USD/百万
 token），页脚随后会显示 `$cost` 与缓存命中率（`CH%`）。

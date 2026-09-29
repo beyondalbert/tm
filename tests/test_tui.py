@@ -713,3 +713,25 @@ async def test_prompt_error_resets_status(monkeypatch) -> None:
         notes = app.query(".system")
         assert notes
         assert "kaboom" in str(notes.first().render())
+
+
+async def test_reasoning_is_folded_then_expandable() -> None:
+    from textual.containers import VerticalScroll
+
+    from tm.tui.app import AssistantMessageWidget
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        widget = AssistantMessageWidget()
+        await app.query_one("#messages", VerticalScroll).mount(widget)
+        widget.set_content("deep thought " * 10, "answer", final=True)
+        await pilot.pause()
+
+        assert widget._thinking.display is True
+        assert "ctrl+o" in str(widget._thinking.render())
+
+        widget.set_expanded(True)
+        await pilot.pause()
+        assert "deep thought" in str(widget._thinking.render())

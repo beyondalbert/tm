@@ -53,6 +53,7 @@ class Settings:
     compact_keep_recent: int = 6
     max_turns: int = 300
     max_retries: int = 3
+    language: str = "auto"
     telemetry: bool = False
     durable: bool = False
     mouse: bool = True

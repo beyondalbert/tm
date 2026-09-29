@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -31,7 +32,7 @@ from tm.cli.autocomplete import (
     command_completions,
     detect,
 )
-from tm.cli.commands import COMMAND_SPECS, ExitSignal
+from tm.cli.commands import ExitSignal, command_specs
 from tm.clipboard import copy_to_clipboard
 from tm.core.agent import Agent
 from tm.core.compaction import estimate_tokens
@@ -47,6 +48,7 @@ from tm.core.events import (
     ToolExecutionStartEvent,
 )
 from tm.core.session import SessionInfo
+from tm.i18n import t as _t
 from tm.permissions import ApprovalOutcome, SessionApprover
 
 # pi dark theme palette
@@ -172,7 +174,10 @@ class AssistantMessageWidget(Vertical):
         self._thinking = Static(Text(""), classes="thinking")
         self._body = Static(Text(""), classes="body")
         self._error = Static(Text(""), classes="error")
+        self._thinking_text = ""
         self._text = ""
+        self._final = False
+        self._expanded = False
         for widget in (self._thinking, self._body, self._error):
             widget.display = False
 
@@ -181,14 +186,14 @@ class AssistantMessageWidget(Vertical):
         yield self._body
         yield self._error
 
-    def set_content(self, thinking: str, text: str, *, error: str | None = None) -> None:
-        if thinking.strip():
-            self._thinking.update(Text(thinking.strip(), style=f"italic {_MUTED}"))
-            self._thinking.display = True
-        else:
-            self._thinking.display = False
+    def set_content(
+        self, thinking: str, text: str, *, error: str | None = None, final: bool = False
+    ) -> None:
+        self._thinking_text = thinking.strip()
+        self._render_thinking()
 
         self._text = text.strip()
+        self._final = final
         if self._text:
             self._render_body()
             self._body.display = True
@@ -201,6 +206,25 @@ class AssistantMessageWidget(Vertical):
         else:
             self._error.display = False
 
+    def set_expanded(self, expanded: bool) -> None:
+        if expanded != self._expanded:
+            self._expanded = expanded
+            self._render_thinking()
+
+    def _render_thinking(self) -> None:
+        if not self._thinking_text:
+            self._thinking.display = False
+            return
+        if self._expanded:
+            self._thinking.update(
+                Text(self._thinking_text, style=f"italic {_MUTED}")
+            )
+        else:
+            # Reasoning models emit long thinking; fold it by default.
+            label = _t("tui.thinking", chars=len(self._thinking_text))
+            self._thinking.update(Text(label, style=_MUTED))
+        self._thinking.display = True
+
     def on_resize(self) -> None:
         self._render_body()
 
@@ -208,8 +232,14 @@ class AssistantMessageWidget(Vertical):
         if not self._text:
             return
         width = self._body.size.width or self.size.width or self.app.size.width - 2
-        if width > 0:
+        if width <= 0:
+            return
+        if self._final:
+            # Styled, selectable Markdown once the reply is complete.
             self._body.update(render_markdown(self._text, width))
+        else:
+            # Plain text while streaming keeps the UI responsive.
+            self._body.update(Text(self._text, style=_TEXT))
 
 
 class ToolWidget(Vertical):
@@ -299,12 +329,12 @@ class PermissionScreen(ModalScreen[ApprovalOutcome]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="perm-box"):
-            yield Label("Permission required", id="perm-title")
+            yield Label(_t("tui.perm_title"), id="perm-title")
             yield Static(f"{self._description}\n{self._reason}", id="perm-body")
             with Horizontal(id="perm-buttons"):
-                yield Button("Allow", id="allow", variant="success")
-                yield Button("Always allow", id="always", variant="primary")
-                yield Button("Deny", id="deny", variant="error")
+                yield Button(_t("tui.perm_allow"), id="allow", variant="success")
+                yield Button(_t("tui.perm_always"), id="always", variant="primary")
+                yield Button(_t("tui.perm_deny"), id="deny", variant="error")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         choice = {
@@ -337,7 +367,7 @@ class SessionScreen(ModalScreen[SessionInfo | None]):
             for index, info in enumerate(self._infos, start=1)
         ]
         with Vertical(id="session-box"):
-            yield Label("Resume session", id="session-title")
+            yield Label(_t("tui.resume_title"), id="session-title")
             yield OptionList(*options, id="session-list")
 
     def on_mount(self) -> None:
@@ -477,7 +507,7 @@ class TMPromptApp(App[None]):
     """
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
-        Binding("ctrl+o", "toggle_tools", "Expand tools"),
+        Binding("ctrl+o", "toggle_tools", "Expand details"),
         Binding("ctrl+y", "toggle_auto", "Auto-approve"),
         Binding("ctrl+p", "toggle_pause", "Pause"),
         Binding("ctrl+shift+c", "copy_selection", "Copy selection", show=False),
@@ -499,6 +529,7 @@ class TMPromptApp(App[None]):
         self._status = "idle"
         self._current: AssistantMessageWidget | None = None
         self._current_mounted = False
+        self._last_stream_render = 0.0
         self._tools: dict[str, ToolWidget] = {}
         self._expanded = False
         self._spin_index = 0
@@ -519,10 +550,7 @@ class TMPromptApp(App[None]):
         yield VerticalScroll(id="messages")
         yield Static("", id="editor-status")
         yield OptionList(id="suggestions")
-        yield PromptArea(
-            placeholder="Ask TM to do something, then Enter. Shift+Enter for a new line.",
-            id="prompt",
-        )
+        yield PromptArea(placeholder=_t("tui.placeholder"), id="prompt")
         yield Static("", id="footer")
 
     def on_mount(self) -> None:
@@ -594,15 +622,17 @@ class TMPromptApp(App[None]):
 
     def action_toggle_tools(self) -> None:
         self._expanded = not self._expanded
-        for widget in self.query(ToolWidget):
-            widget.set_expanded(self._expanded)
+        for tool in self.query(ToolWidget):
+            tool.set_expanded(self._expanded)
+        for message in self.query(AssistantMessageWidget):
+            message.set_expanded(self._expanded)
 
     def action_toggle_auto(self) -> None:
         approver = self.session_approver
         if approver is None:
             return
         approver.auto = not approver.auto
-        self.notify(f"auto-approve {'on' if approver.auto else 'off'}")
+        self.notify(_t("tui.auto_on") if approver.auto else _t("tui.auto_off"))
         self._update_footer()
 
     def action_toggle_pause(self) -> None:
@@ -611,31 +641,31 @@ class TMPromptApp(App[None]):
         if self._agent.pause.paused:
             self._agent.pause.resume()
             self._set_status("working")
-            self.notify("resumed")
+            self.notify(_t("tui.resumed_notice"))
         else:
             self._agent.pause.pause()
             self._set_status("paused")
-            self.notify("paused")
+            self.notify(_t("tui.paused_notice"))
 
     def action_copy_selection(self) -> None:
         """Copy the mouse selection, or the last reply, to the system clipboard."""
         selection = self.screen.get_selected_text()
         if selection:
-            self._copy(selection, "selection")
+            self._copy(selection, _t("tui.selection"))
             return
         reply = self._last_reply()
         if reply:
-            self._copy(reply, "last reply")
+            self._copy(reply, _t("tui.last_reply"))
             return
-        self.notify("nothing to copy")
+        self.notify(_t("tui.nothing_to_copy"))
 
     def _copy(self, text: str, label: str) -> None:
         if copy_to_clipboard(text):
-            self.notify(f"copied {label}")
+            self.notify(_t("tui.copy_selection", label=label))
             return
         # Fall back to OSC 52 for terminals that support it.
         self.copy_to_clipboard(text)
-        self.notify(f"copied {label} (OSC52)")
+        self.notify(_t("tui.copy_selection_osc52", label=label))
 
     def _last_reply(self) -> str:
         for message in reversed(self._agent.messages):
@@ -681,7 +711,7 @@ class TMPromptApp(App[None]):
             self.close_suggestions()
             return
         if span.kind == "command":
-            completions = command_completions(span.token, COMMAND_SPECS)
+            completions = command_completions(span.token, command_specs())
         else:
             completions = [
                 Completion(f"@{c.value}", c.label, c.description)
@@ -758,7 +788,7 @@ class TMPromptApp(App[None]):
         if not self.is_working:
             return
         self._agent.abort()
-        self.notify("stopping…")
+        self.notify(_t("tui.stopping"))
 
     # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
@@ -782,13 +812,13 @@ class TMPromptApp(App[None]):
         if self._status == "idle":
             line.append("─" * width, style=_BORDER_MUTED)
         elif self._status == "paused":
-            label = "Paused  Ctrl+P to resume"
+            label = _t("tui.paused")
             line.append("── ", style=_BORDER_MUTED)
             line.append(label, style=_WARNING)
             line.append(" " + "─" * max(0, width - len(label) - 3), style=_BORDER_MUTED)
         else:
-            label = f"{_SPINNER[self._spin_index]} Working"
-            hint = "  Esc/Ctrl+C stop  ·  Ctrl+P pause"
+            label = f"{_SPINNER[self._spin_index]} {_t('tui.working')}"
+            hint = _t("tui.stop_hint")
             head = f"── {label} "
             tail = "─" * max(0, width - len(head) - len(hint))
             line.append(head, style=_BORDER_MUTED)
@@ -869,14 +899,10 @@ class TMPromptApp(App[None]):
             self._update_footer()
             if event.stop_reason == "max_turns":
                 await self._mount(
-                    SystemNote(
-                        f"Stopped after {self._agent.max_turns} turns "
-                        "(raise it with --max-turns). Send another message to continue.",
-                        _WARNING,
-                    )
+                    SystemNote(_t("tui.max_turns", n=self._agent.max_turns), _WARNING)
                 )
             elif event.stop_reason == "aborted":
-                await self._mount(SystemNote("Stopped by user.", _WARNING))
+                await self._mount(SystemNote(_t("tui.stopped"), _WARNING))
         elif isinstance(event, AgentNoticeEvent):
             style = _WARNING if event.level in ("warning", "error") else _DIM
             await self._mount(SystemNote(event.text, style))
@@ -884,7 +910,9 @@ class TMPromptApp(App[None]):
             event.message, AssistantMessage
         ):
             self._current = AssistantMessageWidget()
+            self._current.set_expanded(self._expanded)
             self._current_mounted = False
+            self._last_stream_render = 0.0
         elif isinstance(event, MessageUpdateEvent):
             if self._current is not None:
                 thinking = event.message.thinking()
@@ -893,8 +921,11 @@ class TMPromptApp(App[None]):
                     await self._mount(self._current)
                     self._current_mounted = True
                 if self._current_mounted:
-                    self._current.set_content(thinking, text)
-                    self.query_one("#messages", VerticalScroll).scroll_end(animate=False)
+                    now = time.monotonic()
+                    if now - self._last_stream_render >= 0.08:
+                        self._last_stream_render = now
+                        self._current.set_content(thinking, text)
+                        self.query_one("#messages", VerticalScroll).scroll_end(animate=False)
         elif isinstance(event, MessageEndEvent) and isinstance(
             event.message, AssistantMessage
         ):
@@ -908,13 +939,14 @@ class TMPromptApp(App[None]):
             # widget was created yet (e.g. authentication errors).
             if self._current is None and (thinking.strip() or text.strip() or error):
                 self._current = AssistantMessageWidget()
+                self._current.set_expanded(self._expanded)
                 self._current_mounted = False
             if self._current is not None:
                 if thinking.strip() or text.strip() or error:
                     if not self._current_mounted:
                         await self._mount(self._current)
                         self._current_mounted = True
-                    self._current.set_content(thinking, text, error=error)
+                    self._current.set_content(thinking, text, error=error, final=True)
                 self._current = None
                 self._current_mounted = False
             self._update_footer()

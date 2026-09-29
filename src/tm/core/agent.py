@@ -36,6 +36,7 @@ from tm.core.messages import repair_tool_messages
 from tm.core.operation import Operation, OperationState, OperationStatus, PendingEffect
 from tm.core.session import Session
 from tm.core.store import Store
+from tm.i18n import t as _t
 from tm.safety.journal import Journal
 from tm.telemetry import (
     SPAN_OPERATION,
@@ -191,10 +192,12 @@ class Agent:
 
         if len(self._messages) <= keep_recent:
             return False
-        index = len(self._messages) - keep_recent
+        index = max(0, len(self._messages) - keep_recent)
         # Never start the retained tail with a tool result: include the assistant
         # that requested it, so the provider sees a valid tool call sequence.
-        while index > 0 and isinstance(self._messages[index], ToolResultMessage):
+        while 0 < index < len(self._messages) and isinstance(
+            self._messages[index], ToolResultMessage
+        ):
             index -= 1
         older = self._messages[:index]
         recent = repair_tool_messages(self._messages[index:])
@@ -244,10 +247,7 @@ class Agent:
         limit = int(self.model.context_window * self.compact_threshold)
         if estimated < limit:
             return False
-        await self._notice(
-            f"context is large (~{estimated} tokens); compacting before responding…",
-            "info",
-        )
+        await self._notice(_t("notice.compacting", tokens=estimated), "info")
         return await self.compact(keep_recent=self.compact_keep_recent, signal=self._signal)
 
     @property
@@ -388,7 +388,7 @@ class Agent:
         self.operation = operation
         status = "ok"
         recovery_attempts = 0
-        max_recoveries = 5
+        max_recoveries = self.compact_keep_recent + 2
         try:
             while True:
                 result = await agent_loop(
@@ -409,19 +409,17 @@ class Agent:
                 if (
                     recovery_attempts < max_recoveries
                     and self._context_overflowed()
-                    and len(self._messages) > self.compact_keep_recent
+                    and len(self._messages) > 1
                 ):
-                    # Context overflowed: persist what we have, compact, retry.
+                    # Context overflowed: persist, compact a smaller tail, retry.
                     self._flush_messages()
                     recovery_attempts += 1
+                    keep = max(0, self.compact_keep_recent - recovery_attempts)
                     await self._notice(
-                        f"context overflowed; compacting and retrying "
-                        f"({recovery_attempts}/{max_recoveries})…",
+                        _t("notice.overflow", n=recovery_attempts, keep=keep),
                         "warning",
                     )
-                    if await self.compact(
-                        keep_recent=self.compact_keep_recent, signal=self._signal
-                    ):
+                    if await self.compact(keep_recent=keep, signal=self._signal):
                         continue
                 break
         except BaseException:

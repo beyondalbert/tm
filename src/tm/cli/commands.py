@@ -16,6 +16,8 @@ from tm.core.agent import Agent
 from tm.core.session import Session, SessionInfo, SessionManager
 from tm.extensions import ExtensionAPI
 from tm.host import detect_host
+from tm.i18n import get_language, set_language
+from tm.i18n import t as _t
 from tm.prompts import PromptTemplate, expand_template
 from tm.safety import Journal, apply_undo
 from tm.skills import Skill, find_skill
@@ -26,6 +28,34 @@ if TYPE_CHECKING:
 
 Emit = Callable[[str], None]
 SessionPicker = Callable[[list[SessionInfo]], Awaitable[SessionInfo | None]]
+
+_SPEC_NAMES = (
+    "help",
+    "model",
+    "new",
+    "session",
+    "resume",
+    "tree",
+    "fork",
+    "compact",
+    "recover",
+    "undo",
+    "copy",
+    "auto",
+    "lang",
+    "trust",
+    "skills",
+    "prompts",
+    "exit",
+)
+
+
+def command_specs() -> list[tuple[str, str]]:
+    return [(name, _t(f"spec.{name}")) for name in _SPEC_NAMES]
+
+
+def help_text() -> str:
+    return _t("help.text")
 
 
 def _preview(message: Message, limit: int = 60) -> str:
@@ -69,46 +99,6 @@ class CommandContext:
     approver: SessionApprover | None = None
 
 
-COMMAND_SPECS: list[tuple[str, str]] = [
-    ("help", "show this help"),
-    ("model", "list models or switch model"),
-    ("new", "start a new session"),
-    ("session", "show current session info"),
-    ("resume", "resume a saved session"),
-    ("tree", "list conversation points or branch"),
-    ("fork", "fork the session into a new file"),
-    ("compact", "summarize older context"),
-    ("recover", "reconcile interrupted durable operations"),
-    ("undo", "roll back the last change(s)"),
-    ("copy", "copy the last reply to the clipboard"),
-    ("auto", "toggle auto-approve for this session"),
-    ("trust", "trust or untrust this project"),
-    ("skills", "list available skills"),
-    ("prompts", "list prompt templates"),
-    ("exit", "quit"),
-]
-
-HELP = """commands:
-  /help                 show this help
-  /model [pattern]      list models or switch model
-  /new                  start a new session
-  /session              show current session info
-  /resume [n|id]        resume a saved session (picker when no argument)
-  /tree [n]             list conversation points or branch from point n
-  /fork [n]             fork the session (at point n) into a new file
-  /compact [note]       summarize older context
-  /recover              reconcile interrupted durable operations
-  /undo [n]             roll back the last n reversible changes
-  /copy [n]             copy the nth-from-last reply to the clipboard
-  /auto [on|off]        toggle auto-approve for this session
-  /trust [off]          trust (or untrust) this project for future sessions
-  /skills               list available skills
-  /skill:<name>         load a skill into the conversation
-  /prompts              list prompt templates
-  /<template> [args]    expand a prompt template
-  /exit                 quit"""
-
-
 class SlashCommands:
     def __init__(self, ctx: CommandContext) -> None:
         self.ctx = ctx
@@ -128,7 +118,7 @@ class SlashCommands:
         if command in ("exit", "quit"):
             raise ExitSignal
         if command == "help":
-            self._emit(HELP)
+            self._emit(help_text())
             return None
         if command == "new":
             await self._new_session()
@@ -171,6 +161,9 @@ class SlashCommands:
         if command == "copy":
             self._copy(argument)
             return None
+        if command == "lang":
+            self._lang(argument)
+            return None
         if command == "trust":
             self._trust(argument)
             return None
@@ -188,7 +181,7 @@ class SlashCommands:
                 self._emit(result)
             return None
 
-        self._emit(f"unknown command: /{command} (try /help)")
+        self._emit(_t("cmd.unknown", command=command))
         return None
 
     async def _new_session(self) -> None:
@@ -201,9 +194,9 @@ class SlashCommands:
                 session.set_model_selection(
                     self.ctx.agent.provider.id, self.ctx.agent.model.id
                 )
-            self._emit(f"new session {session.id}")
+            self._emit(_t("cmd.new_session", id=session.id))
         else:
-            self._emit("conversation cleared")
+            self._emit(_t("cmd.cleared"))
 
     def _apply_session_model(self) -> None:
         """Restore the provider/model the session remembers, if any."""
@@ -224,10 +217,10 @@ class SlashCommands:
     def _show_session(self) -> None:
         session = self.ctx.session
         if session is None:
-            self._emit("no session (session persistence disabled)")
+            self._emit(_t("cmd.no_session"))
             return
         count = len(self.ctx.agent.messages)
-        self._emit(f"session {session.id} | {count} messages | {session.path}")
+        self._emit(_t("cmd.session_info", id=session.id, count=count, path=session.path))
 
     def _session_choices(self) -> list[SessionInfo]:
         manager = self.ctx.session_manager
@@ -245,7 +238,7 @@ class SlashCommands:
                 f"{index}. {label} | {info.message_count} msgs | "
                 f"{_format_time(info.updated)} | {info.preview}"
             )
-        lines.append("use /resume <n> or /resume <id>")
+        lines.append(_t("cmd.use_resume"))
         self._emit("\n".join(lines))
 
     @staticmethod
@@ -266,18 +259,18 @@ class SlashCommands:
     async def _resume(self, argument: str) -> None:
         manager = self.ctx.session_manager
         if manager is None:
-            self._emit("no session (session persistence disabled)")
+            self._emit(_t("cmd.no_session"))
             return
         infos = self._session_choices()
         if not infos:
-            self._emit("no saved sessions")
+            self._emit(_t("cmd.no_sessions"))
             return
 
         chosen: SessionInfo | None = None
         if argument:
             chosen = self._match_session(infos, argument)
             if chosen is None:
-                self._emit(f"no session matching '{argument}'")
+                self._emit(_t("cmd.no_match", argument=argument))
                 return
         elif self.ctx.picker is not None:
             chosen = await self.ctx.picker(infos)
@@ -286,49 +279,49 @@ class SlashCommands:
             return
 
         if chosen is None:
-            self._emit("resume cancelled")
+            self._emit(_t("cmd.resume_cancelled"))
             return
         session = manager.open(chosen.path)
         self.ctx.session = session
         self.ctx.agent.resume(session)
         self._apply_session_model()
-        self._emit(f"resumed session {session.id} ({len(session.messages())} messages)")
+        self._emit(_t("cmd.resumed", id=session.id, count=len(session.messages())))
 
     def _tree(self, argument: str) -> None:
         session = self.ctx.session
         if session is None:
-            self._emit("no session (session persistence disabled)")
+            self._emit(_t("cmd.no_session"))
             return
         entries = session.points()
         if not argument:
             if not entries:
-                self._emit("no conversation points yet")
+                self._emit(_t("cmd.no_points"))
                 return
             lines = []
             for index, entry in enumerate(entries, start=1):
                 marker = "*" if entry.id == session.leaf_id else " "
                 preview = _preview(entry.message) if entry.message is not None else ""
                 lines.append(f"{marker} {index}. {preview}")
-            lines.append("use /tree <n> to branch, /fork <n> to fork into a new file")
+            lines.append(_t("cmd.tree_hint"))
             self._emit("\n".join(lines))
             return
         try:
             index = int(argument)
         except ValueError:
-            self._emit("usage: /tree <n>")
+            self._emit(_t("cmd.usage_tree"))
             return
         if not 1 <= index <= len(entries):
-            self._emit(f"point out of range (1..{len(entries)})")
+            self._emit(_t("cmd.out_of_range", count=len(entries)))
             return
         session.branch_from(entries[index - 1].id)
         self.ctx.agent.set_messages(session.messages())
-        self._emit(f"branched at point {index}; {len(session.messages())} messages active")
+        self._emit(_t("cmd.branched", index=index, count=len(session.messages())))
 
     def _fork(self, argument: str) -> None:
         session = self.ctx.session
         manager = self.ctx.session_manager
         if session is None or manager is None:
-            self._emit("no session (session persistence disabled)")
+            self._emit(_t("cmd.no_session"))
             return
         target = session.leaf_id
         if argument:
@@ -336,19 +329,19 @@ class SlashCommands:
             try:
                 index = int(argument)
             except ValueError:
-                self._emit("usage: /fork <n>")
+                self._emit(_t("cmd.usage_fork"))
                 return
             if not 1 <= index <= len(entries):
-                self._emit(f"point out of range (1..{len(entries)})")
+                self._emit(_t("cmd.out_of_range", count=len(entries)))
                 return
             target = entries[index - 1].id
         if target is None:
-            self._emit("nothing to fork")
+            self._emit(_t("cmd.nothing_to_fork"))
             return
         forked = manager.fork(session, target, cwd=self.ctx.cwd)
         self.ctx.session = forked
         self.ctx.agent.resume(forked)
-        self._emit(f"forked to session {forked.id} | {forked.path}")
+        self._emit(_t("cmd.forked", id=forked.id, path=forked.path))
 
     def _model(self, argument: str) -> None:
         registry = self.ctx.registry
@@ -357,7 +350,7 @@ class SlashCommands:
             for preset in registry.presets():
                 models = ", ".join(model.id for model in preset.models)
                 lines.append(f"{preset.id}: {models or '(none)'}")
-            self._emit("models (/model <id> to switch):\n" + "\n".join(lines))
+            self._emit(_t("cmd.models_header") + "\n" + "\n".join(lines))
             return
         try:
             provider, model = registry.resolve(argument, None)
@@ -368,52 +361,52 @@ class SlashCommands:
         self.ctx.agent.model = model
         if self.ctx.session is not None:
             self.ctx.session.set_model_selection(provider.id, model.id)
-        self._emit(f"model set to {model.provider}/{model.id}")
+        self._emit(_t("cmd.model_set", provider=model.provider, id=model.id))
 
     def _list_skills(self) -> None:
         skills = self.ctx.skills or []
         if not skills:
-            self._emit("no skills found")
+            self._emit(_t("cmd.no_skills"))
             return
         lines = [f"{skill.name}: {skill.description}" for skill in skills]
-        self._emit("skills:\n" + "\n".join(lines))
+        self._emit(_t("cmd.skills_header") + "\n" + "\n".join(lines))
 
     def _load_skill(self, name: str) -> str | None:
         skill = find_skill(self.ctx.skills or [], name)
         if skill is None:
-            self._emit(f"no such skill: {name}")
+            self._emit(_t("cmd.no_skill", name=name))
             return None
         return f"Apply the following skill:\n\n{skill.body}"
 
     def _list_prompts(self) -> None:
         templates = self.ctx.templates or {}
         if not templates:
-            self._emit("no prompt templates found")
+            self._emit(_t("cmd.no_prompts"))
             return
-        self._emit("prompt templates: " + ", ".join(sorted(templates)))
+        self._emit(_t("cmd.prompts_header", names=", ".join(sorted(templates))))
 
     async def _compact(self, instructions: str | None) -> None:
         changed = await self.ctx.agent.compact(instructions)
-        self._emit("compacted" if changed else "nothing to compact")
+        self._emit(_t("cmd.compacted") if changed else _t("cmd.nothing_compact"))
 
     async def _recover(self) -> None:
         pending = self.ctx.agent.pending_recovery()
         if not pending:
-            self._emit("nothing to recover")
+            self._emit(_t("cmd.nothing_recover"))
             return
         await self.ctx.agent.recover()
-        self._emit(f"recovered {len(pending)} interrupted operation(s)")
+        self._emit(_t("cmd.recovered", count=len(pending)))
 
     def _undo(self, argument: str) -> None:
         journal = self.ctx.journal
         if journal is None:
-            self._emit("no change journal available")
+            self._emit(_t("cmd.no_journal"))
             return
         count = int(argument) if argument.strip().isdigit() else 1
         session = self.ctx.session.id if self.ctx.session is not None else None
         changes = [change for change in journal.last(count, session=session) if change.reversible]
         if not changes:
-            self._emit("nothing to undo")
+            self._emit(_t("cmd.nothing_undo"))
             return
         host = detect_host()
         for change in reversed(changes):
@@ -423,7 +416,7 @@ class SlashCommands:
     def _auto(self, argument: str) -> None:
         approver = self.ctx.approver
         if approver is None:
-            self._emit("auto-approve is not available")
+            self._emit(_t("cmd.auto_off_unavailable"))
             return
         choice = argument.strip().lower()
         if choice in ("on", "true", "yes", "1"):
@@ -432,7 +425,15 @@ class SlashCommands:
             approver.auto = False
         else:
             approver.auto = not approver.auto
-        self._emit(f"auto-approve {'on' if approver.auto else 'off'}")
+        self._emit(_t("tui.auto_on") if approver.auto else _t("tui.auto_off"))
+
+    def _lang(self, argument: str) -> None:
+        choice = argument.strip().lower()
+        if not choice:
+            self._emit(_t("cmd.lang_usage", lang=get_language()))
+            return
+        lang = set_language(choice)
+        self._emit(_t("cmd.lang_set", lang=lang))
 
     def _copy(self, argument: str) -> None:
         count = int(argument) if argument.strip().isdigit() else 1
@@ -442,37 +443,34 @@ class SlashCommands:
             if isinstance(message, AssistantMessage) and message.text()
         ]
         if not replies:
-            self._emit("nothing to copy")
+            self._emit(_t("cmd.nothing_copy"))
             return
         if count < 1 or count > len(replies):
-            self._emit(f"only {len(replies)} assistant message(s)")
+            self._emit(_t("cmd.only_n", n=len(replies)))
             return
         text = replies[-count].text()
         if copy_to_clipboard(text):
-            self._emit(f"copied assistant message (-{count}) to the clipboard")
+            self._emit(_t("cmd.copied", count=count))
         else:
-            self._emit(
-                "could not access the system clipboard; use --no-mouse and the "
-                "terminal's native copy instead"
-            )
+            self._emit(_t("cmd.clipboard_failed"))
 
     def _trust(self, argument: str) -> None:
         manager = self.ctx.trust_manager
         if manager is None:
-            self._emit("trust is not available")
+            self._emit(_t("cmd.trust_unavailable"))
             return
         trusted = argument.strip().lower() not in ("off", "no", "false", "untrust")
         manager.save(self.ctx.cwd, trusted)
-        state = "trusted" if trusted else "untrusted"
-        self._emit(f"{state} {self.ctx.cwd} (restart to apply)")
+        key = "cmd.trusted" if trusted else "cmd.untrusted"
+        self._emit(_t(key, cwd=self.ctx.cwd))
 
 
 __all__ = [
-    "COMMAND_SPECS",
-    "HELP",
     "CommandContext",
     "Emit",
     "ExitSignal",
     "SessionPicker",
     "SlashCommands",
+    "command_specs",
+    "help_text",
 ]

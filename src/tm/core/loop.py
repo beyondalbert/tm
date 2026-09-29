@@ -38,6 +38,7 @@ from tm.core.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from tm.i18n import t as _t
 from tm.telemetry import (
     SPAN_TURN,
     NoopTelemetry,
@@ -175,8 +176,7 @@ async def agent_loop(
                 attempt += 1
                 delay = _retry_delay(attempt)
                 await hooks.notice(
-                    f"network problem: retrying in {delay:g}s "
-                    f"(attempt {attempt}/{max_retries})",
+                    _t("notice.network_retry", delay=f"{delay:g}", n=attempt, max=max_retries),
                     "warning",
                 )
                 await asyncio.sleep(delay)
