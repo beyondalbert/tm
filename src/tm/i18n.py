@@ -58,6 +58,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "tui.paused": ("Paused  Ctrl+P to resume", "已暂停  Ctrl+P 继续"),
     "tui.stop_hint": ("  Esc/Ctrl+C stop  ·  Ctrl+P pause", "  Esc/Ctrl+C 停止  ·  Ctrl+P 暂停"),
     "tui.stopped": ("Stopped by user.", "已被用户停止。"),
+    "tui.history_truncated": (
+        "… {count} earlier messages hidden (history is capped to stay responsive)",
+        "… 已隐藏更早的 {count} 条消息（为保持流畅限制了历史条数）",
+    ),
     "tui.max_turns": (
         "Stopped after {n} turns (raise it with --max-turns). Send another message to continue.",
         "已达到 {n} 回合上限（可用 --max-turns 提高）。再发一条消息即可继续。",

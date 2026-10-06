@@ -339,7 +339,9 @@ selection and `Escape` dismisses it.
 running, `Esc` or `Ctrl+C` stops it and `Ctrl+P` pauses/resumes it (the status
 line shows which). Stopping cancels the in-flight model request and kills a
 running shell/python command. Reasoning output and tool results are folded to
-one line by default; `Ctrl+O` expands/collapses them.
+one line by default; `Ctrl+O` expands/collapses them. Very long sessions keep
+only the most recent ~150 messages on screen (older ones are hidden) so the view
+stays fast; the full history is still in the session file.
 
 **Network errors.** Transient provider failures (timeouts, connection resets,
 429/5xx) are retried up to `max_retries` times with a visible "network problem:

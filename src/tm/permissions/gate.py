@@ -188,7 +188,13 @@ class PermissionChecker:
 def build_permission_hook(checker: PermissionChecker, cwd: Path):
     async def hook(call, args) -> BeforeToolCallResult | None:
         actions = actions_for_tool(call.name, call.arguments, cwd)
-        if actions and not await checker.authorize_all(actions):
+        if not actions:
+            return None
+        try:
+            allowed = await checker.authorize_all(actions)
+        except Exception as exc:  # noqa: BLE001 - a broken gate must not hang the run
+            return BeforeToolCallResult(block=True, reason=f"Permission check failed: {exc}")
+        if not allowed:
             described = ", ".join(action.describe() for action in actions)
             return BeforeToolCallResult(
                 block=True, reason=f"Permission denied: {described}"

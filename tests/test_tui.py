@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 pytest.importorskip("textual")
@@ -735,3 +737,89 @@ async def test_reasoning_is_folded_then_expandable() -> None:
         widget.set_expanded(True)
         await pilot.pause()
         assert "deep thought" in str(widget._thinking.render())
+
+
+def test_permission_answer_is_idempotent() -> None:
+    from tm.tui.app import PermissionScreen
+
+    screen = PermissionScreen("shell: ls", "default policy")
+    calls: list[ApprovalOutcome] = []
+
+    def fake_dismiss(outcome: ApprovalOutcome) -> None:
+        calls.append(outcome)
+
+    screen.dismiss = fake_dismiss  # type: ignore[method-assign, assignment]
+
+    screen._answer(ApprovalOutcome(allowed=True))
+    screen._answer(ApprovalOutcome(allowed=False))
+
+    assert calls == [ApprovalOutcome(allowed=True)]
+
+
+async def test_approver_serializes_concurrent_requests() -> None:
+    from tm.permissions import Action, ActionKind
+    from tm.tui.app import TextualApprover
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        approver = TextualApprover(app)
+        results: dict[str, list[ApprovalOutcome]] = {}
+
+        async def two() -> None:
+            first = asyncio.ensure_future(
+                approver.request(Action(ActionKind.SHELL, "ls"), "r")
+            )
+            await asyncio.sleep(0.05)
+            second = asyncio.ensure_future(
+                approver.request(Action(ActionKind.SHELL, "git status"), "r")
+            )
+            results["both"] = list(await asyncio.gather(first, second))
+
+        app.run_worker(two())
+        await pilot.pause()
+        await pilot.pause()
+        assert len(app.screen_stack) == 2  # exactly one modal at a time
+
+        await pilot.click("#allow")
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.click("#allow")
+        await pilot.pause()
+        await pilot.pause()
+
+    assert len(results.get("both", [])) == 2
+    assert all(outcome.allowed for outcome in results["both"])
+
+
+async def test_rendered_history_is_capped() -> None:
+    from textual.containers import VerticalScroll
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    agent.set_messages([UserMessage(content=f"m{i}") for i in range(500)])
+
+    async with app.run_test() as pilot:
+        await app._render_history()
+        await pilot.pause()
+        container = app.query_one("#messages", VerticalScroll)
+        assert len(container.children) <= app.MAX_HISTORY_WIDGETS
+        notes = app.query(".system")
+        assert any("hidden" in str(note.render()) for note in notes)
+
+
+async def test_pruning_bounds_the_widget_tree() -> None:
+    from textual.containers import VerticalScroll
+
+    from tm.tui.app import SystemNote
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        for index in range(app.MAX_HISTORY_WIDGETS + 25):
+            await app._mount(SystemNote(f"n{index}"))
+        await pilot.pause()
+        container = app.query_one("#messages", VerticalScroll)
+        assert len(container.children) <= app.MAX_HISTORY_WIDGETS

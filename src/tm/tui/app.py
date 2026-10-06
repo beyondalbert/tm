@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import time
@@ -66,6 +67,9 @@ _TOOL_OK_BG = "#283228"
 _TOOL_ERR_BG = "#3c2828"
 
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+#: Cap a single rendered block so one huge message cannot stall layout.
+_MAX_BODY_CHARS = 20000
 
 
 def format_tokens(count: int) -> str:
@@ -234,12 +238,15 @@ class AssistantMessageWidget(Vertical):
         width = self._body.size.width or self.size.width or self.app.size.width - 2
         if width <= 0:
             return
+        text = self._text
+        if len(text) > _MAX_BODY_CHARS:
+            text = text[:_MAX_BODY_CHARS] + "\n… (truncated for display)"
         if self._final:
             # Styled, selectable Markdown once the reply is complete.
-            self._body.update(render_markdown(self._text, width))
+            self._body.update(render_markdown(text, width))
         else:
             # Plain text while streaming keeps the UI responsive.
-            self._body.update(Text(self._text, style=_TEXT))
+            self._body.update(Text(text, style=_TEXT))
 
 
 class ToolWidget(Vertical):
@@ -301,7 +308,10 @@ class ToolWidget(Vertical):
             self._body.display = False
             return
         if self._expanded:
-            self._body.update(Text(self._output, style=_MUTED))
+            output = self._output
+            if len(output) > _MAX_BODY_CHARS:
+                output = output[:_MAX_BODY_CHARS] + "\n… (truncated for display)"
+            self._body.update(Text(output, style=_MUTED))
             self._body.display = True
             return
         if self._is_error:
@@ -326,6 +336,7 @@ class PermissionScreen(ModalScreen[ApprovalOutcome]):
         super().__init__()
         self._description = description
         self._reason = reason
+        self._answered = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="perm-box"):
@@ -336,16 +347,24 @@ class PermissionScreen(ModalScreen[ApprovalOutcome]):
                 yield Button(_t("tui.perm_always"), id="always", variant="primary")
                 yield Button(_t("tui.perm_deny"), id="deny", variant="error")
 
+    def _answer(self, outcome: ApprovalOutcome) -> None:
+        # Guard against a second dismiss (a repeat click or Escape) popping the
+        # screen twice, which raises ScreenStackError and can leave it stuck.
+        if self._answered:
+            return
+        self._answered = True
+        self.dismiss(outcome)
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         choice = {
             "allow": ApprovalOutcome(allowed=True),
             "always": ApprovalOutcome(allowed=True, remember=True),
             "deny": ApprovalOutcome(allowed=False),
         }
-        self.dismiss(choice.get(event.button.id or "deny", ApprovalOutcome(allowed=False)))
+        self._answer(choice.get(event.button.id or "deny", ApprovalOutcome(allowed=False)))
 
     def action_deny(self) -> None:
-        self.dismiss(ApprovalOutcome(allowed=False))
+        self._answer(ApprovalOutcome(allowed=False))
 
 
 class SessionScreen(ModalScreen[SessionInfo | None]):
@@ -356,6 +375,7 @@ class SessionScreen(ModalScreen[SessionInfo | None]):
     def __init__(self, infos: list[SessionInfo]) -> None:
         super().__init__()
         self._infos = infos
+        self._answered = False
 
     def compose(self) -> ComposeResult:
         options = [
@@ -373,25 +393,35 @@ class SessionScreen(ModalScreen[SessionInfo | None]):
     def on_mount(self) -> None:
         self.query_one(OptionList).focus()
 
+    def _answer(self, info: SessionInfo | None) -> None:
+        if self._answered:
+            return
+        self._answered = True
+        self.dismiss(info)
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         for info in self._infos:
             if info.path.as_posix() == event.option.id:
-                self.dismiss(info)
+                self._answer(info)
                 return
-        self.dismiss(None)
+        self._answer(None)
 
     def action_cancel(self) -> None:
-        self.dismiss(None)
+        self._answer(None)
 
 
 class TextualApprover:
     def __init__(self, app: TMPromptApp) -> None:
         self._app = app
+        # Serialize approvals: parallel tool calls would otherwise push several
+        # permission modals at once and leave them stuck.
+        self._lock = asyncio.Lock()
 
     async def request(self, action, reason: str) -> ApprovalOutcome:
-        return await self._app.push_screen_wait(
-            PermissionScreen(action.describe(), reason)
-        )
+        async with self._lock:
+            return await self._app.push_screen_wait(
+                PermissionScreen(action.describe(), reason)
+            )
 
 
 class DeferredApprover:
@@ -517,6 +547,11 @@ class TMPromptApp(App[None]):
         Binding("escape", "dismiss_suggestions", "Dismiss suggestions", show=False),
     ]
 
+    # Bound the rendered history so the widget tree (and layout cost) stays flat
+    # as a session grows long.
+    MAX_HISTORY_WIDGETS = 200
+    MAX_HISTORY_MESSAGES = 150
+
     def __init__(self, agent: Agent, model: Model, *, banner: str | None = None) -> None:
         super().__init__()
         self._agent = agent
@@ -578,9 +613,15 @@ class TMPromptApp(App[None]):
 
     async def _render_history(self) -> None:
         """Render the messages already loaded from a resumed session."""
+        messages = self._agent.messages
+        hidden = max(0, len(messages) - self.MAX_HISTORY_MESSAGES)
+        if hidden:
+            messages = messages[hidden:]
         widgets: list[Widget] = []
+        if hidden:
+            widgets.append(SystemNote(_t("tui.history_truncated", count=hidden)))
         tools: dict[str, ToolWidget] = {}
-        for message in self._agent.messages:
+        for message in messages:
             if isinstance(message, UserMessage):
                 widgets.append(UserMessageWidget(self._user_text(message)))
             elif isinstance(message, AssistantMessage):
@@ -591,7 +632,9 @@ class TMPromptApp(App[None]):
                         if message.stop_reason == "error"
                         else None
                     )
-                    widget.set_content(message.thinking(), message.text(), error=error)
+                    widget.set_content(
+                        message.thinking(), message.text(), error=error, final=True
+                    )
                     widgets.append(widget)
                 for call in message.tool_calls:
                     tool_widget = ToolWidget(
@@ -608,6 +651,7 @@ class TMPromptApp(App[None]):
         if widgets:
             container = self.query_one("#messages", VerticalScroll)
             await container.mount(*widgets)
+            await self._prune_history()
             container.scroll_end(animate=False)
 
     async def _reload_history(self) -> None:
@@ -618,7 +662,18 @@ class TMPromptApp(App[None]):
     async def _mount(self, widget: Widget) -> None:
         container = self.query_one("#messages", VerticalScroll)
         await container.mount(widget)
+        await self._prune_history()
         container.scroll_end(animate=False)
+
+    async def _prune_history(self) -> None:
+        """Drop the oldest rendered widgets so the tree stays bounded and fast."""
+        container = self.query_one("#messages", VerticalScroll)
+        children = list(container.children)
+        excess = len(children) - self.MAX_HISTORY_WIDGETS
+        if excess <= 0:
+            return
+        for widget in children[:excess]:
+            await widget.remove()
 
     def action_toggle_tools(self) -> None:
         self._expanded = not self._expanded

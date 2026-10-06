@@ -557,7 +557,10 @@ class Agent:
             else:
                 blocked = None
                 if self.before_tool_call is not None:
-                    blocked = await _maybe_await(self.before_tool_call(call, args))
+                    try:
+                        blocked = await _maybe_await(self.before_tool_call(call, args))
+                    except Exception as exc:  # noqa: BLE001
+                        blocked = BeforeToolCallResult(block=True, reason=str(exc))
                 if blocked is not None and blocked.block:
                     result = text_result(blocked.reason or "Blocked", is_error=True)
                     status = OperationStatus.FAILED
@@ -675,7 +678,11 @@ class Agent:
             return self._result_message(call, result)
 
         if self.before_tool_call is not None:
-            decision = await _maybe_await(self.before_tool_call(call, entry.args))
+            try:
+                decision = await _maybe_await(self.before_tool_call(call, entry.args))
+            except Exception as exc:  # noqa: BLE001 - a hook error must not hang the run
+                result = text_result(f"Permission check failed: {exc}", is_error=True)
+                return self._result_message(call, result)
             if decision is not None and decision.block:
                 result = text_result(decision.reason or "Blocked", is_error=True)
                 return self._result_message(call, result)

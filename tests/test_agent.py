@@ -12,6 +12,7 @@ from tm.ai.types import (
     TextContent,
     TextDeltaEvent,
     ToolCall,
+    ToolResultMessage,
 )
 from tm.core.agent import Agent
 from tm.core.events import (
@@ -286,3 +287,25 @@ async def test_a_broken_listener_does_not_abort_the_run() -> None:
 
     assert agent.last_stop_reason == "stop"
     assert any(isinstance(event, AgentEndEvent) for event in collected)
+
+
+async def test_a_broken_permission_hook_does_not_hang() -> None:
+    tool_call = AssistantMessage(
+        tool_calls=[ToolCall(id="t1", name="echo", arguments={"text": "hi"})],
+        stop_reason="tool_use",
+    )
+    final = AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+    agent = Agent(MODEL, stream_fn=scripted([tool_call, final]), tools=[EchoTool()])
+
+    async def boom(call, args) -> None:
+        raise RuntimeError("gate down")
+
+    agent.before_tool_call = boom
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "stop"
+    assert any(
+        isinstance(message, ToolResultMessage) and message.is_error
+        for message in agent.messages
+    )
