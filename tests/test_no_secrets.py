@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("provider key", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")),
     ("openai project key", re.compile(r"\bsk-proj-[A-Za-z0-9_\-]{20,}")),
+    ("tm_im api key", re.compile(r"\bsk_live_[0-9a-fA-F]{16,}\b")),
     ("pypi token", re.compile(r"\bpypi-AgEI[A-Za-z0-9_\-]{10,}")),
     ("aws access key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("github token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}")),
@@ -26,6 +27,9 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 ALLOW: tuple[re.Pattern[str], ...] = (
     re.compile(r"^sk-0{32}$"),
     re.compile(r"^sk-x{4,}$"),
+    # tm_im example key: the integration docs use a 16-hex placeholder that is
+    # explicitly not a usable credential (real keys are 32 hex).
+    re.compile(r"^sk_live_9f2c1d7a4b8e3f60$"),
 )
 
 

@@ -858,5 +858,20 @@ def main(
         console.print()
 
 
-if __name__ == "__main__":
+def run_cli() -> None:
+    """Console entry point.
+
+    Routes ``tm im ...`` to the tm_im integration and everything else to the
+    default command, so the existing single-command CLI is unchanged.
+    """
+    if len(sys.argv) > 1 and sys.argv[1] == "im":
+        from tm.im.cli import app as im_app
+
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        im_app()
+        return
     app()
+
+
+if __name__ == "__main__":
+    run_cli()
