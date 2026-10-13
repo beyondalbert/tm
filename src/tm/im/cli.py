@@ -243,7 +243,8 @@ def run(
             "--allow-tools read_only to scope it down."
         )
     console.print(
-        f"connecting to {settings.base_url} (realtime {host}:{port}) as tools={settings.allow_tools}"
+        f"connecting to {settings.base_url} (realtime {host}:{port}) | "
+        f"model {resolved_model.provider}/{resolved_model.id} | tools={settings.allow_tools}"
     )
 
     async def main() -> None:
@@ -340,6 +341,12 @@ def login(
     allow_tools: str | None = typer.Option(
         None, "--allow-tools", help="none | read_only | full."
     ),
+    provider: str | None = typer.Option(
+        None, "--provider", "-p", help="Provider id for IM replies."
+    ),
+    model: str | None = typer.Option(
+        None, "--model", "-m", help="Model id or pattern for IM replies."
+    ),
     config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
     """Store the agent api_key (and options) in im.toml."""
@@ -359,9 +366,17 @@ def login(
         if value not in ALLOW_TOOLS:
             raise typer.BadParameter(f"allow-tools must be one of {', '.join(ALLOW_TOOLS)}")
         settings.allow_tools = value
+    if provider:
+        settings.provider = provider
+    if model:
+        settings.model = model
     saved = save_im_settings(settings, path)
     console.print(f"saved tm_im credentials to [bold]{saved}[/bold]")
     console.print(f"[dim]key: {key[:6]}...{key[-4:]} ({len(key)} chars)[/dim]")
+    if settings.provider or settings.model:
+        console.print(
+            f"[dim]model: {settings.provider or '(default)'}/{settings.model or '(default)'}[/dim]"
+        )
 
 
 __all__ = ["app"]
