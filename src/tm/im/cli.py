@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import typer
@@ -18,6 +19,7 @@ from tm.core.session import Session, SessionManager
 from tm.core.system_prompt import build_system_prompt
 from tm.host import detect_host, render_environment
 from tm.i18n import set_language
+from tm.im import daemon
 from tm.im.bot import ImBot
 from tm.im.client import ImApiError, ImClient
 from tm.im.config import (
@@ -151,6 +153,13 @@ def run(
         },
     )
     _require_key(settings)
+
+    other = daemon.running_pid()
+    if os.environ.get("TM_IM_DAEMON") != "1" and other is not None and other != os.getpid():
+        console.print(
+            f"[yellow]another tm im instance is running (pid {other}); "
+            "they will compete for this account's single connection[/yellow]"
+        )
 
     global_settings = load_settings()
     set_language(lang if lang is not None else global_settings.language)
@@ -377,6 +386,125 @@ def login(
         console.print(
             f"[dim]model: {settings.provider or '(default)'}/{settings.model or '(default)'}[/dim]"
         )
+
+
+# ---------------------------------------------------------------------------
+# start / stop / status / logs (background)
+# ---------------------------------------------------------------------------
+_START_FLAGS: tuple[tuple[str, str], ...] = (
+    ("base_url", "--base-url"),
+    ("api_key", "--api-key"),
+    ("tcp_addr", "--tcp-addr"),
+    ("allow_tools", "--allow-tools"),
+    ("respond_in_groups", "--respond-in-groups"),
+    ("provider", "--provider"),
+    ("model", "--model"),
+    ("lang", "--lang"),
+    ("config", "--config"),
+)
+
+
+def _forward_start_args(options: dict, workers: int) -> list[str]:
+    args: list[str] = []
+    for key, flag in _START_FLAGS:
+        value = options.get(key)
+        if value:
+            args += [flag, str(value)]
+    if workers != 2:
+        args += ["--workers", str(workers)]
+    return args
+
+
+@app.command()
+def start(
+    base_url: str | None = typer.Option(None, "--base-url", help="REST base URL."),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="Agent api_key (prefer TM_IM_API_KEY)."
+    ),
+    tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    allow_tools: str | None = typer.Option(
+        None, "--allow-tools", help="none | read_only | full."
+    ),
+    respond_in_groups: str | None = typer.Option(
+        None, "--respond-in-groups", help="mention | always | never."
+    ),
+    provider: str | None = typer.Option(None, "--provider", "-p", help="Provider id."),
+    model: str | None = typer.Option(None, "--model", "-m", help="Model id or pattern."),
+    lang: str | None = typer.Option(None, "--lang", help="UI language: en, zh, or auto."),
+    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    workers: int = typer.Option(2, "--workers", help="Concurrent conversations."),
+) -> None:
+    """Start ``tm im run`` in the background (detached)."""
+    existing = daemon.running_pid()
+    if existing is not None:
+        console.print(f"[yellow]already running (pid {existing})[/yellow]; use `tm im stop` first")
+        raise typer.Exit(code=1)
+
+    forwarded = _forward_start_args(
+        {
+            "base_url": base_url,
+            "api_key": api_key,
+            "tcp_addr": tcp_addr,
+            "allow_tools": allow_tools,
+            "respond_in_groups": respond_in_groups,
+            "provider": provider,
+            "model": model,
+            "lang": lang,
+            "config": config,
+        },
+        workers,
+    )
+    child = daemon.start_background(forwarded)
+    if not daemon.wait_alive(child):
+        daemon.clear_pid()
+        console.print("[red]failed to start; last log lines:[/red]")
+        for line in daemon.read_tail(20):
+            console.print(line, markup=False, highlight=False)
+        raise typer.Exit(code=1)
+    console.print(f"started tm im in the background (pid {child})")
+    console.print(f"logs: {daemon.log_path()}")
+
+
+@app.command()
+def stop() -> None:
+    """Stop the background ``tm im`` process."""
+    pid = daemon.stop_background()
+    if pid is None:
+        console.print("tm im is not running")
+    else:
+        console.print(f"stopped (pid {pid})")
+
+
+@app.command()
+def status() -> None:
+    """Show whether the background ``tm im`` process is running."""
+    pid = daemon.running_pid()
+    if pid is None:
+        console.print("tm im is not running")
+        raise typer.Exit(code=1)
+    console.print(f"tm im is running (pid {pid})")
+    console.print(f"log: {daemon.log_path()}")
+
+
+@app.command()
+def logs(
+    lines: int = typer.Option(40, "--lines", "-n", help="Number of lines to show."),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Keep printing new lines."),
+) -> None:
+    """Show the background log (``%APPDATA%/the-machine/im/im.log``)."""
+    path = daemon.log_path()
+    if not path.exists():
+        console.print(f"no log yet ({path})")
+        return
+    if follow:
+        console.print(f"[dim]following {path} (Ctrl+C to stop)[/dim]")
+        try:
+            daemon.follow(lines)
+        except KeyboardInterrupt:
+            console.print()
+        return
+    for line in daemon.read_tail(lines):
+        console.print(line, markup=False, highlight=False)
 
 
 __all__ = ["app"]
