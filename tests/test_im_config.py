@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tm.im.config import ImSettings, load_im_settings, save_im_settings
+from tm.im.config import (
+    ImSettings,
+    load_im_settings,
+    named_config_path,
+    resolve_config,
+    save_im_settings,
+)
 
 
 def test_load_from_file(tmp_path: Path, monkeypatch) -> None:
@@ -55,3 +61,18 @@ def test_save_roundtrip(tmp_path: Path) -> None:
     assert loaded.allow_tools == "none"
     assert loaded.owner_handles == ["@alice"]
     assert loaded.tcp_addr == "tcp.example:8090"
+
+
+def test_named_config_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    assert named_config_path("alice") == tmp_path / "configs" / "alice.toml"
+    assert named_config_path("alice.toml") == tmp_path / "configs" / "alice.toml"
+
+
+def test_resolve_config(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    assert resolve_config(None) is None
+    assert resolve_config("alice") == str(tmp_path / "configs" / "alice.toml")
+    assert resolve_config("im.toml") == str(tmp_path / "configs" / "im.toml")
+    explicit = str(tmp_path / "custom" / "a.toml")
+    assert resolve_config(explicit) == explicit

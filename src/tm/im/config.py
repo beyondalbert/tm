@@ -8,7 +8,9 @@ without persisting a key.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +27,52 @@ ACCEPT_FRIENDS = ("none", "allowlist", "all")
 
 def im_path() -> Path:
     return config_dir() / "im.toml"
+
+
+def configs_dir() -> Path:
+    """Directory for named config files created by ``tm im config new``."""
+    return config_dir() / "configs"
+
+
+def named_config_path(name: str) -> Path:
+    filename = name if name.endswith(".toml") else f"{name}.toml"
+    return configs_dir() / filename
+
+
+def resolve_config(value: str | None) -> str | None:
+    """Turn a ``--config`` value into a concrete path.
+
+    A bare name (no path separator) is a named config under ``configs/``; a
+    value with separators is used as an explicit path. ``None`` means the
+    default ``<config>/im.toml``.
+    """
+    if value is None or value == "":
+        return None
+    text = str(value)
+    separators = (os.sep, os.altsep) if os.altsep else (os.sep,)
+    if any(sep and sep in text for sep in separators):
+        return str(Path(text).expanduser())
+    return str(named_config_path(text))
+
+
+def instance_dir(config: str | None) -> Path:
+    """The on-disk directory for one ``tm im`` instance.
+
+    The default config uses ``<config>/im``; any other ``--config`` file gets
+    its own subdirectory so instances do not share state, sessions, the
+    pidfile, or the log.
+    """
+    base = config_dir() / "im"
+    if config is None:
+        return base
+    path = Path(config).expanduser()
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path.absolute()
+    digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:8]
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", path.stem) or "im"
+    return base / "instances" / f"{name}-{digest}"
 
 
 def _normalize_choice(value: str, allowed: tuple[str, ...], default: str) -> str:
@@ -137,7 +185,11 @@ __all__ = [
     "ALLOW_TOOLS",
     "ImSettings",
     "RESPOND_IN_GROUPS",
+    "configs_dir",
     "im_path",
+    "instance_dir",
     "load_im_settings",
+    "named_config_path",
+    "resolve_config",
     "save_im_settings",
 ]

@@ -1,9 +1,10 @@
 """Run ``tm im`` detached in the background.
 
+Every instance is isolated on disk by its config file. ``tm im start --config
+a.toml`` and ``--config b.toml`` use separate directories (state, sessions,
+pidfile, log), so several accounts can run on one machine without interfering.
 ``tm im start`` re-launches the normal ``run`` command as a detached child
-process (no console, output appended to a log file) and records its pid. The
-pidfile enforces a single instance locally, which also avoids two connections
-for the same account fighting over the server's one-device policy.
+process (no console, output appended to a log file) and records its pid.
 """
 
 from __future__ import annotations
@@ -15,30 +16,24 @@ import sys
 import time
 from pathlib import Path
 
-from tm.config import config_dir
-
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _DETACHED_PROCESS = 0x00000008
 _MAX_LOG_BYTES = 5 * 1024 * 1024
 
 
-def im_dir() -> Path:
-    return config_dir() / "im"
+def pid_path(base: Path) -> Path:
+    return base / "im.pid"
 
 
-def pid_path() -> Path:
-    return im_dir() / "im.pid"
-
-
-def log_path() -> Path:
-    return im_dir() / "im.log"
+def log_path(base: Path) -> Path:
+    return base / "im.log"
 
 
 # ---------------------------------------------------------------------------
 # pid file
 # ---------------------------------------------------------------------------
-def read_pid() -> int | None:
-    path = pid_path()
+def read_pid(base: Path) -> int | None:
+    path = pid_path(base)
     if not path.exists():
         return None
     try:
@@ -47,15 +42,15 @@ def read_pid() -> int | None:
         return None
 
 
-def write_pid(pid: int) -> None:
-    path = pid_path()
+def write_pid(base: Path, pid: int) -> None:
+    path = pid_path(base)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(str(pid), encoding="utf-8")
 
 
-def clear_pid() -> None:
+def clear_pid(base: Path) -> None:
     with contextlib.suppress(OSError):
-        pid_path().unlink()
+        pid_path(base).unlink()
 
 
 def is_alive(pid: int) -> bool:
@@ -79,8 +74,8 @@ def is_alive(pid: int) -> bool:
     return True
 
 
-def running_pid() -> int | None:
-    pid = read_pid()
+def running_pid(base: Path) -> int | None:
+    pid = read_pid(base)
     if pid is not None and is_alive(pid):
         return pid
     return None
@@ -89,11 +84,11 @@ def running_pid() -> int | None:
 # ---------------------------------------------------------------------------
 # start / stop
 # ---------------------------------------------------------------------------
-def start_background(forwarded: list[str]) -> int:
-    im_dir().mkdir(parents=True, exist_ok=True)
-    _rotate_log()
+def start_background(base: Path, forwarded: list[str]) -> int:
+    base.mkdir(parents=True, exist_ok=True)
+    _rotate_log(base)
     command = [sys.executable, "-m", "tm.im.daemon", "run", *forwarded]
-    with open(log_path(), "ab") as log:
+    with open(log_path(base), "ab") as log:
         if os.name == "nt":
             process = subprocess.Popen(
                 command,
@@ -112,14 +107,14 @@ def start_background(forwarded: list[str]) -> int:
                 close_fds=True,
                 start_new_session=True,
             )
-    write_pid(process.pid)
+    write_pid(base, process.pid)
     return process.pid
 
 
-def stop_background() -> int | None:
-    pid = running_pid()
+def stop_background(base: Path) -> int | None:
+    pid = running_pid(base)
     if pid is None:
-        clear_pid()
+        clear_pid(base)
         return None
     if os.name == "nt":
         subprocess.run(
@@ -132,12 +127,12 @@ def stop_background() -> int | None:
 
         with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGTERM)
-    clear_pid()
+    clear_pid(base)
     return pid
 
 
-def _rotate_log() -> None:
-    path = log_path()
+def _rotate_log(base: Path) -> None:
+    path = log_path(base)
     try:
         if path.exists() and path.stat().st_size > _MAX_LOG_BYTES:
             path.replace(path.with_suffix(".log.1"))
@@ -148,8 +143,8 @@ def _rotate_log() -> None:
 # ---------------------------------------------------------------------------
 # logs
 # ---------------------------------------------------------------------------
-def read_tail(lines: int) -> list[str]:
-    path = log_path()
+def read_tail(base: Path, lines: int) -> list[str]:
+    path = log_path(base)
     if not path.exists():
         return []
     with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -157,8 +152,8 @@ def read_tail(lines: int) -> list[str]:
     return [line.rstrip("\n") for line in content[-lines:]]
 
 
-def follow(lines: int, sleep: float = 0.5) -> None:
-    path = log_path()
+def follow(base: Path, lines: int, sleep: float = 0.5) -> None:
+    path = log_path(base)
     if not path.exists():
         return
     with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -204,7 +199,6 @@ if __name__ == "__main__":
 __all__ = [
     "clear_pid",
     "follow",
-    "im_dir",
     "is_alive",
     "log_path",
     "main",

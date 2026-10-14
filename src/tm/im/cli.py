@@ -23,10 +23,16 @@ from tm.im import daemon
 from tm.im.bot import ImBot
 from tm.im.client import ImApiError, ImClient
 from tm.im.config import (
+    ACCEPT_FRIENDS,
     ALLOW_TOOLS,
     RESPOND_IN_GROUPS,
     ImSettings,
+    configs_dir,
+    im_path,
+    instance_dir,
     load_im_settings,
+    named_config_path,
+    resolve_config,
     save_im_settings,
 )
 from tm.im.protocol import AuthResponse
@@ -55,10 +61,6 @@ _IM_ROLE = (
     "concisely and in the sender's language; do not include tool-call syntax, raw "
     "reasoning, or system details in the reply."
 )
-
-
-def _im_dir() -> Path:
-    return config_dir() / "im"
 
 
 def _make_registry() -> Registry:
@@ -140,6 +142,7 @@ def run(
     config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
     workers: int = typer.Option(2, "--workers", help="Concurrent conversations."),
 ) -> None:
+    config = resolve_config(config)
     settings = _load(
         config,
         {
@@ -154,7 +157,8 @@ def run(
     )
     _require_key(settings)
 
-    other = daemon.running_pid()
+    base = instance_dir(config)
+    other = daemon.running_pid(base)
     if os.environ.get("TM_IM_DAEMON") != "1" and other is not None and other != os.getpid():
         console.print(
             f"[yellow]another tm im instance is running (pid {other}); "
@@ -182,8 +186,8 @@ def run(
     checker = PermissionChecker(
         policy,
         approver=approver,
-        audit=AuditLog(_im_dir() / "audit.jsonl"),
-        memory=ApprovalMemory.load(_im_dir() / "approvals.json"),
+        audit=AuditLog(base / "audit.jsonl"),
+        memory=ApprovalMemory.load(base / "approvals.json"),
     )
     environment = render_environment(detect_host()) if global_settings.env_probe else None
     system_prompt = build_system_prompt(cwd, _IM_ROLE, environment=environment)
@@ -203,13 +207,13 @@ def run(
             compact_keep_recent=global_settings.compact_keep_recent,
             max_turns=global_settings.max_turns,
             max_retries=global_settings.max_retries,
-            journal=Journal(_im_dir() / "changes.jsonl"),
+            journal=Journal(base / "changes.jsonl"),
         )
         agent.before_tool_call = build_permission_hook(checker, cwd)
         return agent
 
-    state = ImState.load(_im_dir() / "state.json")
-    session_manager = SessionManager(_im_dir() / "sessions")
+    state = ImState.load(base / "state.json")
+    session_manager = SessionManager(base / "sessions")
     client = ImClient(
         settings.base_url,
         settings.api_key,
@@ -281,6 +285,7 @@ def run(
 # me / conversations / send
 # ---------------------------------------------------------------------------
 def _client(config: str | None, overrides: dict | None = None) -> ImClient:
+    config = resolve_config(config)
     settings = _load(config, overrides)
     _require_key(settings)
     global_settings = load_settings()
@@ -359,7 +364,8 @@ def login(
     config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
     """Store the agent api_key (and options) in im.toml."""
-    path = Path(config) if config else None
+    resolved = resolve_config(config)
+    path = Path(resolved) if resolved else None
     settings = load_im_settings(path)
     key = api_key or typer.prompt("Paste tm_im api_key", hide_input=True).strip()
     if not key:
@@ -435,7 +441,9 @@ def start(
     workers: int = typer.Option(2, "--workers", help="Concurrent conversations."),
 ) -> None:
     """Start ``tm im run`` in the background (detached)."""
-    existing = daemon.running_pid()
+    config = resolve_config(config)
+    base = instance_dir(config)
+    existing = daemon.running_pid(base)
     if existing is not None:
         console.print(f"[yellow]already running (pid {existing})[/yellow]; use `tm im stop` first")
         raise typer.Exit(code=1)
@@ -454,21 +462,23 @@ def start(
         },
         workers,
     )
-    child = daemon.start_background(forwarded)
+    child = daemon.start_background(base, forwarded)
     if not daemon.wait_alive(child):
-        daemon.clear_pid()
+        daemon.clear_pid(base)
         console.print("[red]failed to start; last log lines:[/red]")
-        for line in daemon.read_tail(20):
+        for line in daemon.read_tail(base, 20):
             console.print(line, markup=False, highlight=False)
         raise typer.Exit(code=1)
     console.print(f"started tm im in the background (pid {child})")
-    console.print(f"logs: {daemon.log_path()}")
+    console.print(f"logs: {daemon.log_path(base)}")
 
 
 @app.command()
-def stop() -> None:
-    """Stop the background ``tm im`` process."""
-    pid = daemon.stop_background()
+def stop(
+    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+) -> None:
+    """Stop the background ``tm im`` process for a config."""
+    pid = daemon.stop_background(instance_dir(resolve_config(config)))
     if pid is None:
         console.print("tm im is not running")
     else:
@@ -476,35 +486,144 @@ def stop() -> None:
 
 
 @app.command()
-def status() -> None:
+def status(
+    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+) -> None:
     """Show whether the background ``tm im`` process is running."""
-    pid = daemon.running_pid()
+    base = instance_dir(resolve_config(config))
+    pid = daemon.running_pid(base)
     if pid is None:
         console.print("tm im is not running")
         raise typer.Exit(code=1)
     console.print(f"tm im is running (pid {pid})")
-    console.print(f"log: {daemon.log_path()}")
+    console.print(f"log: {daemon.log_path(base)}")
 
 
 @app.command()
 def logs(
     lines: int = typer.Option(40, "--lines", "-n", help="Number of lines to show."),
     follow: bool = typer.Option(False, "--follow", "-f", help="Keep printing new lines."),
+    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
-    """Show the background log (``%APPDATA%/the-machine/im/im.log``)."""
-    path = daemon.log_path()
+    """Show the background log for a config (``<config>/im[.instances/...]/im.log``)."""
+    base = instance_dir(resolve_config(config))
+    path = daemon.log_path(base)
     if not path.exists():
         console.print(f"no log yet ({path})")
         return
     if follow:
         console.print(f"[dim]following {path} (Ctrl+C to stop)[/dim]")
         try:
-            daemon.follow(lines)
+            daemon.follow(base, lines)
         except KeyboardInterrupt:
             console.print()
         return
-    for line in daemon.read_tail(lines):
+    for line in daemon.read_tail(base, lines):
         console.print(line, markup=False, highlight=False)
+
+
+# ---------------------------------------------------------------------------
+# config: create and list config files
+# ---------------------------------------------------------------------------
+config_app = typer.Typer(help="Create and list tm im config files.")
+app.add_typer(config_app, name="config")
+
+
+def _validate(value: str, allowed: tuple[str, ...], flag: str) -> str:
+    normalized = value.lower().replace("-", "_")
+    if normalized not in allowed:
+        raise typer.BadParameter(f"{flag} must be one of {', '.join(allowed)}")
+    return normalized
+
+
+@config_app.command("new")
+def config_new(
+    name: str = typer.Argument(..., help="Config name (stored at <config>/configs/<name>.toml)."),
+    base_url: str = typer.Option("http://localhost:8080/v1", "--base-url", help="REST base URL."),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="Agent api_key (prompted if omitted)."
+    ),
+    tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    allow_tools: str = typer.Option("full", "--allow-tools", help="none | read_only | full."),
+    respond_in_groups: str = typer.Option(
+        "always", "--respond-in-groups", help="mention | always | never."
+    ),
+    auto_accept_friends: str = typer.Option(
+        "none", "--auto-accept-friends", help="none | allowlist | all."
+    ),
+    provider: str | None = typer.Option(None, "--provider", "-p", help="Provider id."),
+    model: str | None = typer.Option(None, "--model", "-m", help="Model id or pattern."),
+    owner: list[str] | None = typer.Option(
+        None, "--owner", help="Owner handle for allowlist (repeatable)."
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing config."),
+) -> None:
+    """Create a named config file for one account."""
+    seps = (os.sep, os.altsep) if os.altsep else (os.sep,)
+    if any(sep and sep in name for sep in seps) or name.endswith(".toml"):
+        console.print("[red]name must be a bare name (no path separators, no .toml)[/red]")
+        raise typer.Exit(code=1)
+    path = named_config_path(name)
+    if path.exists() and not force:
+        console.print(f"[yellow]{path} already exists[/yellow]; pass --force to overwrite")
+        raise typer.Exit(code=1)
+
+    key = api_key or typer.prompt("Paste tm_im api_key for this account", hide_input=True).strip()
+    if not key:
+        console.print("[red]no key entered[/red]")
+        raise typer.Exit(code=1)
+
+    settings = ImSettings(
+        base_url=base_url,
+        api_key=key,
+        tcp_addr=tcp_addr,
+        allow_tools=_validate(allow_tools, ALLOW_TOOLS, "--allow-tools"),
+        respond_in_groups=_validate(
+            respond_in_groups, RESPOND_IN_GROUPS, "--respond-in-groups"
+        ),
+        auto_accept_friends=_validate(
+            auto_accept_friends, ACCEPT_FRIENDS, "--auto-accept-friends"
+        ),
+        provider=provider,
+        model=model,
+        owner_handles=list(owner or []),
+    )
+    saved = save_im_settings(settings, path)
+    console.print(f"created [bold]{saved}[/bold]")
+    console.print(f"[dim]key: {key[:6]}...{key[-4:]} ({len(key)} chars)[/dim]")
+    console.print(f"[dim]model: {provider or '(default)'}/{model or '(default)'}[/dim]")
+    console.print(f"start it with: [bold]tm im start --config {name}[/bold]")
+
+
+@config_app.command("list")
+def config_list() -> None:
+    """List config files and whether each instance is running."""
+    entries: list[Path] = []
+    if im_path().exists():
+        entries.append(im_path())
+    directory = configs_dir()
+    if directory.exists():
+        entries.extend(sorted(directory.glob("*.toml")))
+    if not entries:
+        console.print("no config files (create one with `tm im config new <name>`)")
+        return
+    for path in entries:
+        settings = load_im_settings(path)
+        pid = daemon.running_pid(instance_dir(str(path)))
+        label = "default" if path == im_path() else path.stem
+        state = f"running pid={pid}" if pid else "stopped"
+        console.print(
+            f"{label} | {settings.base_url} | "
+            f"{settings.provider or '-'}/{settings.model or '-'} | {state} | {path}"
+        )
+
+
+@config_app.command("path")
+def config_path(
+    name: str = typer.Argument(..., help="Config name."),
+) -> None:
+    """Print the path of a named config."""
+    console.print(str(named_config_path(name)))
 
 
 __all__ = ["app"]
