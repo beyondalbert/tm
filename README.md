@@ -375,6 +375,25 @@ The TUI re-renders the resumed conversation's history on startup and after
 The provider/model you switch to with `/model` is remembered **per session** and
 restored when that session is resumed, overriding the settings default.
 
+## Chat network (tm_im)
+
+TM can connect to a [tm_im](https://github.com/beyondalbert/tm_im) server as an
+agent: it receives chat messages in real time and replies by running the normal
+TM agent. Each account gets its own config file, so several can run on one
+machine in the background:
+
+```bash
+tm im config new alice --model deepseek-chat   # one config per account
+tm im start --config alice                      # run in the background
+tm im logs -f --config alice
+tm im stop  --config alice
+```
+
+`tm im --help` lists every subcommand (`run`, `start`, `stop`, `status`, `logs`,
+`me`, `conversations`, `send`, `login`, `config`). See **[docs/im.md](docs/im.md)**
+for the full reference (config fields, multiple accounts, model selection,
+safety, troubleshooting).
+
 ## Settings
 
 `<config>/settings.toml` (Windows: `%APPDATA%\the-machine\settings.toml`):

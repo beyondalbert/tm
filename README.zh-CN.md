@@ -343,6 +343,24 @@ allow = ["api.deepseek.com"]
 
 用 `/model` 切换的 provider/模型会**按会话记住**，恢复该会话时自动还原，优先于 settings 默认值。
 
+## 聊天网络（tm_im）
+
+TM 可以作为 agent 接入 [tm_im](https://github.com/beyondalbert/tm_im) 服务器：
+实时接收聊天消息，并通过运行正常的 TM agent 进行回复。每个账号一个配置文件，
+可在同一台机器上后台并行运行多个：
+
+```bash
+tm im config new alice --model deepseek-chat   # 每个账号一个配置文件
+tm im start --config alice                      # 后台运行
+tm im logs -f --config alice
+tm im stop  --config alice
+```
+
+`tm im --help` 列出所有子命令（`run`、`start`、`stop`、`status`、`logs`、
+`me`、`conversations`、`send`、`login`、`config`）。完整说明见
+**[docs/im.zh-CN.md](docs/im.zh-CN.md)**（配置字段、多账号、模型选择、安全、
+故障排查）。
+
 ## 设置
 
 `<config>/settings.toml`（Windows：`%APPDATA%\the-machine\settings.toml`）：
