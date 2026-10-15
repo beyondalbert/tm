@@ -82,6 +82,8 @@ def _apply_overrides(settings: ImSettings, options: dict) -> ImSettings:
         settings.api_key = options["api_key"]
     if options.get("tcp_addr"):
         settings.tcp_addr = options["tcp_addr"]
+    if options.get("ws_url"):
+        settings.ws_url = options["ws_url"]
     if options.get("allow_tools"):
         value = options["allow_tools"].lower().replace("-", "_")
         if value not in ALLOW_TOOLS:
@@ -133,6 +135,9 @@ def run(
         None, "--api-key", help="Agent api_key (prefer TM_IM_API_KEY)."
     ),
     tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    ws_url: str | None = typer.Option(
+        None, "--ws-url", help="Realtime WebSocket URL (e.g. tmim.stkg.ltd/ws)."
+    ),
     allow_tools: str | None = typer.Option(
         None, "--allow-tools", help="none | read_only | full."
     ),
@@ -152,6 +157,7 @@ def run(
             "base_url": base_url,
             "api_key": api_key,
             "tcp_addr": tcp_addr,
+            "ws_url": ws_url,
             "allow_tools": allow_tools,
             "respond_in_groups": respond_in_groups,
             "provider": provider,
@@ -233,16 +239,18 @@ def run(
         workers=workers,
     )
 
-    host, port = settings.realtime_address()
+    ws_url = settings.websocket_url()
+    tcp = settings.realtime_address()
+    tcp_endpoint = None if ws_url else tcp
 
     async def on_ready(info: AuthResponse) -> None:
         bot.actor_id = info.actor_id
         bot.handle = info.handle
 
     realtime = RealtimeClient(
-        host,
-        port,
         settings.api_key,
+        tcp_addr=tcp_endpoint,
+        ws_url=ws_url,
         device_id=settings.device_id,
         client_version=__version__,
         on_message=bot.enqueue,
@@ -258,8 +266,9 @@ def run(
             "message this agent can run shell commands on this machine. Set "
             "--allow-tools read_only to scope it down."
         )
+    endpoint = ws_url or f"{tcp[0]}:{tcp[1]}"
     console.print(
-        f"connecting to {settings.base_url} (realtime {host}:{port}) | "
+        f"connecting to {settings.base_url} (realtime {endpoint}) | "
         f"model {resolved_model.provider}/{resolved_model.id} | tools={settings.allow_tools}"
     )
 
@@ -355,6 +364,9 @@ def login(
     api_key: str | None = typer.Option(None, "--api-key", help="Agent api_key."),
     base_url: str | None = typer.Option(None, "--base-url", help="REST base URL."),
     tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    ws_url: str | None = typer.Option(
+        None, "--ws-url", help="Realtime WebSocket URL (e.g. tmim.stkg.ltd/ws)."
+    ),
     config: str | None = typer.Option(None, "--config", help="Config name or path."),
 ) -> None:
     """Store the agent api_key and endpoint in a config file.
@@ -373,6 +385,8 @@ def login(
         settings.base_url = base_url
     if tcp_addr:
         settings.tcp_addr = tcp_addr
+    if ws_url:
+        settings.ws_url = ws_url
     saved = save_im_settings(settings, path)
     console.print(f"saved tm_im credentials to [bold]{saved}[/bold]")
     console.print(f"[dim]key: {key[:6]}...{key[-4:]} ({len(key)} chars)[/dim]")
@@ -385,6 +399,7 @@ _START_FLAGS: tuple[tuple[str, str], ...] = (
     ("base_url", "--base-url"),
     ("api_key", "--api-key"),
     ("tcp_addr", "--tcp-addr"),
+    ("ws_url", "--ws-url"),
     ("allow_tools", "--allow-tools"),
     ("respond_in_groups", "--respond-in-groups"),
     ("provider", "--provider"),
@@ -412,6 +427,9 @@ def start(
         None, "--api-key", help="Agent api_key (prefer TM_IM_API_KEY)."
     ),
     tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    ws_url: str | None = typer.Option(
+        None, "--ws-url", help="Realtime WebSocket URL (e.g. tmim.stkg.ltd/ws)."
+    ),
     allow_tools: str | None = typer.Option(
         None, "--allow-tools", help="none | read_only | full."
     ),
@@ -437,6 +455,7 @@ def start(
             "base_url": base_url,
             "api_key": api_key,
             "tcp_addr": tcp_addr,
+            "ws_url": ws_url,
             "allow_tools": allow_tools,
             "respond_in_groups": respond_in_groups,
             "provider": provider,
@@ -528,6 +547,9 @@ def config_new(
         None, "--api-key", help="Agent api_key (prompted if omitted)."
     ),
     tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    ws_url: str | None = typer.Option(
+        None, "--ws-url", help="Realtime WebSocket URL (e.g. tmim.stkg.ltd/ws)."
+    ),
     allow_tools: str = typer.Option("full", "--allow-tools", help="none | read_only | full."),
     respond_in_groups: str = typer.Option(
         "always", "--respond-in-groups", help="mention | always | never."
@@ -561,6 +583,7 @@ def config_new(
         base_url=base_url,
         api_key=key,
         tcp_addr=tcp_addr,
+        ws_url=ws_url,
         allow_tools=_validate(allow_tools, ALLOW_TOOLS, "--allow-tools"),
         respond_in_groups=_validate(
             respond_in_groups, RESPOND_IN_GROUPS, "--respond-in-groups"

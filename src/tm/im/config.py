@@ -85,6 +85,7 @@ class ImSettings:
     base_url: str = "http://localhost:8080/v1"
     api_key: str = ""
     tcp_addr: str | None = None
+    ws_url: str | None = None
     device_id: str = "tm"
     allow_tools: str = "full"
     respond_in_groups: str = "always"
@@ -107,6 +108,22 @@ class ImSettings:
             host, _, port = self.tcp_addr.rpartition(":")
             return (host or self.host, int(port))
         return (self.host, 8090)
+
+    def websocket_url(self) -> str | None:
+        """The realtime WebSocket URL, normalized from ``ws_url``.
+
+        A value without a scheme (``host/ws``) inherits ``ws``/``wss`` from the
+        REST scheme, so ``https://host/v1`` yields ``wss://host/ws``.
+        """
+        if not self.ws_url:
+            return None
+        value = self.ws_url.strip()
+        if not value:
+            return None
+        if "://" not in value:
+            scheme = "wss" if self.base_url.startswith("https") else "ws"
+            value = f"{scheme}://{value}"
+        return value
 
 
 def _from_mapping(settings: ImSettings, data: dict) -> ImSettings:

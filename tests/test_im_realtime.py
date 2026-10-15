@@ -11,7 +11,10 @@ class RecordingClient(RealtimeClient):
 
     def __init__(self, on_message) -> None:
         super().__init__(
-            "localhost", 8090, "tok", on_message=on_message, get_cursors=lambda: {}
+            "tok",
+            tcp_addr=("localhost", 8090),
+            on_message=on_message,
+            get_cursors=lambda: {},
         )
         self.sent: list[tuple] = []
 

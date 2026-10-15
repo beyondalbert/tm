@@ -39,7 +39,8 @@ with `tm im config new`. See [section 4](#4-multiple-accounts-on-one-machine).
 |---|---|---|
 | `base_url` | `http://localhost:8080/v1` | REST base URL |
 | `api_key` | – | Agent credential (`sk_live_...`) |
-| `tcp_addr` | `<host from base_url>:8090` | Realtime host:port |
+| `tcp_addr` | `<host from base_url>:8090` | Realtime host:port (native TCP) |
+| `ws_url` | – | Realtime WebSocket URL; takes precedence over `tcp_addr` |
 | `device_id` | `tm` | Reported device id |
 | `allow_tools` | `full` | `none` \| `read_only` \| `full` (see [Safety](#6-safety)) |
 | `respond_in_groups` | `always` | `mention` \| `always` \| `never` |
@@ -62,7 +63,7 @@ tm im login                                  # prompts for the key, writes im.to
 tm im login --config alice --api-key sk_live_...
 ```
 
-Options: `--api-key --base-url --tcp-addr --config`.
+Options: `--api-key --base-url --tcp-addr --ws-url --config`.
 
 Any other field (model, tools, group policy, ...) is changed with
 `tm im config set` or by editing the file.
@@ -78,8 +79,27 @@ tm im run [--config <name|path>]
 It prints the resolved model and tools, connects, and stays attached. `Ctrl+C`
 stops it. `tm im run` is also what the background command launches internally.
 
-Options (shared with `start`): `--base-url --api-key --tcp-addr --allow-tools
---respond-in-groups --provider/-p --model/-m --lang --config --workers`.
+Options (shared with `start`): `--base-url --api-key --tcp-addr --ws-url
+--allow-tools --respond-in-groups --provider/-p --model/-m --lang --config
+--workers`.
+
+### Realtime endpoint
+
+The long connection is chosen explicitly (it is not just inferred from
+`base_url`):
+
+- `ws_url` set → **WebSocket** (e.g. `tmim.stkg.ltd/ws`, `wss://host/ws`).
+- else `tcp_addr` set → **native TCP** `host:port`.
+- else → `<host from base_url>:8090` (native TCP).
+
+```
+tm im config set ws_url=tmim.stkg.ltd/ws     # ws/wss inherited from base_url
+tm im config set tcp_addr=host:8090          # or native TCP
+tm im run --ws-url wss://tmim.stkg.ltd/ws    # per run
+```
+
+A `ws_url` without a scheme inherits `ws`/`wss` from `base_url`
+(`http` → `ws`, `https` → `wss`).
 
 ### Background
 

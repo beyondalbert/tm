@@ -1,9 +1,13 @@
-"""Realtime TCP client for tm_im.
+"""Realtime client for tm_im.
 
-Frame boundaries over the native TCP transport are a 4-byte big-endian length
-prefix followed by that many Frame bytes. This client authenticates, keeps the
-connection alive, reconnects with jittered backoff, and backfills gaps with
-``SYNC`` after every reconnect (and whenever a gap is detected).
+Receives chat messages over a long connection, which can be either the native
+TCP transport (a 4-byte big-endian length prefix followed by that many Frame
+bytes) or a WebSocket (one binary message per Frame). The endpoint is chosen
+explicitly: ``ws_url`` for WebSocket, otherwise ``tcp_addr`` (host:port).
+
+It authenticates, keeps the connection alive, reconnects with jittered backoff,
+and backfills gaps with ``SYNC`` after every reconnect (and whenever a gap is
+detected).
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from tm.im.protocol import (
     encode_read_request,
     encode_sync_request,
 )
+from tm.im.websocket import WsConnection
 
 _AUTH_ERRORS = {40101, 40102, 40103, 40104, 40105, 40106}
 _MAX_CURSORS_PER_SYNC = 50
@@ -54,13 +59,55 @@ class _Reconnect(Exception):
     """Close the current connection and reconnect."""
 
 
+class _TcpTransport:
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self._reader = reader
+        self._writer = writer
+
+    async def send(self, data: bytes) -> None:
+        self._writer.write(len(data).to_bytes(4, "big") + data)
+        await self._writer.drain()
+
+    async def recv(self) -> bytes | None:
+        header = await self._reader.readexactly(4)
+        length = int.from_bytes(header, "big")
+        if length == 0:
+            return b""
+        return await self._reader.readexactly(length)
+
+    def abort(self) -> None:
+        self._writer.close()
+
+    async def aclose(self) -> None:
+        self._writer.close()
+        with contextlib.suppress(Exception):
+            await self._writer.wait_closed()
+
+
+class _WsTransport:
+    def __init__(self, connection: WsConnection) -> None:
+        self._connection = connection
+
+    async def send(self, data: bytes) -> None:
+        await self._connection.send(data)
+
+    async def recv(self) -> bytes | None:
+        return await self._connection.recv()
+
+    def abort(self) -> None:
+        self._connection.abort()
+
+    async def aclose(self) -> None:
+        await self._connection.close()
+
+
 class RealtimeClient:
     def __init__(
         self,
-        host: str,
-        port: int,
         token: str,
         *,
+        tcp_addr: tuple[str, int] | None = None,
+        ws_url: str | None = None,
         device_id: str = "tm",
         client_version: str = "tm",
         on_message: MessageHandler,
@@ -69,9 +116,9 @@ class RealtimeClient:
         log: LogFn | None = None,
         sync_limit: int = 200,
     ) -> None:
-        self.host = host
-        self.port = port
         self.token = token
+        self.tcp_addr = tcp_addr
+        self.ws_url = ws_url
         self.device_id = device_id
         self.client_version = client_version
         self.on_message = on_message
@@ -84,13 +131,11 @@ class RealtimeClient:
         self.handle: str = ""
         self.heartbeat_sec = 30
 
-        self._reader: asyncio.StreamReader | None = None
-        self._writer: asyncio.StreamWriter | None = None
+        self._transport: _TcpTransport | _WsTransport | None = None
         self._stop = asyncio.Event()
         self._req = itertools.count(1)
         self._cursors: dict[int, int] = {}
         self._last_recv = time.monotonic()
-        self._auth_ok = asyncio.Event()
 
         self._sync_batches: list[list[int]] = []
         self._sync_index = 0
@@ -102,7 +147,6 @@ class RealtimeClient:
     async def run(self) -> None:
         backoff = 1.0
         while not self._stop.is_set():
-            self._auth_ok.clear()
             self._reconnect_delay = None
             self._sync_active = False
             self._sync_pending = False
@@ -130,8 +174,8 @@ class RealtimeClient:
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._writer is not None:
-            self._writer.close()
+        if self._transport is not None:
+            self._transport.abort()
 
     def cursors(self) -> dict[int, int]:
         return dict(self._cursors)
@@ -140,15 +184,22 @@ class RealtimeClient:
         await self._start_sync()
 
     # -- connection -------------------------------------------------------
+    async def _open_transport(self) -> _TcpTransport | _WsTransport:
+        if self.ws_url:
+            return _WsTransport(await WsConnection.connect(self.ws_url))
+        host, port = self.tcp_addr or ("localhost", 8090)
+        reader, writer = await asyncio.open_connection(host, port)
+        return _TcpTransport(reader, writer)
+
     async def _session(self) -> None:
-        self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
+        self._transport = await self._open_transport()
         self._cursors = dict(self.get_cursors())
         self._last_recv = time.monotonic()
         try:
             await self._send_frame(
-                Cmd.AUTH, self._next_req(), encode_auth_request(
-                    self.token, self.client_version, self.device_id
-                )
+                Cmd.AUTH,
+                self._next_req(),
+                encode_auth_request(self.token, self.client_version, self.device_id),
             )
             heartbeat = asyncio.create_task(self._heartbeat())
             try:
@@ -158,13 +209,11 @@ class RealtimeClient:
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat
         finally:
-            writer = self._writer
-            self._writer = None
-            self._reader = None
-            if writer is not None:
-                writer.close()
+            transport = self._transport
+            self._transport = None
+            if transport is not None:
                 with contextlib.suppress(Exception):
-                    await writer.wait_closed()
+                    await transport.aclose()
 
     async def _next_ready(self, frame: Frame) -> None:
         if frame.cmd == Cmd.AUTH_OK:
@@ -172,37 +221,32 @@ class RealtimeClient:
             self.actor_id = info.actor_id
             self.handle = info.handle
             self.heartbeat_sec = info.heartbeat_sec or 30
-            self.log(
-                f"authenticated as {info.handle or '?'} (actor_id={info.actor_id})"
-            )
-            self._auth_ok.set()
+            self.log(f"authenticated as {info.handle or '?'} (actor_id={info.actor_id})")
             if self.on_ready is not None:
                 await self.on_ready(info)
             await self._start_sync()
 
     # -- io ---------------------------------------------------------------
     async def _send_frame(self, cmd: int, req_id: int, payload: bytes = b"") -> None:
-        writer = self._writer
-        if writer is None:
+        transport = self._transport
+        if transport is None:
             raise _Reconnect("not connected")
-        frame = encode_frame(cmd, req_id, payload)
-        writer.write(len(frame).to_bytes(4, "big") + frame)
-        await writer.drain()
+        await transport.send(encode_frame(cmd, req_id, payload))
 
     def _next_req(self) -> int:
         return next(self._req)
 
     async def _read_loop(self) -> None:
-        reader = self._reader
-        if reader is None:
+        transport = self._transport
+        if transport is None:
             raise _Reconnect("not connected")
         while True:
-            header = await reader.readexactly(4)
-            length = int.from_bytes(header, "big")
-            if length == 0:
-                continue
-            data = await reader.readexactly(length)
+            data = await transport.recv()
+            if data is None:
+                raise _Reconnect("closed by peer")
             self._last_recv = time.monotonic()
+            if not data:
+                continue
             frame = decode_frame(data)
             await self._dispatch(frame)
 
@@ -211,8 +255,8 @@ class RealtimeClient:
             await asyncio.sleep(self.heartbeat_sec or 30)
             if time.monotonic() - self._last_recv > _IDLE_TIMEOUT:
                 self.log("no server data for 90s; reconnecting")
-                if self._writer is not None:
-                    self._writer.close()
+                if self._transport is not None:
+                    self._transport.abort()
                 return
             try:
                 await self._send_frame(Cmd.PING, 0)

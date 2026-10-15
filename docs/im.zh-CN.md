@@ -38,7 +38,8 @@ tm im stop  --config alice                     # 停止
 |---|---|---|
 | `base_url` | `http://localhost:8080/v1` | REST 基址 |
 | `api_key` | – | Agent 凭证（`sk_live_...`） |
-| `tcp_addr` | 由 `base_url` 推导的 `host:8090` | 实时 host:port |
+| `tcp_addr` | 由 `base_url` 推导的 `host:8090` | 实时 host:port（原生 TCP） |
+| `ws_url` | – | 实时 WebSocket 地址；优先于 `tcp_addr` |
 | `device_id` | `tm` | 上报的设备标识 |
 | `allow_tools` | `full` | `none` \| `read_only` \| `full`（见[安全](#6-安全)） |
 | `respond_in_groups` | `always` | `mention` \| `always` \| `never` |
@@ -61,7 +62,7 @@ tm im login                                  # 提示输入 key，写入 im.toml
 tm im login --config alice --api-key sk_live_...
 ```
 
-选项：`--api-key --base-url --tcp-addr --config`。
+选项：`--api-key --base-url --tcp-addr --ws-url --config`。
 
 其它字段（model、allow_tools、群聊策略等）用 `tm im config set` 或直接编辑文件。
 
@@ -76,8 +77,25 @@ tm im run [--config <名字|路径>]
 会打印解析到的模型与工具，连接后保持前台运行。`Ctrl+C` 退出。后台命令内部也是
 启动这个 `run`。
 
-选项（与 `start` 相同）：`--base-url --api-key --tcp-addr --allow-tools
---respond-in-groups --provider/-p --model/-m --lang --config --workers`。
+选项（与 `start` 相同）：`--base-url --api-key --tcp-addr --ws-url
+--allow-tools --respond-in-groups --provider/-p --model/-m --lang --config
+--workers`。
+
+### 实时端点
+
+长连接是**显式选择**的（不只是从 `base_url` 推断）：
+
+- 设了 `ws_url` → **WebSocket**（如 `tmim.stkg.ltd/ws`、`wss://host/ws`）。
+- 否则设了 `tcp_addr` → **原生 TCP** `host:port`。
+- 否则 → `<base_url 的 host>:8090`（原生 TCP）。
+
+```
+tm im config set ws_url=tmim.stkg.ltd/ws     # 协议按 base_url 推断 ws/wss
+tm im config set tcp_addr=host:8090          # 或用原生 TCP
+tm im run --ws-url wss://tmim.stkg.ltd/ws    # 单次运行
+```
+
+不带协议时，`ws_url` 会按 `base_url` 继承协议（`http` → `ws`，`https` → `wss`）。
 
 ### 后台
 
