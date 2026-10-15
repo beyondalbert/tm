@@ -12,7 +12,7 @@ import hashlib
 import os
 import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -123,25 +123,26 @@ def _from_mapping(settings: ImSettings, data: dict) -> ImSettings:
     return settings
 
 
-def load_im_settings(path: Path | None = None) -> ImSettings:
+def load_im_settings(path: Path | None = None, *, apply_env: bool = True) -> ImSettings:
     settings = ImSettings()
     target = path or im_path()
     if target.exists():
         with contextlib.suppress(OSError, tomllib.TOMLDecodeError):
             _from_mapping(settings, read_toml(target))
 
-    if env := os.environ.get("TM_IM_BASE_URL"):
-        settings.base_url = env
-    if env := os.environ.get("TM_IM_API_KEY"):
-        settings.api_key = env
-    if env := os.environ.get("TM_IM_TCP_ADDR"):
-        settings.tcp_addr = env
-    if env := os.environ.get("TM_IM_ALLOW_TOOLS"):
-        settings.allow_tools = _normalize_choice(env, ALLOW_TOOLS, settings.allow_tools)
-    if env := os.environ.get("TM_IM_RESPOND_IN_GROUPS"):
-        settings.respond_in_groups = _normalize_choice(
-            env, RESPOND_IN_GROUPS, settings.respond_in_groups
-        )
+    if apply_env:
+        if env := os.environ.get("TM_IM_BASE_URL"):
+            settings.base_url = env
+        if env := os.environ.get("TM_IM_API_KEY"):
+            settings.api_key = env
+        if env := os.environ.get("TM_IM_TCP_ADDR"):
+            settings.tcp_addr = env
+        if env := os.environ.get("TM_IM_ALLOW_TOOLS"):
+            settings.allow_tools = _normalize_choice(env, ALLOW_TOOLS, settings.allow_tools)
+        if env := os.environ.get("TM_IM_RESPOND_IN_GROUPS"):
+            settings.respond_in_groups = _normalize_choice(
+                env, RESPOND_IN_GROUPS, settings.respond_in_groups
+            )
 
     settings.allow_tools = _normalize_choice(settings.allow_tools, ALLOW_TOOLS, "full")
     settings.respond_in_groups = _normalize_choice(
@@ -153,24 +154,52 @@ def load_im_settings(path: Path | None = None) -> ImSettings:
     return settings
 
 
+_INT_FIELDS = ("reply_max_chars", "sync_limit")
+_CHOICE_FIELDS = {
+    "allow_tools": ALLOW_TOOLS,
+    "respond_in_groups": RESPOND_IN_GROUPS,
+    "auto_accept_friends": ACCEPT_FRIENDS,
+}
+
+
+def apply_setting(settings: ImSettings, assignment: str) -> str:
+    """Apply one ``key=value`` assignment to ``settings``; return the key.
+
+    Raises ``ValueError`` for an unknown key or an invalid value.
+    """
+    key, separator, value = assignment.partition("=")
+    key = key.strip().lower().replace("-", "_")
+    value = value.strip()
+    if not separator or not key:
+        raise ValueError(f"expected key=value, got: {assignment}")
+    if key not in ImSettings.__dataclass_fields__ or key.startswith("_"):
+        raise ValueError(f"unknown field: {key}")
+    if key in _INT_FIELDS:
+        try:
+            setattr(settings, key, int(value))
+        except ValueError as error:
+            raise ValueError(f"{key} must be an integer") from error
+    elif key == "owner_handles":
+        setattr(settings, key, [item.strip() for item in value.split(",") if item.strip()])
+    else:
+        setattr(settings, key, value)
+    if key in _CHOICE_FIELDS:
+        allowed = _CHOICE_FIELDS[key]
+        normalized = _normalize_choice(value, allowed, "")
+        if not normalized:
+            raise ValueError(f"{key} must be one of {', '.join(allowed)}")
+        setattr(settings, key, normalized)
+    return key
+
+
 def save_im_settings(settings: ImSettings, path: Path | None = None) -> Path:
     target = path or im_path()
-    data = {
-        "base_url": settings.base_url,
-        "api_key": settings.api_key,
-        "device_id": settings.device_id,
-        "allow_tools": settings.allow_tools,
-        "respond_in_groups": settings.respond_in_groups,
-        "auto_accept_friends": settings.auto_accept_friends,
-        "owner_handles": list(settings.owner_handles),
-        "reply_max_chars": settings.reply_max_chars,
-    }
-    if settings.tcp_addr:
-        data["tcp_addr"] = settings.tcp_addr
-    if settings.provider:
-        data["provider"] = settings.provider
-    if settings.model:
-        data["model"] = settings.model
+    data: dict = {}
+    for item in fields(ImSettings):
+        value = getattr(settings, item.name)
+        if value is None:
+            continue
+        data[item.name] = value
 
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("wb") as handle:
@@ -185,6 +214,7 @@ __all__ = [
     "ALLOW_TOOLS",
     "ImSettings",
     "RESPOND_IN_GROUPS",
+    "apply_setting",
     "configs_dir",
     "im_path",
     "instance_dir",

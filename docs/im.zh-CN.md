@@ -54,15 +54,16 @@ tm im stop  --config alice                     # 停止
 
 ### `tm im login`
 
-写入或更新配置文件中的 key（及部分选项）：
+写入或更新配置文件中的凭证与端点：
 
 ```
 tm im login                                  # 提示输入 key，写入 im.toml
-tm im login --config alice --api-key sk_live_... --model deepseek-chat
+tm im login --config alice --api-key sk_live_...
 ```
 
-选项：`--api-key --base-url --tcp-addr --allow-tools --provider/-p
---model/-m --config`。
+选项：`--api-key --base-url --tcp-addr --config`。
+
+其它字段（model、allow_tools、群聊策略等）用 `tm im config set` 或直接编辑文件。
 
 ## 3. 运行
 
@@ -111,6 +112,8 @@ tm im start --config bob
 | 命令 | 说明 |
 |---|---|
 | `tm im config new <name>` | 创建 `<config>/configs/<name>.toml`。选项：`--base-url --api-key --tcp-addr --allow-tools --respond-in-groups --auto-accept-friends --provider/-p --model/-m --owner（可重复） --force` |
+| `tm im config set [--config <名字\|路径>] KEY=VALUE...` | 修改已有配置的任意字段，例如 `model=deepseek-chat allow_tools=read_only owner_handles=@a,@b` |
+| `tm im config edit [--config <名字\|路径>]` | 用 `$EDITOR` / `$VISUAL` 打开配置文件 |
 | `tm im config list` | 列出配置及其 base URL、模型、运行状态 |
 | `tm im config path <name>` | 打印命名配置的路径 |
 
@@ -146,7 +149,7 @@ tm im start --config bob
 3. `<config>/settings.toml` 里的 `provider` / `model`
 4. 内置默认（`deepseek` / `deepseek-v4-pro`）
 
-持久化可用 `tm im login --config <name> --provider <id> --model <id>`，或直接编辑
+持久化可用 `tm im config set --config <name> provider=<id> model=<id>`，或直接编辑
 文件。同一实例的所有会话共用该模型。
 
 用 `tm --list-models` 查看已配置 key 的 provider（`*` 表示已设 key）；用

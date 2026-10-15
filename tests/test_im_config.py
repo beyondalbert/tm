@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tm.im.config import (
     ImSettings,
+    apply_setting,
     load_im_settings,
     named_config_path,
     resolve_config,
@@ -76,3 +79,31 @@ def test_resolve_config(tmp_path: Path, monkeypatch) -> None:
     assert resolve_config("im.toml") == str(tmp_path / "configs" / "im.toml")
     explicit = str(tmp_path / "custom" / "a.toml")
     assert resolve_config(explicit) == explicit
+
+
+def test_apply_setting_types() -> None:
+    settings = ImSettings()
+    assert apply_setting(settings, "model=deepseek-chat") == "model"
+    assert settings.model == "deepseek-chat"
+    assert apply_setting(settings, "reply_max_chars=1000") == "reply_max_chars"
+    assert settings.reply_max_chars == 1000
+    assert apply_setting(settings, "owner_handles=@a, @b") == "owner_handles"
+    assert settings.owner_handles == ["@a", "@b"]
+    assert apply_setting(settings, "allow-tools=read_only") == "allow_tools"
+    assert settings.allow_tools == "read_only"
+
+
+def test_apply_setting_rejects_bad_input() -> None:
+    settings = ImSettings()
+    for bad in ("model", "unknown=1", "reply_max_chars=abc", "allow_tools=everything"):
+        with pytest.raises(ValueError):
+            apply_setting(settings, bad)
+
+
+def test_save_persists_extra_fields(tmp_path: Path) -> None:
+    path = tmp_path / "im.toml"
+    settings = ImSettings(api_key="sk_live_k", sync_limit=50, provider="deepseek")
+    save_im_settings(settings, path)
+    loaded = load_im_settings(path, apply_env=False)
+    assert loaded.sync_limit == 50
+    assert loaded.provider == "deepseek"

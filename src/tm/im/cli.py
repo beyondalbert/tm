@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
+import subprocess
 from pathlib import Path
 
 import typer
@@ -27,6 +29,7 @@ from tm.im.config import (
     ALLOW_TOOLS,
     RESPOND_IN_GROUPS,
     ImSettings,
+    apply_setting,
     configs_dir,
     im_path,
     instance_dir,
@@ -352,21 +355,15 @@ def login(
     api_key: str | None = typer.Option(None, "--api-key", help="Agent api_key."),
     base_url: str | None = typer.Option(None, "--base-url", help="REST base URL."),
     tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
-    allow_tools: str | None = typer.Option(
-        None, "--allow-tools", help="none | read_only | full."
-    ),
-    provider: str | None = typer.Option(
-        None, "--provider", "-p", help="Provider id for IM replies."
-    ),
-    model: str | None = typer.Option(
-        None, "--model", "-m", help="Model id or pattern for IM replies."
-    ),
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    config: str | None = typer.Option(None, "--config", help="Config name or path."),
 ) -> None:
-    """Store the agent api_key (and options) in im.toml."""
+    """Store the agent api_key and endpoint in a config file.
+
+    Use `tm im config set` to change other fields (model, allow_tools, ...).
+    """
     resolved = resolve_config(config)
     path = Path(resolved) if resolved else None
-    settings = load_im_settings(path)
+    settings = load_im_settings(path, apply_env=False)
     key = api_key or typer.prompt("Paste tm_im api_key", hide_input=True).strip()
     if not key:
         console.print("[red]no key entered[/red]")
@@ -376,22 +373,9 @@ def login(
         settings.base_url = base_url
     if tcp_addr:
         settings.tcp_addr = tcp_addr
-    if allow_tools:
-        value = allow_tools.lower().replace("-", "_")
-        if value not in ALLOW_TOOLS:
-            raise typer.BadParameter(f"allow-tools must be one of {', '.join(ALLOW_TOOLS)}")
-        settings.allow_tools = value
-    if provider:
-        settings.provider = provider
-    if model:
-        settings.model = model
     saved = save_im_settings(settings, path)
     console.print(f"saved tm_im credentials to [bold]{saved}[/bold]")
     console.print(f"[dim]key: {key[:6]}...{key[-4:]} ({len(key)} chars)[/dim]")
-    if settings.provider or settings.model:
-        console.print(
-            f"[dim]model: {settings.provider or '(default)'}/{settings.model or '(default)'}[/dim]"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +608,54 @@ def config_path(
 ) -> None:
     """Print the path of a named config."""
     console.print(str(named_config_path(name)))
+
+
+def _target_config_path(config: str | None) -> Path:
+    resolved = resolve_config(config)
+    return Path(resolved) if resolved else im_path()
+
+
+@config_app.command("set")
+def config_set(
+    assignments: list[str] = typer.Argument(
+        ..., help="One or more key=value assignments (e.g. model=deepseek-chat)."
+    ),
+    config: str | None = typer.Option(
+        None, "--config", help="Config name or path (default: im.toml)."
+    ),
+) -> None:
+    """Update fields in an existing config (any field, e.g. model, allow_tools)."""
+    path = _target_config_path(config)
+    if not path.exists():
+        console.print(f"[red]{path} not found[/red]; create it with `tm im config new` or `tm im login`")
+        raise typer.Exit(code=1)
+    settings = load_im_settings(path, apply_env=False)
+    changed: list[str] = []
+    for assignment in assignments:
+        try:
+            changed.append(apply_setting(settings, assignment))
+        except ValueError as error:
+            console.print(f"[red]{error}[/red]")
+            raise typer.Exit(code=1) from error
+    saved = save_im_settings(settings, path)
+    console.print(f"updated {', '.join(changed)} in [bold]{saved}[/bold]")
+
+
+@config_app.command("edit")
+def config_edit(
+    config: str | None = typer.Option(
+        None, "--config", help="Config name or path (default: im.toml)."
+    ),
+) -> None:
+    """Open a config file in $EDITOR (or $VISUAL)."""
+    path = _target_config_path(config)
+    if not path.exists():
+        console.print(f"[red]{path} not found[/red]; create it with `tm im config new` or `tm im login`")
+        raise typer.Exit(code=1)
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        editor = "notepad" if os.name == "nt" else "vi"
+    subprocess.run([*shlex.split(editor), str(path)], check=False)
 
 
 __all__ = ["app"]

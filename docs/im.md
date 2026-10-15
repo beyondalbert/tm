@@ -55,15 +55,17 @@ Environment variables override the file: `TM_IM_BASE_URL`, `TM_IM_API_KEY`,
 
 ### `tm im login`
 
-Store or update a key (and a few options) in a config file:
+Store or update the credential and endpoint in a config file:
 
 ```
 tm im login                                  # prompts for the key, writes im.toml
-tm im login --config alice --api-key sk_live_... --model deepseek-chat
+tm im login --config alice --api-key sk_live_...
 ```
 
-Options: `--api-key --base-url --tcp-addr --allow-tools --provider/-p
---model/-m --config`.
+Options: `--api-key --base-url --tcp-addr --config`.
+
+Any other field (model, tools, group policy, ...) is changed with
+`tm im config set` or by editing the file.
 
 ## 3. Running
 
@@ -112,6 +114,8 @@ tm im start --config bob
 | Command | Description |
 |---|---|
 | `tm im config new <name>` | Create `<config>/configs/<name>.toml`. Options: `--base-url --api-key --tcp-addr --allow-tools --respond-in-groups --auto-accept-friends --provider/-p --model/-m --owner (repeatable) --force` |
+| `tm im config set [--config <name\|path>] KEY=VALUE...` | Update any field of an existing config, e.g. `model=deepseek-chat allow_tools=read_only owner_handles=@a,@b` |
+| `tm im config edit [--config <name\|path>]` | Open the config in `$EDITOR` / `$VISUAL` |
 | `tm im config list` | List configs with base URL, model, and running state |
 | `tm im config path <name>` | Print a named config's path |
 
@@ -147,7 +151,7 @@ The reply model is resolved in this order (first match wins):
 3. `provider` / `model` in `<config>/settings.toml`
 4. Built-in defaults (`deepseek` / `deepseek-v4-pro`)
 
-Persist it with `tm im login --config <name> --provider <id> --model <id>` or by
+Persist it with `tm im config set --config <name> provider=<id> model=<id>` or by
 editing the file. All conversations of one instance share the model.
 
 See which providers have keys with `tm --list-models` (`*` = key set); store a
