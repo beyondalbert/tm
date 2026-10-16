@@ -141,7 +141,12 @@ class ImBot:
             reply = self._last_reply(agent)
             if reply:
                 for chunk in self._split(reply, self.settings.reply_max_chars):
-                    await self._send(message.conv_id, chunk)
+                    await self._send(message.conv_id, message.seq, chunk)
+            else:
+                self.log(
+                    f"no reply for conv={message.conv_id} seq={message.seq}: "
+                    f"{self._failure(agent)}"
+                )
             self._advance(message)
             await self._mark_read(message.conv_id, message.seq)
 
@@ -170,14 +175,16 @@ class ImBot:
         self.state.set_last_seq(message.conv_id, message.seq)
         self.state.save()
 
-    async def _send(self, conv_id: int, text: str) -> None:
+    async def _send(self, conv_id: int, seq: int, text: str) -> None:
         try:
             await self.client.send_text(conv_id, text)
         except ImApiError as error:
             if error.code in (40003, 40304):
-                self.log(f"cannot reply to conv={conv_id}: {error}")
-            else:
-                raise
+                self.log(f"cannot reply to conv={conv_id} seq={seq}: {error}")
+                return
+            self.log(f"failed to reply to conv={conv_id} seq={seq}: {error}")
+            raise
+        self.log(f"-> [{conv_id}#{seq}] {text}")
 
     async def _mark_read(self, conv_id: int, seq: int) -> None:
         with contextlib.suppress(ImApiError):
@@ -211,6 +218,16 @@ class ImBot:
                 if text:
                     return text
         return ""
+
+    @staticmethod
+    def _failure(agent: Agent) -> str:
+        """Why the last turn produced no reply text (for logging)."""
+        for message in reversed(agent.messages):
+            if isinstance(message, AssistantMessage):
+                if message.error_message:
+                    return message.error_message
+                return f"stop_reason={message.stop_reason or 'unknown'} (empty reply)"
+        return f"stop_reason={agent.last_stop_reason or 'unknown'}"
 
     @staticmethod
     def _split(text: str, limit: int) -> list[str]:

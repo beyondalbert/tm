@@ -112,18 +112,41 @@ class ImSettings:
     def websocket_url(self) -> str | None:
         """The realtime WebSocket URL, normalized from ``ws_url``.
 
-        A value without a scheme (``host/ws``) inherits ``ws``/``wss`` from the
-        REST scheme, so ``https://host/v1`` yields ``wss://host/ws``.
+        Accepts ``host/ws``, ``ws://host/ws``, ``wss://host:9000/ws``, or even a
+        full REST URL like ``http://host/ws`` (``http`` -> ``ws``, ``https`` ->
+        ``wss``). A value without a scheme inherits ``ws``/``wss`` from
+        ``base_url``, so ``https://host/v1`` yields ``wss://host/ws``.
         """
-        if not self.ws_url:
+        raw = (self.ws_url or "").strip()
+        if not raw:
             return None
-        value = self.ws_url.strip()
-        if not value:
-            return None
-        if "://" not in value:
-            scheme = "wss" if self.base_url.startswith("https") else "ws"
-            value = f"{scheme}://{value}"
-        return value
+        # Collapse a doubled scheme such as "ws://http://host/ws".
+        raw = re.sub(
+            r"^[A-Za-z][A-Za-z0-9+.\-]*://(?=[A-Za-z][A-Za-z0-9+.\-]*://)", "", raw
+        )
+        default_scheme = "wss" if self.base_url.startswith("https") else "ws"
+        if "://" in raw:
+            parsed = urlsplit(raw)
+            scheme = parsed.scheme.lower()
+            if scheme in ("http", "ws"):
+                scheme = "ws"
+            elif scheme in ("https", "wss"):
+                scheme = "wss"
+            else:
+                scheme = default_scheme
+            host, port, path = parsed.hostname, parsed.port, parsed.path
+            query = parsed.query
+        else:
+            scheme = default_scheme
+            parsed = urlsplit(f"//{raw}")
+            host, port, path = parsed.hostname, parsed.port, parsed.path
+            query = parsed.query
+        host = host or self.host
+        netloc = f"{host}:{port}" if port else host
+        path = path or "/"
+        if query:
+            path = f"{path}?{query}"
+        return f"{scheme}://{netloc}{path}"
 
 
 def _from_mapping(settings: ImSettings, data: dict) -> ImSettings:

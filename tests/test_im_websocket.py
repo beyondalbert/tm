@@ -56,4 +56,9 @@ def test_websocket_url_normalization() -> None:
     assert https.websocket_url() == "wss://tmim.stkg.ltd/ws"
     explicit = ImSettings(ws_url="wss://host:9000/custom")
     assert explicit.websocket_url() == "wss://host:9000/custom"
+    # A full REST-style URL is converted to ws/wss (not left as http://...).
+    assert ImSettings(ws_url="http://tmim.stkg.ltd/ws").websocket_url() == "ws://tmim.stkg.ltd/ws"
+    assert ImSettings(ws_url="https://tmim.stkg.ltd/ws").websocket_url() == "wss://tmim.stkg.ltd/ws"
+    # A doubled scheme (e.g. from an earlier bug) is recovered.
+    assert ImSettings(ws_url="ws://http://tmim.stkg.ltd/ws").websocket_url() == "ws://tmim.stkg.ltd/ws"
     assert ImSettings().websocket_url() is None

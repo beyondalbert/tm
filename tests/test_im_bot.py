@@ -40,6 +40,23 @@ def _factory(text: str):
     return factory
 
 
+def _error_factory(message: str):
+    def factory(_conv_id: int, session: Session) -> Agent:
+        def stream_fn(_m, _c, _o) -> EventStream:
+            assistant = AssistantMessage(
+                content=[], stop_reason="error", error_message=message
+            )
+            stream: EventStream = EventStream()
+            stream.push(StartEvent(partial=assistant))
+            stream.push(DoneEvent(partial=assistant, message=assistant))
+            stream.end(assistant)
+            return stream
+
+        return Agent(MODEL, stream_fn=stream_fn, session=session)
+
+    return factory
+
+
 class FakeClient(ImClient):
     def __init__(self, conv_type: int = 1) -> None:
         super().__init__("http://x/v1", "k")
@@ -82,6 +99,8 @@ def _bot(
     text: str = "pong",
     conv_type: int = 1,
     respond: str = "always",
+    factory=None,
+    log: list[str] | None = None,
 ) -> tuple[ImBot, FakeClient]:
     settings = ImSettings(respond_in_groups=respond)
     client = FakeClient(conv_type)
@@ -91,8 +110,9 @@ def _bot(
         settings=settings,
         client=client,
         state=state,
-        agent_factory=_factory(text),
+        agent_factory=factory or _factory(text),
         session_manager=manager,
+        log=log.append if log is not None else None,
     )
     bot.actor_id = 2002
     bot.handle = "weather_bot"
@@ -167,3 +187,19 @@ async def test_session_is_reused(tmp_path: Path) -> None:
     assert first is not None
     await bot.process(_msg(3))
     assert bot.state.session_path(1001) == first
+
+
+async def test_logs_outgoing_reply(tmp_path: Path) -> None:
+    lines: list[str] = []
+    bot, client = _bot(tmp_path, text="pong", log=lines)
+    await bot.process(_msg(2))
+    assert client.sent == [(1001, "pong")]
+    assert any("-> [1001#2] pong" in line for line in lines)
+
+
+async def test_logs_error_when_no_reply(tmp_path: Path) -> None:
+    lines: list[str] = []
+    bot, client = _bot(tmp_path, factory=_error_factory("missing api key"), log=lines)
+    await bot.process(_msg(2))
+    assert client.sent == []
+    assert any("no reply" in line and "missing api key" in line for line in lines)

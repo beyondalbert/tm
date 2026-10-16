@@ -186,6 +186,16 @@ def run(
         console.print(f"[red]{error}[/red]")
         raise typer.Exit(code=1) from error
 
+    preset = next(
+        (p for p in registry.presets() if p.id == resolved_model.provider), None
+    )
+    if preset is not None and not registry.has_credentials(preset):
+        console.print(
+            f"[bold yellow]warning[/bold yellow] no API key for provider "
+            f"'{resolved_model.provider}'; replies will fail. Store one with "
+            f"`tm --login {resolved_model.provider}`."
+        )
+
     cwd = Path.cwd()
     tools = _select_tools(settings.allow_tools)
     approver = (
