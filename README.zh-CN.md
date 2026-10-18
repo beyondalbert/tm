@@ -24,13 +24,16 @@ Shell 与网络访问的**显式权限审批**重新构建。
 
 ```powershell
 # Windows (PowerShell)
-irm https://astral.sh/uv/install.ps1 | iex
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 ```bash
 # macOS / Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+Windows 上请按上面的写法在子进程里执行：单独用 `irm ... | iex` 会在当前会话中
+运行安装脚本，其内部的 `exit 1` 会在你读到报错前就把窗口关掉。
 
 ### 安装 `tm` 命令（推荐）
 

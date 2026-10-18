@@ -25,13 +25,17 @@ Install uv (once):
 
 ```powershell
 # Windows (PowerShell)
-irm https://astral.sh/uv/install.ps1 | iex
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 ```bash
 # macOS / Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+On Windows keep the installer in a child process as shown: `irm ... | iex` on its
+own runs it inside your current shell, so the script's internal `exit 1` closes
+the window before the error is readable.
 
 ### Install the `tm` command (recommended)
 
