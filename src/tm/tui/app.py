@@ -155,19 +155,27 @@ class UserMessageWidget(Static):
     def __init__(self, text: str) -> None:
         super().__init__(classes="user")
         self._text = text.strip()
+        self._render_width = -1
 
     def on_mount(self) -> None:
-        self._render_markdown()
+        self._render_markdown(force=True)
 
     def on_resize(self) -> None:
         self._render_markdown()
 
-    def _render_markdown(self) -> None:
+    def _render_markdown(self, *, force: bool = False) -> None:
         if not self._text:
             return
         width = self.size.width or self.app.size.width - 2
-        if width > 0:
-            self.update(render_markdown(self._text, width))
+        if width <= 0:
+            return
+        # A scrollbar toggling changes the width by 1-2 columns; re-rendering
+        # Markdown for that is expensive and can feed back into another resize
+        # (the UI appears frozen). Only re-render on a meaningful width change.
+        if not force and abs(width - self._render_width) <= 2:
+            return
+        self._render_width = width
+        self.update(render_markdown(self._text, width))
 
 
 class AssistantMessageWidget(Vertical):
@@ -182,6 +190,7 @@ class AssistantMessageWidget(Vertical):
         self._text = ""
         self._final = False
         self._expanded = False
+        self._render_width = -1
         for widget in (self._thinking, self._body, self._error):
             widget.display = False
 
@@ -199,7 +208,7 @@ class AssistantMessageWidget(Vertical):
         self._text = text.strip()
         self._final = final
         if self._text:
-            self._render_body()
+            self._render_body(force=True)
             self._body.display = True
         else:
             self._body.display = False
@@ -232,12 +241,17 @@ class AssistantMessageWidget(Vertical):
     def on_resize(self) -> None:
         self._render_body()
 
-    def _render_body(self) -> None:
+    def _render_body(self, *, force: bool = False) -> None:
         if not self._text:
             return
         width = self._body.size.width or self.size.width or self.app.size.width - 2
         if width <= 0:
             return
+        # Ignore scrollbar-sized width jitter: re-rendering Markdown here can
+        # feed back into layout and stall a long history (see UserMessageWidget).
+        if not force and abs(width - self._render_width) <= 2:
+            return
+        self._render_width = width
         text = self._text
         if len(text) > _MAX_BODY_CHARS:
             text = text[:_MAX_BODY_CHARS] + "\n… (truncated for display)"

@@ -823,3 +823,40 @@ async def test_pruning_bounds_the_widget_tree() -> None:
         await pilot.pause()
         container = app.query_one("#messages", VerticalScroll)
         assert len(container.children) <= app.MAX_HISTORY_WIDGETS
+
+
+async def test_resize_does_not_rerender_markdown_for_scrollbar_jitter(monkeypatch) -> None:
+    from textual.containers import VerticalScroll
+
+    import tm.tui.app as tui
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test():
+        widget = tui.AssistantMessageWidget()
+        await app.query_one("#messages", VerticalScroll).mount(widget)
+
+        calls = {"n": 0}
+        original = tui.render_markdown
+
+        def counting(markdown: str, width: int):
+            calls["n"] += 1
+            return original(markdown, width)
+
+        monkeypatch.setattr(tui, "render_markdown", counting)
+        widget.set_content("", "hello **world**", final=True)
+        rendered = calls["n"]
+
+        width = widget._body.size.width or widget.size.width or app.size.width - 2
+        widget._render_width = width
+        widget._render_body()
+        assert calls["n"] == rendered  # unchanged width
+
+        widget._render_width = width - 1  # scrollbar appearing
+        widget._render_body()
+        assert calls["n"] == rendered
+
+        widget._render_width = width - 5  # a real resize
+        widget._render_body()
+        assert calls["n"] == rendered + 1
