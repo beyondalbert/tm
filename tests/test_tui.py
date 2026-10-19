@@ -286,6 +286,51 @@ def test_tui_has_copy_binding() -> None:
     assert "ctrl+shift+c" in keys
 
 
+def test_sanitize_strips_terminal_controls() -> None:
+    from tm.tui.app import _sanitize
+
+    assert _sanitize("\x1b[31mred\x1b[0m\r\nok\x07") == "red\nok"
+    assert _sanitize("\x1b]0;title\x07text") == "text"
+    assert _sanitize("keep\ttabs\nand lines") == "keep\ttabs\nand lines"
+    assert _sanitize("") == ""
+
+
+async def test_pageup_scrolls_messages() -> None:
+    from textual.containers import VerticalScroll
+
+    def long_stream(model, context, options) -> EventStream:
+        text = "\n".join(f"line {i}" for i in range(200))
+        message = AssistantMessage(content=[TextContent(text=text)], stop_reason="stop")
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(TextDeltaEvent(partial=message, delta=text))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(FAKE_MODEL, stream_fn=long_stream)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    async with app.run_test(size=(80, 24)) as pilot:
+        prompt = app.query_one("#prompt", TextArea)
+        prompt.text = "go"
+        prompt.move_cursor(prompt.document.end)
+        await pilot.pause()
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        container = app.query_one("#messages", VerticalScroll)
+        assert container.max_scroll_y > 0
+        before = container.scroll_y
+        assert before > 0
+
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert container.scroll_y < before
+
+        app.action_redraw()  # must be safe without a real terminal driver
+
+
 async def test_copy_selection_action_is_safe_without_selection() -> None:
     agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
     app = TMPromptApp(agent, FAKE_MODEL)

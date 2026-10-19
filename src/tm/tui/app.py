@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
+import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -71,6 +73,27 @@ _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 #: Cap a single rendered block so one huge message cannot stall layout.
 _MAX_BODY_CHARS = 20000
 
+#: Terminal escape sequences and control characters.
+#:
+#: Textual only strips Bell/Backspace/VT/FF/CR, not ESC, so tool output or a
+#: model reply containing ANSI sequences is written straight to the terminal and
+#: corrupts the screen. Strip them before anything is rendered.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI (SGR, cursor movement, ...)
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
+    r"|\x1b[P^_].*?\x1b\\"  # DCS / PM / APC
+    r"|\x1b[@-Z\\-_]",  # two-character Fe escapes
+    re.DOTALL,
+)
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _sanitize(text: str) -> str:
+    """Remove terminal escape sequences and control characters from display text."""
+    if not text:
+        return text
+    return _CONTROL_RE.sub("", _ANSI_RE.sub("", text))
+
 
 def format_tokens(count: int) -> str:
     if count < 1000:
@@ -87,9 +110,10 @@ def _display_path(value: object, cwd: Path | None = None) -> str:
     if not path.is_absolute():
         path = base / path
     try:
-        return str(path.resolve().relative_to(base.resolve())).replace("\\", "/")
+        result = str(path.resolve().relative_to(base.resolve())).replace("\\", "/")
     except ValueError:
-        return str(path)
+        result = str(path)
+    return _sanitize(result)
 
 
 def tool_title(name: str, arguments: dict) -> Text:
@@ -108,16 +132,16 @@ def tool_title(name: str, arguments: dict) -> Text:
         text.append(" " + _display_path(arguments.get("path")), _ACCENT)
     elif name == "shell":
         text.append("$ ", f"bold {_TEXT}")
-        text.append(str(arguments.get("command", "")), f"bold {_TEXT}")
+        text.append(_sanitize(str(arguments.get("command", ""))), f"bold {_TEXT}")
     elif name == "grep":
         text.append("grep", f"bold {_TEXT}")
-        text.append(" /" + str(arguments.get("pattern", "")) + "/", _ACCENT)
+        text.append(" /" + _sanitize(str(arguments.get("pattern", ""))) + "/", _ACCENT)
         text.append(" in " + _display_path(arguments.get("path", ".")), _MUTED)
         if arguments.get("glob"):
-            text.append(f" ({arguments['glob']})", _MUTED)
+            text.append(f" ({_sanitize(str(arguments['glob']))})", _MUTED)
     elif name == "find":
         text.append("find", f"bold {_TEXT}")
-        text.append(" " + str(arguments.get("pattern", "")), _ACCENT)
+        text.append(" " + _sanitize(str(arguments.get("pattern", ""))), _ACCENT)
         text.append(" in " + _display_path(arguments.get("path", ".")), _MUTED)
     elif name == "ls":
         text.append("ls", f"bold {_TEXT}")
@@ -125,7 +149,9 @@ def tool_title(name: str, arguments: dict) -> Text:
     else:
         text.append(name, f"bold {_TEXT}")
         if arguments:
-            text.append(" " + json.dumps(arguments, ensure_ascii=False), _MUTED)
+            text.append(
+                " " + _sanitize(json.dumps(arguments, ensure_ascii=False)), _MUTED
+            )
     return text
 
 
@@ -136,6 +162,7 @@ def render_markdown(markdown: str, width: int) -> Content:
     ``Markdown`` renderable is not copyable. Rendering it to ``Content`` keeps
     the styling and makes the block selectable with correct offsets.
     """
+    markdown = _sanitize(markdown)
     width = max(width, 1)
     console = Console(
         width=width,
@@ -154,7 +181,7 @@ class UserMessageWidget(Static):
 
     def __init__(self, text: str) -> None:
         super().__init__(classes="user")
-        self._text = text.strip()
+        self._text = _sanitize(text.strip())
         self._render_width = -1
 
     def on_mount(self) -> None:
@@ -202,6 +229,10 @@ class AssistantMessageWidget(Vertical):
     def set_content(
         self, thinking: str, text: str, *, error: str | None = None, final: bool = False
     ) -> None:
+        thinking = _sanitize(thinking)
+        text = _sanitize(text)
+        if error:
+            error = _sanitize(error)
         self._thinking_text = thinking.strip()
         self._render_thinking()
 
@@ -289,7 +320,7 @@ class ToolWidget(Vertical):
         self._render_title()
 
     def set_result(self, output: str, is_error: bool) -> None:
-        self._output = output.rstrip()
+        self._output = _sanitize(output.rstrip())
         self._is_error = is_error
         self._finished = True
         self.set_class(True, "error" if is_error else "success")
@@ -338,7 +369,7 @@ class ToolWidget(Vertical):
 
 class SystemNote(Static):
     def __init__(self, text: str, style: str = _DIM) -> None:
-        super().__init__(Text(text, style=style), classes="system")
+        super().__init__(Text(_sanitize(text), style=style), classes="system")
 
 
 class PermissionScreen(ModalScreen[ApprovalOutcome]):
@@ -484,6 +515,22 @@ class PromptArea(TextArea):
             event.prevent_default()
             app.action_abort_run()
             return
+        if isinstance(app, TMPromptApp):
+            if event.key == "pageup":
+                event.stop()
+                event.prevent_default()
+                app.scroll_page(-1)
+                return
+            if event.key == "pagedown":
+                event.stop()
+                event.prevent_default()
+                app.scroll_page(1)
+                return
+            if event.key == "ctrl+l":
+                event.stop()
+                event.prevent_default()
+                app.action_redraw()
+                return
         if isinstance(app, TMPromptApp) and app.suggestions_active:
             if event.key == "tab":
                 event.stop()
@@ -554,6 +601,9 @@ class TMPromptApp(App[None]):
         Binding("ctrl+o", "toggle_tools", "Expand details"),
         Binding("ctrl+y", "toggle_auto", "Auto-approve"),
         Binding("ctrl+p", "toggle_pause", "Pause"),
+        Binding("ctrl+l", "redraw", "Redraw", show=False),
+        Binding("pageup", "scroll_page_up", "Scroll up", show=False),
+        Binding("pagedown", "scroll_page_down", "Scroll down", show=False),
         Binding("ctrl+shift+c", "copy_selection", "Copy selection", show=False),
         Binding("tab", "accept_suggestion", "Complete", show=False),
         Binding("down", "suggestion_down", "Next suggestion", show=False),
@@ -859,6 +909,40 @@ class TMPromptApp(App[None]):
         self._agent.abort()
         self.notify(_t("tui.stopping"))
 
+    # -- scrolling / terminal recovery ------------------------------------
+    def scroll_page(self, direction: int) -> None:
+        container = self.query_one("#messages", VerticalScroll)
+        container.scroll_relative(
+            y=direction * max(1, container.size.height - 2), animate=False
+        )
+
+    def action_scroll_page_up(self) -> None:
+        self.scroll_page(-1)
+
+    def action_scroll_page_down(self) -> None:
+        self.scroll_page(1)
+
+    def _restore_terminal_modes(self) -> None:
+        """Re-apply mouse/paste modes after a turn.
+
+        A command run during a turn can reset the terminal (or Windows console)
+        mode, after which mouse-wheel scrolling stops working until TM restarts.
+        Re-enable the modes after each turn; Ctrl+L forces it manually.
+        """
+        driver = getattr(self, "_driver", None)
+        if driver is None:
+            return
+        for name in ("_enable_mouse_support", "_enable_bracketed_paste"):
+            method = getattr(driver, name, None)
+            if callable(method):
+                with contextlib.suppress(Exception):
+                    method()
+
+    def action_redraw(self) -> None:
+        self._restore_terminal_modes()
+        self.refresh()
+        self.screen.refresh(layout=True)
+
     # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
         self._status = status
@@ -965,6 +1049,7 @@ class TMPromptApp(App[None]):
             self._set_status("working")
         elif isinstance(event, AgentEndEvent):
             self._set_status("idle")
+            self._restore_terminal_modes()
             self._update_footer()
             if event.stop_reason == "max_turns":
                 await self._mount(
@@ -1072,6 +1157,7 @@ class TMPromptApp(App[None]):
             self._set_status("idle")
             self._update_footer()
             self.query_one("#prompt", TextArea).focus()
+            self._restore_terminal_modes()
 
 
 __all__ = [
