@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import fnmatch
 import re
 import shutil
@@ -11,6 +10,7 @@ from pydantic import BaseModel
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.output import format_truncation
 from tm.tools.path_utils import resolve_path
+from tm.tools.subprocess_utils import run_capture
 from tm.tools.truncate import GREP_MAX_LINE_LENGTH, truncate_head, truncate_line
 
 _SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", ".mypy_cache"}
@@ -86,13 +86,8 @@ class GrepTool(Tool[GrepParams]):
             if args.glob:
                 argv.extend(["--glob", args.glob])
             argv.extend(["--", args.pattern, str(base)])
-            proc = await asyncio.create_subprocess_exec(
-                *argv,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode not in (0, 1):
+            stdout, stderr, returncode = await run_capture(argv)
+            if returncode not in (0, 1):
                 return text_result(
                     f"grep failed: {stderr.decode(errors='replace').strip()}", is_error=True
                 )

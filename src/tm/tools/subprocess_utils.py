@@ -25,11 +25,19 @@ async def kill_process_tree(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is not None:
         return
     if os.name == "nt":
-        await asyncio.create_subprocess_exec(
-            "taskkill", "/pid", str(proc.pid), "/T", "/F",
+        killer = await asyncio.create_subprocess_exec(
+            "taskkill",
+            "/pid",
+            str(proc.pid),
+            "/T",
+            "/F",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
+        # Await the killer too: dropping it leaks its subprocess transport and
+        # produces "unclosed transport" ResourceWarnings at shutdown.
+        with contextlib.suppress(Exception):
+            await killer.wait()
     else:
         killpg = getattr(os, "killpg", None)
         getpgid = getattr(os, "getpgid", None)
@@ -42,6 +50,28 @@ async def kill_process_tree(proc: asyncio.subprocess.Process) -> None:
             proc.kill()
     with contextlib.suppress(ProcessLookupError):
         await proc.wait()
+
+
+async def run_capture(argv: list[str]) -> tuple[bytes, bytes, int | None]:
+    """Run ``argv`` and return ``(stdout, stderr, returncode)``.
+
+    The child is killed if the awaiting task is cancelled, so aborting a tool
+    cannot leave a subprocess transport open.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await proc.communicate()
+    except asyncio.CancelledError:
+        await kill_process_tree(proc)
+        raise
+    finally:
+        if proc.returncode is None:
+            await kill_process_tree(proc)
+    return stdout, stderr, proc.returncode
 
 
 async def stream_command(
@@ -108,9 +138,19 @@ async def stream_command(
                 task.cancel()
 
     watch = asyncio.create_task(watchdog())
-    await proc.wait()
-    watch.cancel()
-    await reader
+    try:
+        await proc.wait()
+        await reader
+    except asyncio.CancelledError:
+        await kill_process_tree(proc)
+        reader.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await reader
+        raise
+    finally:
+        watch.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watch
 
     return CommandResult(
         output="".join(chunks).rstrip(),
@@ -120,4 +160,4 @@ async def stream_command(
     )
 
 
-__all__ = ["CommandResult", "kill_process_tree", "stream_command"]
+__all__ = ["CommandResult", "kill_process_tree", "run_capture", "stream_command"]
