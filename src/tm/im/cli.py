@@ -7,10 +7,12 @@ import json
 import os
 import shlex
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.text import Text
 
 from tm import __version__
 from tm.ai.registry import Registry, RegistryError
@@ -56,6 +58,15 @@ from tm.tools import build_default_tools
 
 app = typer.Typer(add_completion=False, help="tm_im chat-network integration.")
 console = Console()
+
+
+def _log(message: str, style: str | None = None) -> None:
+    """Print a timestamped tm_im log line (also used for the background log)."""
+    line = Text()
+    line.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), style="dim")
+    line.append("  im  ", style="dim")
+    line.append(message, style=style)
+    console.print(line, markup=False, highlight=False)
 
 _IM_ROLE = (
     "You are connected to the tm_im chat network as an agent. You receive chat "
@@ -245,7 +256,7 @@ def run(
         state=state,
         agent_factory=make_agent,
         session_manager=session_manager,
-        log=lambda message: console.print(f"[dim]im[/dim] {message}"),
+        log=_log,
         workers=workers,
     )
 
@@ -266,18 +277,18 @@ def run(
         on_message=bot.enqueue,
         get_cursors=lambda: dict(bot.state.cursors),
         on_ready=on_ready,
-        log=lambda message: console.print(f"[dim]im[/dim] {message}"),
+        log=_log,
         sync_limit=settings.sync_limit,
     )
 
     if settings.allow_tools == "full":
-        console.print(
-            "[bold yellow]warning[/bold yellow] allow_tools=full: anyone who can "
-            "message this agent can run shell commands on this machine. Set "
-            "--allow-tools read_only to scope it down."
+        _log(
+            "warning allow_tools=full: anyone who can message this agent can run "
+            "shell commands on this machine. Set --allow-tools read_only to scope it down.",
+            "bold yellow",
         )
     endpoint = ws_url or f"{tcp[0]}:{tcp[1]}"
-    console.print(
+    _log(
         f"connecting to {settings.base_url} (realtime {endpoint}) | "
         f"model {resolved_model.provider}/{resolved_model.id} | tools={settings.allow_tools}"
     )
@@ -285,12 +296,12 @@ def run(
     async def main() -> None:
         try:
             await bot.discover()
-            console.print(f"connected as @{bot.handle} (actor_id={bot.actor_id})")
+            _log(f"connected as @{bot.handle} (actor_id={bot.actor_id})")
             await bot.handle_friend_requests()
             bot.start_workers()
             await realtime.run()
         except ImApiError as error:
-            console.print(f"[red]{error}[/red]")
+            _log(str(error), "red")
             raise typer.Exit(code=1) from error
         finally:
             await realtime.stop()
