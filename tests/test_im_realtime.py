@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from tm.im.protocol import Cmd, Frame, ImMessage
-from tm.im.realtime import RealtimeClient
+from tm.im.realtime import RealtimeClient, _next_backoff
 
 
 class RecordingClient(RealtimeClient):
@@ -84,3 +84,14 @@ async def test_auth_ok_sets_identity() -> None:
     assert client.actor_id == 2002
     assert client.handle == "weather_bot"
     assert client.heartbeat_sec == 30
+    assert client._authenticated is True
+
+
+def test_backoff_resets_after_authentication() -> None:
+    # A successful authentication restarts the sequence at one second.
+    assert _next_backoff(16.0, True) == (1.0, 2.0)
+    assert _next_backoff(1.0, True) == (1.0, 2.0)
+    # Unauthenticated failures grow exponentially and cap at 30 seconds.
+    assert _next_backoff(1.0, False) == (1.0, 2.0)
+    assert _next_backoff(16.0, False) == (16.0, 30.0)
+    assert _next_backoff(30.0, False) == (30.0, 30.0)

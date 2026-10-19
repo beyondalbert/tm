@@ -45,6 +45,20 @@ from tm.im.websocket import WsConnection
 _AUTH_ERRORS = {40101, 40102, 40103, 40104, 40105, 40106}
 _MAX_CURSORS_PER_SYNC = 50
 _IDLE_TIMEOUT = 90.0
+_MAX_BACKOFF = 30.0
+
+
+def _next_backoff(backoff: float, authenticated: bool) -> tuple[float, float]:
+    """Return ``(delay, next_backoff)`` for the reconnect loop.
+
+    A successful authentication means the server is reachable, so a later drop
+    starts over at one second instead of inheriting a large backoff from earlier
+    failures.
+    """
+    if authenticated:
+        backoff = 1.0
+    delay = min(_MAX_BACKOFF, backoff)
+    return delay, min(_MAX_BACKOFF, backoff * 2)
 
 MessageHandler = Callable[[ImMessage], Awaitable[None]]
 CursorsProvider = Callable[[], dict[int, int]]
@@ -136,6 +150,7 @@ class RealtimeClient:
         self._req = itertools.count(1)
         self._cursors: dict[int, int] = {}
         self._last_recv = time.monotonic()
+        self._authenticated = False
 
         self._sync_batches: list[list[int]] = []
         self._sync_index = 0
@@ -148,11 +163,11 @@ class RealtimeClient:
         backoff = 1.0
         while not self._stop.is_set():
             self._reconnect_delay = None
+            self._authenticated = False
             self._sync_active = False
             self._sync_pending = False
             try:
                 await self._session()
-                backoff = 1.0
             except FatalRealtimeError as error:
                 self.log(f"stopping: {error}")
                 return
@@ -164,10 +179,11 @@ class RealtimeClient:
                 self.log(f"connection lost: {type(error).__name__}: {error}")
             if self._stop.is_set():
                 return
-            delay = self._reconnect_delay
-            if delay is None:
-                delay = min(30.0, backoff) * (1 + random.uniform(-0.3, 0.3))
-                backoff = min(30.0, backoff * 2)
+            delay, backoff = _next_backoff(backoff, self._authenticated)
+            if self._reconnect_delay is not None:
+                delay = self._reconnect_delay
+            else:
+                delay *= 1 + random.uniform(-0.3, 0.3)
             self.log(f"reconnecting in {delay:.1f}s")
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), timeout=delay)
@@ -221,6 +237,7 @@ class RealtimeClient:
             self.actor_id = info.actor_id
             self.handle = info.handle
             self.heartbeat_sec = info.heartbeat_sec or 30
+            self._authenticated = True
             self.log(f"authenticated as {info.handle or '?'} (actor_id={info.actor_id})")
             if self.on_ready is not None:
                 await self.on_ready(info)
