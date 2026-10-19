@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from pydantic import BaseModel
 
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
@@ -24,7 +26,9 @@ class LsTool(Tool[LsParams]):
         if not path.is_dir():
             return text_result(f"Not a directory: {path}", is_error=True)
         try:
-            entries = sorted(path.iterdir(), key=lambda entry: entry.name.lower())
+            entries = await asyncio.to_thread(
+                lambda: sorted(path.iterdir(), key=lambda entry: entry.name.lower())
+            )
         except OSError as exc:
             return text_result(f"Could not list {path}: {exc}", is_error=True)
 

@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 from pydantic import BaseModel
 
 from tm.safety import record_file_change
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.path_utils import resolve_path
+
+
+def _write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 class WriteParams(BaseModel):
@@ -27,12 +35,11 @@ class WriteTool(Tool[WriteParams]):
         old: bytes | None = None
         if existed:
             try:
-                old = path.read_bytes()
+                old = await asyncio.to_thread(path.read_bytes)
             except OSError:
                 old = None
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(args.content, encoding="utf-8")
+            await asyncio.to_thread(_write_text, path, args.content)
         except OSError as exc:
             return text_result(f"Could not write {path}: {exc}", is_error=True)
         record_file_change(

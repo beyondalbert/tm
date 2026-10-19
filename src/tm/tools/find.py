@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import shutil
 from pathlib import Path
@@ -71,7 +72,9 @@ class FindTool(Tool[FindParams]):
                 )
             results = stdout.decode(errors="replace").splitlines()
         else:
-            results = _python_find(base, args)
+            # The fallback walks the tree synchronously; keep it off the event
+            # loop so a large directory cannot freeze the UI.
+            results = await asyncio.to_thread(_python_find, base, args)
 
         if not results:
             return text_result(f"No files matching '{args.pattern}'")

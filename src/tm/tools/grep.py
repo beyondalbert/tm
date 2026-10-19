@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import re
 import shutil
@@ -95,7 +96,9 @@ class GrepTool(Tool[GrepParams]):
             total = len(lines)
             shown = lines[: args.max_results]
         else:
-            shown, total = _python_search(base, args)
+            # The fallback scans the filesystem synchronously; run it off the
+            # event loop so a big tree cannot freeze the TUI or a modal.
+            shown, total = await asyncio.to_thread(_python_search, base, args)
 
         if not shown:
             return text_result(f"No matches for '{args.pattern}'")
