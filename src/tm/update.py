@@ -8,6 +8,7 @@ detached helper that waits for this process to exit first.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -115,12 +116,48 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def _wait_and_upgrade(pid: int, argv: Sequence[str]) -> None:
-    """Run in the detached helper: wait for the parent, then upgrade."""
+def _wait_and_upgrade(pid: int, argv: Sequence[str], log_path: str) -> None:
+    """Run in the detached helper: wait for the parent, then upgrade.
+
+    Output is streamed to the console (when one is still attached) and appended
+    to ``log_path``, so a failure is visible instead of only being logged.
+    """
     deadline = time.time() + 300
     while time.time() < deadline and _alive(pid):
         time.sleep(0.5)
-    subprocess.call(list(argv))
+
+    path = Path(log_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as log:
+
+        def emit(text: str) -> None:
+            log.write(text)
+            log.flush()
+            with contextlib.suppress(OSError, ValueError):
+                sys.stdout.write(text)
+                sys.stdout.flush()
+
+        emit(f"\n[tm update] {' '.join(argv)}\n")
+        try:
+            proc = subprocess.Popen(
+                list(argv),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+            )
+        except OSError as exc:
+            emit(f"[tm update] could not run the updater: {exc}\n")
+            emit(f"[tm update] run manually: {' '.join(argv)}\n")
+            return
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            emit(line)
+        code = proc.wait()
+        if code == 0:
+            emit("[tm update] update complete\n")
+        else:
+            emit(f"[tm update] update failed (exit code {code})\n")
 
 
 def _start_background_upgrade(argv: Sequence[str]) -> Path:
@@ -128,18 +165,17 @@ def _start_background_upgrade(argv: Sequence[str]) -> Path:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = (
         "import sys; from tm.update import _wait_and_upgrade; "
-        "_wait_and_upgrade(int(sys.argv[1]), sys.argv[2:])"
+        "_wait_and_upgrade(int(sys.argv[1]), sys.argv[2:-1], sys.argv[-1])"
     )
-    creationflags = 0x08000000 | 0x00000200 if os.name == "nt" else 0
-    with log_path.open("ab") as log:
-        subprocess.Popen(
-            [sys.executable, "-c", command, str(os.getpid()), *argv],
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            creationflags=creationflags,
-            start_new_session=os.name != "nt",
-        )
+    # Keep the console attached so progress and errors are visible; the helper
+    # waits for this process to exit before replacing the running executable.
+    creationflags = 0x00000200 if os.name == "nt" else 0
+    subprocess.Popen(
+        [sys.executable, "-c", command, str(os.getpid()), *argv, str(log_path)],
+        stdin=subprocess.DEVNULL,
+        creationflags=creationflags,
+        start_new_session=os.name != "nt",
+    )
     return log_path
 
 
@@ -159,7 +195,8 @@ def run_update(
     current = _current_version()
     latest = latest_version()
     if latest is None:
-        out("could not reach PyPI to check for updates")
+        out("could not reach PyPI to check for updates (network or DNS error)")
+        out(f"upgrade manually: pip install --upgrade {PACKAGE}")
         return 1
     if not is_newer(latest, current):
         if parse_version(current) > parse_version(latest):
@@ -174,24 +211,43 @@ def run_update(
     argv = upgrade_argv(prefix)
     if argv is None:
         out("pip is not available; bootstrapping it with ensurepip")
-        code = subprocess.call([sys.executable, "-m", "ensurepip", "--upgrade"])
+        try:
+            code = subprocess.call([sys.executable, "-m", "ensurepip", "--upgrade"])
+        except OSError as exc:
+            out(f"could not run ensurepip: {exc}")
+            out(f"run manually: pip install --upgrade {PACKAGE}")
+            return 1
         if code != 0:
             out(f"could not bootstrap pip; run manually: pip install --upgrade {PACKAGE}")
             return code
         argv = [sys.executable, "-m", "pip", "install", "--upgrade", PACKAGE]
 
+    command = " ".join(argv)
     if background is None:
         background = os.name == "nt"
     if background:
-        log_path = _start_background_upgrade(argv)
-        out(
-            f"updating TM {current} -> {latest} in the background; "
-            f"exit tm, then check {log_path}"
-        )
+        try:
+            log_path = _start_background_upgrade(argv)
+        except OSError as exc:
+            out(f"could not start the updater: {exc}")
+            out(f"run manually: {command}")
+            return 1
+        out(f"updating TM {current} -> {latest} in the background ({command})")
+        out(f"progress and errors are printed here and appended to {log_path}")
         return 0
 
-    out(f"updating TM {current} -> {latest}")
-    return subprocess.call(argv)
+    out(f"updating TM {current} -> {latest}: {command}")
+    try:
+        code = subprocess.call(argv)
+    except OSError as exc:
+        out(f"could not run the updater: {exc}")
+        out(f"run manually: {command}")
+        return 1
+    if code == 0:
+        out("update complete; restart tm to use the new version")
+    else:
+        out(f"update failed (exit code {code}); see the output above")
+    return code
 
 
 __all__ = [

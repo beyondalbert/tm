@@ -85,3 +85,29 @@ def test_run_update_background(monkeypatch, tmp_path: Path) -> None:
     messages: list[str] = []
     assert update.run_update(messages.append, background=True) == 0
     assert "background" in messages[-1]
+
+
+def test_run_update_reports_a_failed_upgrade(monkeypatch) -> None:
+    monkeypatch.setattr(update, "_current_version", lambda: "0.2.0")
+    monkeypatch.setattr(update, "latest_version", lambda: "0.2.1")
+    monkeypatch.setattr(update, "upgrade_argv", lambda prefix=None: ["pip", "upgrade"])
+    monkeypatch.setattr(update.subprocess, "call", lambda argv: 2)
+    messages: list[str] = []
+    assert update.run_update(messages.append, background=False) == 2
+    assert any("update failed" in message for message in messages)
+    assert any("pip upgrade" in message for message in messages)
+
+
+def test_run_update_reports_a_missing_updater(monkeypatch) -> None:
+    monkeypatch.setattr(update, "_current_version", lambda: "0.2.0")
+    monkeypatch.setattr(update, "latest_version", lambda: "0.2.1")
+    monkeypatch.setattr(update, "upgrade_argv", lambda prefix=None: ["pip", "upgrade"])
+
+    def boom(argv: list[str]) -> int:
+        raise OSError("updater not found")
+
+    monkeypatch.setattr(update.subprocess, "call", boom)
+    messages: list[str] = []
+    assert update.run_update(messages.append, background=False) == 1
+    assert any("could not run the updater" in message for message in messages)
+    assert any("run manually" in message for message in messages)
