@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 
-from tm.tools.subprocess_utils import kill_process_tree, run_capture
+from tm.tools.subprocess_utils import kill_process_tree, run_capture, stream_command
 
 
 class _FakeProcess:
@@ -50,3 +50,13 @@ async def test_run_capture_returns_output() -> None:
     assert returncode == 0
     assert stdout.strip() == b"hello"
     assert stderr == b""
+
+
+async def test_stream_command_times_out_hanging_process(tmp_path) -> None:
+    result = await stream_command(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        cwd=tmp_path,
+        timeout=1,
+    )
+    assert result.timed_out is True
+    assert result.returncode is not None

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from tm.config import load_settings
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.output import format_truncation, spill_output
 from tm.tools.subprocess_utils import stream_command
@@ -47,11 +48,15 @@ class ShellTool(Tool[ShellParams]):
             return text_result(f"Working directory does not exist: {cwd}", is_error=True)
 
         argv = shell_argv(args.command)
+        # A command that never exits would otherwise leave the agent (and the
+        # TUI "Working…" spinner) stuck forever. Default to a timeout unless the
+        # model asked for a specific one.
+        timeout = args.timeout if args.timeout is not None else load_settings().shell_timeout
         try:
             result = await stream_command(
                 argv,
                 cwd=cwd,
-                timeout=args.timeout,
+                timeout=timeout,
                 signal=ctx.signal,
                 on_update=ctx.on_update,
             )
@@ -66,7 +71,7 @@ class ShellTool(Tool[ShellParams]):
         if result.aborted:
             notes.append("aborted")
         elif result.timed_out:
-            notes.append(f"timed out after {args.timeout}s")
+            notes.append(f"timed out after {timeout}s")
         notes.append(f"exit code {result.returncode}")
         parts = [truncation.content] if truncation.content else []
         notice = format_truncation(truncation, full_path=full_path, tail=True)

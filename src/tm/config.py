@@ -62,6 +62,7 @@ class Settings:
     env_probe: bool = True
     python_executable: str | None = None
     python_timeout: int = 120
+    shell_timeout: int = 120
     workspace_dir: str | None = None
     auto_install: bool = True
 
