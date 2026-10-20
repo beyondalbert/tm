@@ -1,7 +1,7 @@
 import pytest
 
 from tm.ai.catalog import PRESETS
-from tm.ai.registry import Registry, RegistryError
+from tm.ai.registry import Registry, RegistryError, is_localhost_url
 
 
 def test_resolve_default_provider_and_model() -> None:
@@ -101,3 +101,17 @@ def test_model_cost() -> None:
 
     unpriced = Model(id="m", provider="p")
     assert unpriced.cost(usage) is None
+
+
+def test_provider_key_present_reflects_a_real_key() -> None:
+    registry = Registry(api_keys={"deepseek": "sk-real"})
+    assert registry.provider_key_present("deepseek") is True
+    assert registry.provider_key_present("qwen") is False
+
+
+def test_is_localhost_url() -> None:
+    assert is_localhost_url("http://127.0.0.1:11434/v1") is True
+    assert is_localhost_url("http://localhost:8000/v1") is True
+    assert is_localhost_url("http://[::1]:8080/v1") is True
+    assert is_localhost_url("http://tmim.stkg.ltd/v1") is False
+    assert is_localhost_url(None) is False

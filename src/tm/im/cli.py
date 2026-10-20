@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.text import Text
 
 from tm import __version__
-from tm.ai.registry import Registry, RegistryError
+from tm.ai.registry import Registry, RegistryError, is_localhost_url
 from tm.ai.user_models import UserModelError, load_presets
 from tm.config import config_dir, load_credentials, load_settings
 from tm.core.agent import Agent
@@ -200,11 +200,17 @@ def run(
     preset = next(
         (p for p in registry.presets() if p.id == resolved_model.provider), None
     )
-    if preset is not None and not registry.has_credentials(preset):
+    if (
+        preset is not None
+        and preset.api == "openai-completions"
+        and not registry.provider_key_present(resolved_model.provider)
+        and not is_localhost_url(preset.base_url)
+    ):
         console.print(
             f"[bold yellow]warning[/bold yellow] no API key for provider "
-            f"'{resolved_model.provider}'; replies will fail. Store one with "
-            f"`tm --login {resolved_model.provider}`."
+            f"'{resolved_model.provider}'; it is not a localhost base URL. Replies "
+            "will fail on a key-checking gateway. Store one with "
+            f"`tm --login {resolved_model.provider}` and restart."
         )
 
     cwd = Path.cwd()

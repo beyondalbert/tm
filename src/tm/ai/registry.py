@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 from tm.ai.catalog import PRESETS, ProviderPreset
 from tm.ai.providers.anthropic import AnthropicProvider
@@ -42,6 +43,12 @@ class Registry:
 
     def has_credentials(self, preset: ProviderPreset) -> bool:
         return bool(preset.api_key_env == ()) or self._api_key(preset) is not None
+
+    def provider_key_present(self, provider_id: str) -> bool:
+        """Whether an actual API key is available for a provider (not just that
+        it has an ``api_key_env`` declared but unset)."""
+        preset = self._presets.get(provider_id)
+        return preset is not None and self._api_key(preset) is not None
 
     def provider(self, provider_id: str) -> Provider:
         if provider_id not in self._providers:
@@ -162,4 +169,12 @@ def available_provider_ids(
     return [p.id for p in source if registry.has_credentials(p)]
 
 
-__all__ = ["Registry", "RegistryError", "available_provider_ids"]
+def is_localhost_url(base_url: str | None) -> bool:
+    """Whether a base URL points at a loopback host (local-only servers)."""
+    if not base_url:
+        return False
+    host = (urlsplit(base_url).hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
+__all__ = ["Registry", "RegistryError", "available_provider_ids", "is_localhost_url"]

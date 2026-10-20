@@ -196,7 +196,11 @@ def _configure(
         if api_key_env is None:
             api_key_env = default_key_env or None
     else:
-        provider = typer.prompt("Provider id", default=provider)
+        if not require_existing:
+            # add-local lets you pick/rename the provider; edit-local is fixed
+            # to its positional argument so it edits in place rather than
+            # silently creating a new provider.
+            provider = typer.prompt("Provider id", default=provider)
         base_url = base_url or typer.prompt("Base URL", default=default_base)
         model = model or typer.prompt("Model id (see the server's /v1/models)", default=default_model)
         if context_window is None:
@@ -235,6 +239,10 @@ def _configure(
     if context_window <= 0 or max_tokens <= 0:
         console.print("[red]context window and max tokens must be positive[/red]")
         raise typer.Exit(code=1)
+
+    # Re-resolve after any interactive changes so add/edit report and write to
+    # the final provider id correctly.
+    existing = _existing_provider(models_file, provider)
 
     if api_key:
         _store_key(provider, api_key)

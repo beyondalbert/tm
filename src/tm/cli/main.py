@@ -13,7 +13,7 @@ from rich.console import Console
 
 from tm import __version__
 from tm.ai.providers.base import Provider, StreamOptions
-from tm.ai.registry import Registry, RegistryError
+from tm.ai.registry import Registry, RegistryError, is_localhost_url
 from tm.ai.types import (
     AssistantMessage,
     Context,
@@ -742,6 +742,23 @@ def main(
     except RegistryError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
+
+    selected_preset = next(
+        (preset for preset in registry.presets() if preset.id == selected_provider.id),
+        None,
+    )
+    if (
+        selected_preset is not None
+        and selected_preset.api == "openai-completions"
+        and not registry.provider_key_present(selected_provider.id)
+        and not is_localhost_url(selected_preset.base_url)
+    ):
+        console.print(
+            f"[bold yellow]warning[/bold yellow] no API key for provider "
+            f"'{selected_provider.id}' (it is not a localhost base URL). "
+            "Requests will send a placeholder key and a key-checking gateway will "
+            f"reject them. Store the key with `tm --login {selected_provider.id}` and restart."
+        )
 
     tools = _select_tools(no_tools, read_only, no_python=no_python)
     trusted = _resolve_trust(settings, approve, no_approve)
