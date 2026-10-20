@@ -870,6 +870,12 @@ def run_cli() -> None:
         sys.argv = [sys.argv[0], *sys.argv[2:]]
         im_app()
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "models":
+        from tm.cli.models_cmd import app as models_app
+
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        models_app()
+        return
     app()
 
 

@@ -174,6 +174,14 @@ or extra models in `<config>/models.toml` (Windows:
 `%APPDATA%\the-machine\models.toml`). It is merged over the built-in catalog, so
 `tm --list-models` and `/model` pick it up without editing code.
 
+The interactive helper writes these files for you:
+
+```bash
+tm models add-local     # prompts for endpoint, model id, context window, ...
+tm models edit-local local  # change an existing provider (values pre-filled)
+tm models list          # show providers defined in models.toml
+```
+
 ```toml
 [providers.myprovider]
 name = "My Provider"
