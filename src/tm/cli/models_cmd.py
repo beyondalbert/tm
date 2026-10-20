@@ -8,7 +8,7 @@ import tomli_w
 import typer
 from rich.console import Console
 
-from tm.config import config_dir, read_toml
+from tm.config import config_dir, read_toml, save_credential
 
 app = typer.Typer(
     add_completion=False,
@@ -121,6 +121,14 @@ def set_default(path: Path, provider_id: str, model_id: str) -> Path:
     return path
 
 
+def _store_key(provider: str, key: str) -> None:
+    saved = save_credential(provider, key)
+    masked = f"{key[:6]}...{key[-4:]} ({len(key)} chars)"
+    console.print(
+        f"stored API key for '{provider}' in [bold]{saved}[/bold] ({masked})"
+    )
+
+
 def _existing_provider(path: Path, provider_id: str) -> dict | None:
     if not path.exists():
         return None
@@ -153,6 +161,7 @@ def _configure(
     max_tokens: int | None,
     reasoning: bool,
     api_key_env: str | None,
+    api_key: str | None,
     make_default: bool,
     assume_yes: bool,
     require_existing: bool,
@@ -199,6 +208,14 @@ def _configure(
                 "Max output tokens", default=default_max, type=int
             )
         reasoning = typer.confirm("Is it a reasoning model?", default=default_reasoning)
+        if api_key is None:
+            answer = typer.prompt(
+                "Paste the API key (blank if the endpoint ignores keys)",
+                default="",
+                show_default=False,
+                hide_input=True,
+            ).strip()
+            api_key = answer or None
         if api_key_env is None:
             answer = typer.prompt(
                 "API key env var (leave blank if none)",
@@ -218,6 +235,9 @@ def _configure(
     if context_window <= 0 or max_tokens <= 0:
         console.print("[red]context window and max tokens must be positive[/red]")
         raise typer.Exit(code=1)
+
+    if api_key:
+        _store_key(provider, api_key)
 
     spec = build_provider(
         provider,
@@ -258,6 +278,9 @@ def add_local(
     api_key_env: str | None = typer.Option(
         None, "--api-key-env", help="Env var holding the key (omit for local servers)."
     ),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="Store this API key for the provider (overrides env)."
+    ),
     make_default: bool = typer.Option(
         True, "--default/--no-default", help="Also set it as the default provider/model."
     ),
@@ -278,6 +301,7 @@ def add_local(
         max_tokens=max_tokens,
         reasoning=reasoning,
         api_key_env=api_key_env,
+        api_key=api_key,
         make_default=make_default,
         assume_yes=assume_yes,
         require_existing=False,
@@ -293,6 +317,9 @@ def edit_local(
     max_tokens: int | None = typer.Option(None, "--max-tokens"),
     reasoning: bool = typer.Option(False, "--reasoning/--no-reasoning"),
     api_key_env: str | None = typer.Option(None, "--api-key-env"),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="Store this API key for the provider (overrides env)."
+    ),
     make_default: bool = typer.Option(True, "--default/--no-default"),
     assume_yes: bool = typer.Option(
         False, "--yes", "-y", help="Do not prompt; keep values not given."
@@ -307,6 +334,7 @@ def edit_local(
         max_tokens=max_tokens,
         reasoning=reasoning,
         api_key_env=api_key_env,
+        api_key=api_key,
         make_default=make_default,
         assume_yes=assume_yes,
         require_existing=True,
