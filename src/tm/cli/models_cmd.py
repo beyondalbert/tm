@@ -123,9 +123,8 @@ def set_default(path: Path, provider_id: str, model_id: str) -> Path:
 
 def _store_key(provider: str, key: str) -> None:
     saved = save_credential(provider, key)
-    masked = f"{key[:6]}...{key[-4:]} ({len(key)} chars)"
     console.print(
-        f"stored API key for '{provider}' in [bold]{saved}[/bold] ({masked})"
+        f"stored API key for '{provider}' in [bold]{saved}[/bold]: {key}"
     )
 
 
@@ -244,7 +243,6 @@ def _configure(
                 "Paste the API key (blank if the endpoint ignores keys)",
                 default="",
                 show_default=False,
-                hide_input=True,
             ).strip()
             api_key = answer or None
         if api_key_env is None:
