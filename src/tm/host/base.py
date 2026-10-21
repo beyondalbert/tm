@@ -144,14 +144,13 @@ def probe_gpus() -> tuple[Gpu, ...]:
         completed = subprocess.run(
             [executable, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
             capture_output=True,
-            text=True,
             timeout=5,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return ()
     gpus: list[Gpu] = []
-    for line in completed.stdout.splitlines():
+    for line in _decode(completed.stdout or b"").splitlines():
         if not line.strip():
             continue
         name, _, memory = line.rpartition(",")

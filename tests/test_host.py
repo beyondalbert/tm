@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from tm.host import detect_host, human_bytes, render_environment
 from tm.host.base import (
     DiskUsage,
@@ -9,6 +11,7 @@ from tm.host.base import (
     Resources,
     Software,
     SystemInfo,
+    run_command,
 )
 
 
@@ -76,3 +79,14 @@ def test_live_probe_does_not_crash() -> None:
     assert host.identity().user
     assert host.system().os
     assert host.resources().cpu_count >= 1
+
+
+def test_run_command_decodes_output_from_another_code_page() -> None:
+    # Python 3.15 decodes subprocess text as UTF-8, so a Windows tool answering
+    # in the console code page must still come back as text instead of raising
+    # inside the reader thread and yielding None.
+    script = "import os; os.write(1, '\u4fe1\u606f'.encode('gbk'))"
+    ok, output = run_command([sys.executable, "-c", script])
+    assert ok is True
+    assert isinstance(output, str)
+    assert output != ""

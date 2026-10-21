@@ -22,6 +22,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from tm.config import config_dir
+from tm.host.base import run_command
 
 PACKAGE = "the-machine"
 PYPI_JSON = f"https://pypi.org/pypi/{PACKAGE}/json"
@@ -99,16 +100,18 @@ def upgrade_argv(prefix: Path | None = None) -> list[str] | None:
 
 
 def _alive(pid: int) -> bool:
+    """Whether ``pid`` is still running.
+
+    The Windows probe runs through ``run_command``: tasklist prints a localized
+    message when nothing matches, and decoding those bytes as UTF-8 under
+    Python 3.15's default UTF-8 mode used to fail and leave ``stdout`` as None.
+    """
     if os.name == "nt":
-        try:
-            output = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True,
-                text=True,
-            ).stdout
-        except OSError:
+        tasklist = shutil.which("tasklist")
+        if tasklist is None:
             return False
-        return str(pid) in output
+        ok, output = run_command([tasklist, "/FI", f"PID eq {pid}", "/NH"])
+        return ok and str(pid) in output
     try:
         os.kill(pid, 0)
     except OSError:

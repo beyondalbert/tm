@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import tm.update as update
@@ -111,3 +114,15 @@ def test_run_update_reports_a_missing_updater(monkeypatch) -> None:
     assert update.run_update(messages.append, background=False) == 1
     assert any("could not run the updater" in message for message in messages)
     assert any("run manually" in message for message in messages)
+
+
+def test_alive_sees_the_current_process() -> None:
+    assert update._alive(os.getpid()) is True
+
+
+def test_alive_is_false_once_the_process_is_gone() -> None:
+    # On Windows this asks tasklist about a pid that no longer exists, which is
+    # answered with a localized message: decoding it must not raise.
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    assert update._alive(proc.pid) is False
