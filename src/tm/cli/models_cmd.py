@@ -129,6 +129,33 @@ def _store_key(provider: str, key: str) -> None:
     )
 
 
+def remove_provider(path: Path, provider_id: str) -> None:
+    """Delete a provider from ``models.toml``, preserving the rest."""
+    data = read_toml(path) if path.exists() else {}
+    providers = data.get("providers")
+    if isinstance(providers, dict):
+        providers.pop(provider_id, None)
+        data["providers"] = providers
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        tomli_w.dump(data, handle)
+
+
+def clear_default_if_matches(settings_file: Path, provider_id: str) -> bool:
+    """Drop the provider/model default from settings.toml if it points here."""
+    if not settings_file.exists():
+        return False
+    data = read_toml(settings_file)
+    if data.get("provider") != provider_id:
+        return False
+    data.pop("provider", None)
+    data.pop("model", None)
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    with settings_file.open("wb") as handle:
+        tomli_w.dump(data, handle)
+    return True
+
+
 def _existing_provider(path: Path, provider_id: str) -> dict | None:
     if not path.exists():
         return None
@@ -269,7 +296,7 @@ def _configure(
     console.print("restart tm, then verify with: [bold]tm --list-models[/bold]")
 
 
-@app.command("add-local")
+@app.command("add")
 def add_local(
     provider: str = typer.Option("local", "--provider", help="Provider id."),
     base_url: str | None = typer.Option(
@@ -296,7 +323,8 @@ def add_local(
         False, "--yes", "-y", help="Do not prompt; require --model."
     ),
 ) -> None:
-    """Add a local OpenAI-compatible model (Ollama, LM Studio, vLLM, ...).
+    """Add a custom OpenAI-compatible model (Ollama, LM Studio, vLLM, a hosted
+    endpoint, DeepSeek, ...). Works for both local and remote base URLs.
 
     Re-running it for an existing provider pre-fills the current values and
     updates them in place, preserving other models and extra fields.
@@ -316,7 +344,7 @@ def add_local(
     )
 
 
-@app.command("edit-local")
+@app.command("edit")
 def edit_local(
     provider: str = typer.Argument("local", help="Provider id to edit."),
     base_url: str | None = typer.Option(None, "--base-url", help="New base URL."),
@@ -349,12 +377,33 @@ def edit_local(
     )
 
 
+@app.command("delete")
+def delete_provider(
+    provider: str = typer.Argument(..., help="Provider id to remove."),
+    force: bool = typer.Option(False, "--force", "-f", help="Do not ask for confirmation."),
+) -> None:
+    """Delete a provider and clear it as the default if set."""
+    path = models_path()
+    if _existing_provider(path, provider) is None:
+        console.print(f"[red]provider '{provider}' is not in {path}[/red]")
+        raise typer.Exit(code=1)
+    if not force and not typer.confirm(f"Remove provider '{provider}' from {path}?"):
+        console.print("aborted")
+        return
+    remove_provider(path, provider)
+    if clear_default_if_matches(settings_path(), provider):
+        console.print(
+            f"cleared default in [bold]{settings_path()}[/bold] (was provider '{provider}')"
+        )
+    console.print(f"removed provider '{provider}' from [bold]{path}[/bold]")
+
+
 @app.command("list")
 def list_local() -> None:
     """List providers defined in models.toml."""
     path = models_path()
     if not path.exists():
-        console.print("no models.toml yet (create one with `tm models add-local`)")
+        console.print("no models.toml yet (create one with `tm models add`)")
         return
     data = read_toml(path)
     providers = data.get("providers", {})
@@ -374,10 +423,13 @@ __all__ = [
     "add_local",
     "app",
     "build_provider",
+    "clear_default_if_matches",
+    "delete_provider",
     "edit_local",
     "list_local",
     "merge_provider",
     "models_path",
+    "remove_provider",
     "set_default",
     "settings_path",
 ]

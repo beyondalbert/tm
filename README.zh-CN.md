@@ -169,9 +169,10 @@ provider（任意 OpenAI 兼容、Anthropic 或 Google 端点）或额外模型�
 交互式命令会自动写入这些文件：
 
 ```bash
-tm models add-local     # 提示输入端点、模型 id、上下文长度等
-tm models edit-local local  # 修改已有 provider（自动预填当前值）
-tm models list          # 查看 models.toml 中的 provider
+tm models add                 # 添加自定义 OpenAI 兼容模型（本地或托管均可）
+tm models edit local          # 修改已有 provider（自动预填当前值）
+tm models delete local        # 删除 provider（若为默认则一并清除）
+tm models list                # 查看 models.toml 中的 provider
 ```
 
 ```toml

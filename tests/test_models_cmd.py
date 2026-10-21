@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tm.cli.models_cmd import build_provider, merge_provider, set_default
+from tm.cli.models_cmd import (
+    build_provider,
+    clear_default_if_matches,
+    merge_provider,
+    remove_provider,
+    set_default,
+)
 from tm.config import read_toml
 
 
@@ -146,3 +152,32 @@ output_cost = 1.5
     assert model["output_cost"] == 1.5
     assert model["reasoning"] is True
 
+
+
+def test_remove_provider_keeps_others(tmp_path: Path) -> None:
+    path = tmp_path / "models.toml"
+    path.write_text(
+        '[providers.other]\napi = "openai-completions"\nbase_url = "http://h/v1"\n'
+        '[providers.local]\napi = "openai-completions"\nbase_url = "http://h2/v1"\n',
+        encoding="utf-8",
+    )
+    remove_provider(path, "local")
+    providers = read_toml(path)["providers"]
+    assert "local" not in providers
+    assert "other" in providers
+
+
+def test_clear_default_when_matching(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text('provider = "local"\nmodel = "m"\n', encoding="utf-8")
+    assert clear_default_if_matches(path, "local") is True
+    data = read_toml(path)
+    assert "provider" not in data
+    assert "model" not in data
+
+
+def test_clear_default_noop_when_not_matching(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text('provider = "other"\nmodel = "m"\n', encoding="utf-8")
+    assert clear_default_if_matches(path, "local") is False
+    assert read_toml(path)["provider"] == "other"

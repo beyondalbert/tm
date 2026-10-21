@@ -177,9 +177,10 @@ or extra models in `<config>/models.toml` (Windows:
 The interactive helper writes these files for you:
 
 ```bash
-tm models add-local     # prompts for endpoint, model id, context window, ...
-tm models edit-local local  # change an existing provider (values pre-filled)
-tm models list          # show providers defined in models.toml
+tm models add                 # add a custom OpenAI-compatible model (local or hosted)
+tm models edit local          # change an existing provider (values pre-filled)
+tm models delete local        # remove a provider (and clear it as the default if set)
+tm models list                # show providers defined in models.toml
 ```
 
 ```toml
