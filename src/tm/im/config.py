@@ -93,6 +93,8 @@ class ImSettings:
     owner_handles: list[str] = field(default_factory=list)
     reply_max_chars: int = 4000
     sync_limit: int = 200
+    ack_reply: str = "收到，正在处理：{preview}"
+    ack_preview_chars: int = 60
     client_version: str = "tm"
     provider: str | None = None
     model: str | None = None
@@ -183,6 +185,8 @@ def load_im_settings(path: Path | None = None, *, apply_env: bool = True) -> ImS
             settings.respond_in_groups = _normalize_choice(
                 env, RESPOND_IN_GROUPS, settings.respond_in_groups
             )
+        if env := os.environ.get("TM_IM_ACK_REPLY"):
+            settings.ack_reply = env
 
     settings.allow_tools = _normalize_choice(settings.allow_tools, ALLOW_TOOLS, "full")
     settings.respond_in_groups = _normalize_choice(
@@ -194,7 +198,7 @@ def load_im_settings(path: Path | None = None, *, apply_env: bool = True) -> ImS
     return settings
 
 
-_INT_FIELDS = ("reply_max_chars", "sync_limit")
+_INT_FIELDS = ("reply_max_chars", "sync_limit", "ack_preview_chars")
 _CHOICE_FIELDS = {
     "allow_tools": ALLOW_TOOLS,
     "respond_in_groups": RESPOND_IN_GROUPS,

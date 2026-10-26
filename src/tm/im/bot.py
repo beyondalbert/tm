@@ -135,8 +135,9 @@ class ImBot:
                 self._advance(message)
                 return
 
-            agent = self._agent(message.conv_id)
             self.log(f"<- [{message.conv_id}#{message.seq}] {text}")
+            await self._send_ack(message, text)
+            agent = self._agent(message.conv_id)
             await agent.prompt(text)
             reply = self._last_reply(agent)
             if reply:
@@ -174,6 +175,29 @@ class ImBot:
     def _advance(self, message: ImMessage) -> None:
         self.state.set_last_seq(message.conv_id, message.seq)
         self.state.save()
+
+    async def _send_ack(self, message: ImMessage, text: str) -> None:
+        """Reply immediately so the sender sees the message was received.
+
+        The agent turn can take a while (or fail); this acknowledgment is
+        best-effort and must never prevent the real reply.
+        """
+        ack = self._ack_text(text)
+        if not ack:
+            return
+        with contextlib.suppress(ImApiError):
+            # _send already logged the failure; the real reply may still work.
+            await self._send(message.conv_id, message.seq, ack)
+
+    def _ack_text(self, text: str) -> str:
+        template = (self.settings.ack_reply or "").strip()
+        if not template:
+            return ""
+        preview = " ".join(text.split())
+        limit = max(1, int(self.settings.ack_preview_chars))
+        if len(preview) > limit:
+            preview = preview[: limit - 1].rstrip() + "…"
+        return template.replace("{preview}", preview)
 
     async def _send(self, conv_id: int, seq: int, text: str) -> None:
         try:

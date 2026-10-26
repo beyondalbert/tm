@@ -48,11 +48,14 @@ with `tm im config new`. See [section 4](#4-multiple-accounts-on-one-machine).
 | `owner_handles` | `[]` | Handles accepted with `allowlist` |
 | `reply_max_chars` | `4000` | Reply chunk size (tm_im caps text at 5000) |
 | `sync_limit` | `200` | Realtime `SYNC` page size |
+| `ack_reply` | `收到，正在处理：{preview}` | Immediate acknowledgment sent before the agent runs; `{preview}` is the incoming text, empty disables it |
+| `ack_preview_chars` | `60` | Max characters of `{preview}` |
 | `provider` | – | Model provider override for replies |
 | `model` | – | Model override for replies |
 
 Environment variables override the file: `TM_IM_BASE_URL`, `TM_IM_API_KEY`,
-`TM_IM_TCP_ADDR`, `TM_IM_ALLOW_TOOLS`, `TM_IM_RESPOND_IN_GROUPS`.
+`TM_IM_TCP_ADDR`, `TM_IM_ALLOW_TOOLS`, `TM_IM_RESPOND_IN_GROUPS`,
+`TM_IM_ACK_REPLY`.
 
 ### `tm im login`
 
@@ -82,6 +85,18 @@ stops it. `tm im run` is also what the background command launches internally.
 Options (shared with `start`): `--base-url --api-key --tcp-addr --ws-url
 --allow-tools --respond-in-groups --provider/-p --model/-m --lang --config
 --workers`.
+
+### Immediate acknowledgment
+
+Every accepted message is acknowledged at once with `ack_reply`, before the
+agent turn starts, so the sender sees the bot is connected instead of waiting
+in silence. `{preview}` is replaced with the incoming text (whitespace
+collapsed, cut to `ack_preview_chars`). Set it to an empty string to disable it:
+
+```
+tm im config set ack_reply="收到：{preview}"
+tm im config set ack_reply=      # disable
+```
 
 ### Realtime endpoint
 
@@ -196,7 +211,7 @@ allows. Replies are sent as plain text and split at `reply_max_chars`.
 | Symptom | Cause / fix |
 |---|---|
 | `kicked (reason=1) signed in from another device` and it stops | The same tm_im account is connected elsewhere (e.g. the web client). tm_im allows one connection per account. Use a **dedicated Agent** account for the bot, or close the other session. |
-| Messages from someone get no reply | For a DM, the two accounts must be friends, otherwise the server returns `40003` and the bot never sees it. Make them friends, or use a group. Also check `respond_in_groups` for group chats. |
+| Messages from someone get no reply | For a DM, the two accounts must be friends, otherwise the server returns `40003` and the bot never sees it. Make them friends, or use a group. Also check `respond_in_groups` for group chats. If the bot is connected, `ack_reply` should arrive immediately; no ack at all means the message never reached the bot. |
 | `No such option: --base-url` (or `im` treated as a prompt) | An old `uv tool` launcher. Refresh it: `uv tool install --force "the-machine[tui]"` (close running `tm` first). |
 | `start` fails / uv tool dir "access denied" | A running `tm` holds the tool directory. Close it, then reinstall. |
 | Friend requests are ignored | `auto_accept_friends=none` (the default). Set `allowlist` with `owner_handles`, or `all`. |

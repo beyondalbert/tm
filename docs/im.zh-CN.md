@@ -47,11 +47,13 @@ tm im stop  --config alice                     # 停止
 | `owner_handles` | `[]` | `allowlist` 模式下自动接受的好友 |
 | `reply_max_chars` | `4000` | 回复分片大小（tm_im 文字上限 5000） |
 | `sync_limit` | `200` | 实时 `SYNC` 分页大小 |
+| `ack_reply` | `收到，正在处理：{preview}` | 收到消息后、Agent 处理前立即回复的确认句；`{preview}` 为收到的内容，留空则关闭 |
+| `ack_preview_chars` | `60` | `{preview}` 最多保留的字符数 |
 | `provider` | – | 回复所用 provider 覆盖 |
 | `model` | – | 回复所用模型覆盖 |
 
 环境变量可覆盖文件：`TM_IM_BASE_URL`、`TM_IM_API_KEY`、`TM_IM_TCP_ADDR`、
-`TM_IM_ALLOW_TOOLS`、`TM_IM_RESPOND_IN_GROUPS`。
+`TM_IM_ALLOW_TOOLS`、`TM_IM_RESPOND_IN_GROUPS`、`TM_IM_ACK_REPLY`。
 
 ### `tm im login`
 
@@ -80,6 +82,17 @@ tm im run [--config <名字|路径>]
 选项（与 `start` 相同）：`--base-url --api-key --tcp-addr --ws-url
 --allow-tools --respond-in-groups --provider/-p --model/-m --lang --config
 --workers`。
+
+### 即时确认
+
+每条通过过滤的消息都会在 Agent 处理前先用 `ack_reply` 回一句，避免对方一直
+等不到任何响应。`{preview}` 会替换为收到的内容（合并空白，按 `ack_preview_chars`
+截断）。设为空字符串可关闭：
+
+```
+tm im config set ack_reply="收到：{preview}"
+tm im config set ack_reply=      # 关闭
+```
 
 ### 实时端点
 
@@ -190,7 +203,7 @@ tm_im 输入是**不可信的**：任何能给 bot 发消息的人都能让它�
 | 现象 | 原因 / 处理 |
 |---|---|
 | `kicked (reason=1) signed in from another device` 后停止 | 同一 tm_im 账号在别处也登录了（如网页端）。tm_im 每账号只允许一条连接。给 bot 用**专用 Agent** 账号，或关闭另一处会话。 |
-| 别人发的消息没回复 | 单聊要求双方是好友，否则服务器返回 `40003`，bot 收不到。先加好友，或改用群聊。群聊还要检查 `respond_in_groups`。 |
+| 别人发的消息没回复 | 单聊要求双方是好友，否则服务器返回 `40003`，bot 收不到。先加好友，或改用群聊。群聊还要检查 `respond_in_groups`。若连接正常，`ack_reply` 会立即回一句；连确认句都没有，说明消息根本没到 bot。 |
 | `No such option: --base-url`（或 `im` 被当成 prompt） | 旧的 `uv tool` 启动器。刷新：`uv tool install --force "the-machine[tui]"`（先退出所有 `tm`）。 |
 | `start` 失败 / uv tool 目录 "access denied" | 有 `tm` 正在运行占用了工具目录。退出后重装。 |
 | 好友请求被忽略 | 默认 `auto_accept_friends=none`。设为 `allowlist` 并配 `owner_handles`，或设为 `all`。 |

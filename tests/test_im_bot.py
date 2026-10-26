@@ -15,7 +15,7 @@ from tm.ai.types import (
 from tm.core.agent import Agent
 from tm.core.session import Session, SessionManager
 from tm.im.bot import ImBot
-from tm.im.client import ImClient
+from tm.im.client import ImApiError, ImClient
 from tm.im.config import ImSettings
 from tm.im.protocol import ImMessage
 from tm.im.state import ImState
@@ -64,6 +64,7 @@ class FakeClient(ImClient):
         self.reads: list[tuple[int, int]] = []
         self.types: dict[int, int] = {}
         self._default_type = conv_type
+        self.fail_send_prefix: str | None = None
 
     async def me(self) -> dict:
         return {"actor_id": 2002, "handle": "weather_bot"}
@@ -82,6 +83,8 @@ class FakeClient(ImClient):
         client_msg_id: str | None = None,
         reply_to: int | None = None,
     ) -> dict:
+        if self.fail_send_prefix and text.startswith(self.fail_send_prefix):
+            raise ImApiError(50001, "send rejected")
         self.sent.append((conv_id, text))
         return {"seq": 1}
 
@@ -99,10 +102,11 @@ def _bot(
     text: str = "pong",
     conv_type: int = 1,
     respond: str = "always",
+    ack_reply: str = "",
     factory=None,
     log: list[str] | None = None,
 ) -> tuple[ImBot, FakeClient]:
-    settings = ImSettings(respond_in_groups=respond)
+    settings = ImSettings(respond_in_groups=respond, ack_reply=ack_reply)
     client = FakeClient(conv_type)
     state = ImState(tmp_path / "state.json")
     manager = SessionManager(tmp_path / "sessions")
@@ -178,6 +182,33 @@ async def test_chunks_long_reply(tmp_path: Path) -> None:
     await bot.process(_msg(2))
     assert len(client.sent) >= 3
     assert all(len(text) <= 20 for _, text in client.sent)
+
+
+async def test_sends_ack_before_reply(tmp_path: Path) -> None:
+    bot, client = _bot(tmp_path, ack_reply="收到：{preview}")
+    await bot.process(_msg(2, text="帮我查一下天气"))
+    assert client.sent == [(1001, "收到：帮我查一下天气"), (1001, "pong")]
+
+
+async def test_ack_truncates_long_preview(tmp_path: Path) -> None:
+    bot, client = _bot(tmp_path, ack_reply="got: {preview}")
+    bot.settings.ack_preview_chars = 6
+    await bot.process(_msg(2, text="one two three"))
+    assert client.sent[0] == (1001, "got: one t…")
+
+
+async def test_ack_is_skipped_when_disabled(tmp_path: Path) -> None:
+    bot, client = _bot(tmp_path, ack_reply="")
+    await bot.process(_msg(2))
+    assert client.sent == [(1001, "pong")]
+
+
+async def test_ack_failure_does_not_block_reply(tmp_path: Path) -> None:
+    bot, client = _bot(tmp_path, ack_reply="收到：{preview}")
+    client.fail_send_prefix = "收到"
+    await bot.process(_msg(2))
+    assert client.sent == [(1001, "pong")]
+    assert bot.state.last_seq(1001) == 2
 
 
 async def test_session_is_reused(tmp_path: Path) -> None:

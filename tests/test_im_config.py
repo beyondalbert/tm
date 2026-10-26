@@ -29,7 +29,10 @@ def test_env_overrides_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "im.toml").write_text('api_key = "file"\n', encoding="utf-8")
     monkeypatch.setenv("TM_IM_API_KEY", "env")
-    assert load_im_settings().api_key == "env"
+    monkeypatch.setenv("TM_IM_ACK_REPLY", "收到")
+    settings = load_im_settings()
+    assert settings.api_key == "env"
+    assert settings.ack_reply == "收到"
 
 
 def test_unknown_choice_falls_back(tmp_path: Path, monkeypatch) -> None:
@@ -87,6 +90,8 @@ def test_apply_setting_types() -> None:
     assert settings.model == "deepseek-chat"
     assert apply_setting(settings, "reply_max_chars=1000") == "reply_max_chars"
     assert settings.reply_max_chars == 1000
+    assert apply_setting(settings, "ack_preview_chars=20") == "ack_preview_chars"
+    assert settings.ack_preview_chars == 20
     assert apply_setting(settings, "owner_handles=@a, @b") == "owner_handles"
     assert settings.owner_handles == ["@a", "@b"]
     assert apply_setting(settings, "allow-tools=read_only") == "allow_tools"
