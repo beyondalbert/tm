@@ -8,6 +8,7 @@ dist/
 
 # uv
 .venv/
+.venv*/
 
 # Tooling
 .pytest_cache/

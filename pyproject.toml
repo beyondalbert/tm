@@ -70,7 +70,9 @@ build-backend = "hatchling.build"
 packages = ["src/tm"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/tests"]
+# Local virtualenvs must never leak into the sdist; one once added ~36 MB
+# of interpreter-version-specific dependencies.
+exclude = ["/tests", "/.venv*", "/dist"]
 
 [tool.ruff]
 line-length = 100
