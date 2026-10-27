@@ -784,7 +784,7 @@ async def test_reasoning_is_folded_then_expandable() -> None:
         assert "deep thought" in str(widget._thinking.render())
 
 
-def test_permission_answer_is_idempotent() -> None:
+async def test_permission_answer_is_idempotent() -> None:
     from tm.tui.app import PermissionScreen
 
     screen = PermissionScreen("shell: ls", "default policy")
