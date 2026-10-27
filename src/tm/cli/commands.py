@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
 
 from tm.ai.registry import Registry, RegistryError
 from tm.ai.types import AssistantMessage, Message, ToolResultMessage, UserMessage
@@ -27,7 +26,7 @@ if TYPE_CHECKING:
     from tm.permissions.approval import SessionApprover
 
 Emit = Callable[[str], None]
-SessionPicker = Callable[[list[SessionInfo]], Awaitable[SessionInfo | None]]
+SessionPicker = Callable[[List[SessionInfo]], Awaitable[Optional[SessionInfo]]]
 
 _SPEC_NAMES = (
     "help",

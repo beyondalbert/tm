@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from rich.console import Console
 
+from tm.compat import to_thread
 from tm.permissions.actions import Action, ActionKind
 
 
@@ -77,7 +77,7 @@ class ConsoleApprover:
         )
         prompt = f"  allow? [y]es once / [a]lways {self._scope(action)} / [n]o: "
         try:
-            answer = await asyncio.to_thread(input, prompt)
+            answer = await to_thread(input, prompt)
         except EOFError:
             return ApprovalOutcome(allowed=False)
         normalized = answer.strip().lower()

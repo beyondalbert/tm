@@ -11,13 +11,13 @@ import contextlib
 import hashlib
 import os
 import re
-import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import tomli_w
 
+from tm.compat import TOMLDecodeError
 from tm.config import config_dir, read_toml
 
 ALLOW_TOOLS = ("none", "read_only", "full")
@@ -170,7 +170,7 @@ def load_im_settings(path: Path | None = None, *, apply_env: bool = True) -> ImS
     settings = ImSettings()
     target = path or im_path()
     if target.exists():
-        with contextlib.suppress(OSError, tomllib.TOMLDecodeError):
+        with contextlib.suppress(OSError, TOMLDecodeError):
             _from_mapping(settings, read_toml(target))
 
     if apply_env:

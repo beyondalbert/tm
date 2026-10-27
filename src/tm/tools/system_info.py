@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from pydantic import BaseModel
 
+from tm.compat import to_thread
 from tm.host import detect_host, render_environment
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 
@@ -27,7 +26,7 @@ class SystemInfoTool(Tool[SystemInfoParams]):
         self, call_id: str, args: SystemInfoParams, ctx: ToolContext
     ) -> ToolResult:
         # Host probing shells out synchronously; keep it off the event loop.
-        text = await asyncio.to_thread(
+        text = await to_thread(
             render_environment, detect_host(), full=args.full
         )
         return text_result(text)

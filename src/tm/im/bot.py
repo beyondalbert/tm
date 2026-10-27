@@ -16,8 +16,8 @@ import asyncio
 import contextlib
 import json
 import time
-from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from tm.ai.types import AssistantMessage
 from tm.core.agent import Agent

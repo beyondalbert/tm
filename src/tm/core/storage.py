@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, Union
 
 from tm.ai.types import Usage, now_ms
 
@@ -233,14 +233,14 @@ class ListDeleteWrite:
     op: str = "delete"
 
 
-Write = (
-    EntryWrite
-    | UsageWrite
-    | ValueSetWrite
-    | ValueDeleteWrite
-    | ListAppendWrite
-    | ListDeleteWrite
-)
+Write = Union[
+    EntryWrite,
+    UsageWrite,
+    ValueSetWrite,
+    ValueDeleteWrite,
+    ListAppendWrite,
+    ListDeleteWrite,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ class Storage:
             seqs.append(seq)
 
         # All validation passed: apply and persist.
-        for _write, record in zip(writes, committed, strict=True):
+        for record in committed:
             self._apply_committed(record)
         self._seq = first_seq + len(writes) - 1
         self._persist(committed)

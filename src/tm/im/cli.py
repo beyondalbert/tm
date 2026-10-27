@@ -9,6 +9,7 @@ import shlex
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -141,24 +142,24 @@ def _select_tools(mode: str) -> list:
 # ---------------------------------------------------------------------------
 @app.command()
 def run(
-    base_url: str | None = typer.Option(None, "--base-url", help="REST base URL."),
-    api_key: str | None = typer.Option(
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="REST base URL."),
+    api_key: Optional[str] = typer.Option(
         None, "--api-key", help="Agent api_key (prefer TM_IM_API_KEY)."
     ),
-    tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
-    ws_url: str | None = typer.Option(
+    tcp_addr: Optional[str] = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    ws_url: Optional[str] = typer.Option(
         None, "--ws-url", help="Realtime WebSocket URL (e.g. tmim.stkg.ltd/ws)."
     ),
-    allow_tools: str | None = typer.Option(
+    allow_tools: Optional[str] = typer.Option(
         None, "--allow-tools", help="none | read_only | full."
     ),
-    respond_in_groups: str | None = typer.Option(
+    respond_in_groups: Optional[str] = typer.Option(
         None, "--respond-in-groups", help="mention | always | never."
     ),
-    provider: str | None = typer.Option(None, "--provider", "-p", help="Provider id."),
-    model: str | None = typer.Option(None, "--model", "-m", help="Model id or pattern."),
-    lang: str | None = typer.Option(None, "--lang", help="UI language: en, zh, or auto."),
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="Provider id."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model id or pattern."),
+    lang: Optional[str] = typer.Option(None, "--lang", help="UI language: en, zh, or auto."),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to an im.toml."),
     workers: int = typer.Option(2, "--workers", help="Concurrent conversations."),
 ) -> None:
     config = resolve_config(config)
@@ -338,7 +339,7 @@ def _client(config: str | None, overrides: dict | None = None) -> ImClient:
 
 @app.command()
 def me(
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
     """Show the identity of the configured agent."""
     client = _client(config)
@@ -352,7 +353,7 @@ def me(
 
 @app.command()
 def conversations(
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
     """List the agent's conversations."""
     client = _client(config)
@@ -372,8 +373,8 @@ def conversations(
 @app.command()
 def send(
     conv_id: int = typer.Argument(..., help="Conversation id."),
-    text: list[str] = typer.Argument(..., help="Message text."),
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    text: List[str] = typer.Argument(..., help="Message text."),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
     """Send a text message to a conversation."""
     client = _client(config)
@@ -388,13 +389,13 @@ def send(
 
 @app.command()
 def login(
-    api_key: str | None = typer.Option(None, "--api-key", help="Agent api_key."),
-    base_url: str | None = typer.Option(None, "--base-url", help="REST base URL."),
-    tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
-    ws_url: str | None = typer.Option(
+    api_key: Optional[str] = typer.Option(None, "--api-key", help="Agent api_key."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="REST base URL."),
+    tcp_addr: Optional[str] = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    ws_url: Optional[str] = typer.Option(
         None, "--ws-url", help="Realtime WebSocket URL (e.g. tmim.stkg.ltd/ws)."
     ),
-    config: str | None = typer.Option(None, "--config", help="Config name or path."),
+    config: Optional[str] = typer.Option(None, "--config", help="Config name or path."),
 ) -> None:
     """Store the agent api_key and endpoint in a config file.
 
@@ -449,24 +450,24 @@ def _forward_start_args(options: dict, workers: int) -> list[str]:
 
 @app.command()
 def start(
-    base_url: str | None = typer.Option(None, "--base-url", help="REST base URL."),
-    api_key: str | None = typer.Option(
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="REST base URL."),
+    api_key: Optional[str] = typer.Option(
         None, "--api-key", help="Agent api_key (prefer TM_IM_API_KEY)."
     ),
-    tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
-    ws_url: str | None = typer.Option(
+    tcp_addr: Optional[str] = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    ws_url: Optional[str] = typer.Option(
         None, "--ws-url", help="Realtime WebSocket URL (e.g. tmim.stkg.ltd/ws)."
     ),
-    allow_tools: str | None = typer.Option(
+    allow_tools: Optional[str] = typer.Option(
         None, "--allow-tools", help="none | read_only | full."
     ),
-    respond_in_groups: str | None = typer.Option(
+    respond_in_groups: Optional[str] = typer.Option(
         None, "--respond-in-groups", help="mention | always | never."
     ),
-    provider: str | None = typer.Option(None, "--provider", "-p", help="Provider id."),
-    model: str | None = typer.Option(None, "--model", "-m", help="Model id or pattern."),
-    lang: str | None = typer.Option(None, "--lang", help="UI language: en, zh, or auto."),
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="Provider id."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model id or pattern."),
+    lang: Optional[str] = typer.Option(None, "--lang", help="UI language: en, zh, or auto."),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to an im.toml."),
     workers: int = typer.Option(2, "--workers", help="Concurrent conversations."),
 ) -> None:
     """Start ``tm im run`` in the background (detached)."""
@@ -505,7 +506,7 @@ def start(
 
 @app.command()
 def stop(
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
     """Stop the background ``tm im`` process for a config."""
     pid = daemon.stop_background(instance_dir(resolve_config(config)))
@@ -517,7 +518,7 @@ def stop(
 
 @app.command()
 def status(
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
     """Show whether the background ``tm im`` process is running."""
     base = instance_dir(resolve_config(config))
@@ -533,7 +534,7 @@ def status(
 def logs(
     lines: int = typer.Option(40, "--lines", "-n", help="Number of lines to show."),
     follow: bool = typer.Option(False, "--follow", "-f", help="Keep printing new lines."),
-    config: str | None = typer.Option(None, "--config", help="Path to an im.toml."),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to an im.toml."),
 ) -> None:
     """Show the background log for a config (``<config>/im[.instances/...]/im.log``)."""
     base = instance_dir(resolve_config(config))
@@ -570,11 +571,11 @@ def _validate(value: str, allowed: tuple[str, ...], flag: str) -> str:
 def config_new(
     name: str = typer.Argument(..., help="Config name (stored at <config>/configs/<name>.toml)."),
     base_url: str = typer.Option("http://localhost:8080/v1", "--base-url", help="REST base URL."),
-    api_key: str | None = typer.Option(
+    api_key: Optional[str] = typer.Option(
         None, "--api-key", help="Agent api_key (prompted if omitted)."
     ),
-    tcp_addr: str | None = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
-    ws_url: str | None = typer.Option(
+    tcp_addr: Optional[str] = typer.Option(None, "--tcp-addr", help="Realtime host:port."),
+    ws_url: Optional[str] = typer.Option(
         None, "--ws-url", help="Realtime WebSocket URL (e.g. tmim.stkg.ltd/ws)."
     ),
     allow_tools: str = typer.Option("full", "--allow-tools", help="none | read_only | full."),
@@ -584,9 +585,9 @@ def config_new(
     auto_accept_friends: str = typer.Option(
         "none", "--auto-accept-friends", help="none | allowlist | all."
     ),
-    provider: str | None = typer.Option(None, "--provider", "-p", help="Provider id."),
-    model: str | None = typer.Option(None, "--model", "-m", help="Model id or pattern."),
-    owner: list[str] | None = typer.Option(
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="Provider id."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model id or pattern."),
+    owner: Optional[List[str]] = typer.Option(
         None, "--owner", help="Owner handle for allowlist (repeatable)."
     ),
     force: bool = typer.Option(False, "--force", help="Overwrite an existing config."),
@@ -667,10 +668,10 @@ def _target_config_path(config: str | None) -> Path:
 
 @config_app.command("set")
 def config_set(
-    assignments: list[str] = typer.Argument(
+    assignments: List[str] = typer.Argument(
         ..., help="One or more key=value assignments (e.g. model=deepseek-chat)."
     ),
-    config: str | None = typer.Option(
+    config: Optional[str] = typer.Option(
         None, "--config", help="Config name or path (default: im.toml)."
     ),
 ) -> None:
@@ -693,7 +694,7 @@ def config_set(
 
 @config_app.command("edit")
 def config_edit(
-    config: str | None = typer.Option(
+    config: Optional[str] = typer.Option(
         None, "--config", help="Config name or path (default: im.toml)."
     ),
 ) -> None:

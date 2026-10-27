@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Literal
 
 from pydantic import BaseModel
 
+from tm.compat import to_thread
 from tm.host import Host, detect_host
 from tm.safety import new_change
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
@@ -39,15 +39,15 @@ class ServiceTool(Tool[ServiceParams]):
     ) -> ToolResult:
         host = self._host_instance()
         if args.action == "status":
-            active, output = await asyncio.to_thread(host.service_status, args.name)
+            active, output = await to_thread(host.service_status, args.name)
             state = "active" if active else "inactive"
             return text_result(f"{args.name}: {state}\n{output}")
 
         if ctx.dry_run:
             return text_result(f"[dry-run] would {args.action} service {args.name}")
 
-        was_active, _ = await asyncio.to_thread(host.service_status, args.name)
-        ok, output = await asyncio.to_thread(host.service_action, args.name, args.action)
+        was_active, _ = await to_thread(host.service_status, args.name)
+        ok, output = await to_thread(host.service_action, args.name, args.action)
         if ctx.journal is not None:
             ctx.journal.record(
                 new_change(

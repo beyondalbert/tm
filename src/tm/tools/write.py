@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from tm.compat import to_thread
 from tm.safety import record_file_change
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.path_utils import resolve_path
@@ -35,11 +35,11 @@ class WriteTool(Tool[WriteParams]):
         old: bytes | None = None
         if existed:
             try:
-                old = await asyncio.to_thread(path.read_bytes)
+                old = await to_thread(path.read_bytes)
             except OSError:
                 old = None
         try:
-            await asyncio.to_thread(_write_text, path, args.content)
+            await to_thread(_write_text, path, args.content)
         except OSError as exc:
             return text_result(f"Could not write {path}: {exc}", is_error=True)
         record_file_change(

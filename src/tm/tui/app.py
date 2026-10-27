@@ -10,6 +10,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Optional
 
 from rich.console import Console
 from rich.markdown import Markdown as RichMarkdown
@@ -412,7 +413,7 @@ class PermissionScreen(ModalScreen[ApprovalOutcome]):
         self._answer(ApprovalOutcome(allowed=False))
 
 
-class SessionScreen(ModalScreen[SessionInfo | None]):
+class SessionScreen(ModalScreen[Optional[SessionInfo]]):
     """Modal listing saved sessions to resume."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]

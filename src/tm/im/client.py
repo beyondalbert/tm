@@ -114,8 +114,9 @@ class ImClient:
         attempt = 0
         while True:
             try:
-                return await asyncio.to_thread(
-                    self._sync_request, method, path, body, params
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(
+                    None, self._sync_request, method, path, body, params
                 )
             except ImApiError as error:
                 if not error.retryable or attempt >= self.max_retries:

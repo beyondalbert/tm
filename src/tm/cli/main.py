@@ -7,6 +7,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -27,6 +28,7 @@ from tm.ai.types import (
 from tm.ai.user_models import UserModelError, load_presets
 from tm.cli.commands import CommandContext, ExitSignal, SlashCommands, _format_time
 from tm.cli.console_ui import ConsoleAgentUI
+from tm.compat import to_thread
 from tm.config import (
     Settings,
     config_dir,
@@ -126,7 +128,7 @@ async def _chat_repl(
     console.print(f"[bold]TM[/bold] {__version__} | {model.provider}/{model.id} | /exit to quit")
     while True:
         try:
-            line = await asyncio.to_thread(input, "you> ")
+            line = await to_thread(input, "you> ")
         except (EOFError, KeyboardInterrupt):
             console.print()
             break
@@ -407,7 +409,7 @@ def _pick_session_console(
 
 
 async def _console_picker(infos: list[SessionInfo]) -> SessionInfo | None:
-    return await asyncio.to_thread(_pick_session_console, infos, console)
+    return await to_thread(_pick_session_console, infos, console)
 
 
 def _startup_banner(model: Model, resources: Resources, no_context_files: bool) -> str:
@@ -550,7 +552,7 @@ async def _agent_repl(
     )
     while True:
         try:
-            line = await asyncio.to_thread(input, "you> ")
+            line = await to_thread(input, "you> ")
         except (EOFError, KeyboardInterrupt):
             console.print()
             break
@@ -615,9 +617,9 @@ def _resolve_session(
 # ---------------------------------------------------------------------------
 @app.command()
 def main(
-    prompt: list[str] | None = typer.Argument(None, help="Prompt. Omit for a REPL."),
-    provider: str | None = typer.Option(None, "--provider", "-p", help="Provider id."),
-    model: str | None = typer.Option(None, "--model", "-m", help="Model id or pattern."),
+    prompt: Optional[List[str]] = typer.Argument(None, help="Prompt. Omit for a REPL."),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="Provider id."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model id or pattern."),
     no_tools: bool = typer.Option(False, "--no-tools", "-nt", help="Disable tools."),
     read_only: bool = typer.Option(False, "--read-only", help="Only read-only tools."),
     no_python: bool = typer.Option(
@@ -648,7 +650,7 @@ def main(
     all_sessions: bool = typer.Option(
         False, "--all-sessions", help="Include sessions from other directories."
     ),
-    session_path: str | None = typer.Option(None, "--session", help="Open a session file."),
+    session_path: Optional[str] = typer.Option(None, "--session", help="Open a session file."),
     no_session: bool = typer.Option(False, "--no-session", help="Do not persist this session."),
     no_context_files: bool = typer.Option(
         False, "--no-context-files", "-nc", help="Do not load AGENTS.md/CLAUDE.md."
@@ -659,10 +661,10 @@ def main(
     no_auto_compact: bool = typer.Option(
         False, "--no-auto-compact", help="Disable automatic context compaction."
     ),
-    max_turns: int | None = typer.Option(
+    max_turns: Optional[int] = typer.Option(
         None, "--max-turns", help="Max agent turns per prompt (default from settings)."
     ),
-    max_retries: int | None = typer.Option(
+    max_retries: Optional[int] = typer.Option(
         None, "--max-retries", help="Retries for transient network errors (default from settings)."
     ),
     telemetry_flag: bool = typer.Option(
@@ -684,11 +686,11 @@ def main(
     no_approve: bool = typer.Option(
         False, "--no-approve", "-na", help="Ignore project-local files for this run."
     ),
-    login: str | None = typer.Option(
+    login: Optional[str] = typer.Option(
         None, "--login", help="Store an API key for a provider and exit."
     ),
     list_models: bool = typer.Option(False, "--list-models", help="List known models."),
-    lang: str | None = typer.Option(
+    lang: Optional[str] = typer.Option(
         None, "--lang", help="UI language: en, zh, or auto (default from settings)."
     ),
     update: bool = typer.Option(

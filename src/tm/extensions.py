@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
-from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Coroutine
 
 from tm.core.events import AgentEvent
 from tm.tools.base import Tool

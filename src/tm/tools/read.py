@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
-
 from pydantic import BaseModel
 
+from tm.compat import to_thread
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.path_utils import resolve_path
 from tm.tools.truncate import format_size, truncate_head
@@ -32,7 +31,7 @@ class ReadTool(Tool[ReadParams]):
         if path.is_dir():
             return text_result(f"Path is a directory: {path}", is_error=True)
         try:
-            data = await asyncio.to_thread(path.read_bytes)
+            data = await to_thread(path.read_bytes)
         except OSError as exc:
             return text_result(f"Could not read {path}: {exc}", is_error=True)
 

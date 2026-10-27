@@ -7,9 +7,11 @@ streaming event union. Providers translate these to/from their wire formats.
 from __future__ import annotations
 
 import time
-from typing import Annotated, Literal
+from typing import Literal, Union
 
 from pydantic import BaseModel, Field
+
+from tm.compat import Annotated
 
 StopReason = Literal["stop", "length", "tool_use", "error", "aborted"]
 
@@ -43,7 +45,7 @@ class ImageContent(BaseModel):
 
 
 Content = Annotated[
-    TextContent | ThinkingContent | ImageContent,
+    Union[TextContent, ThinkingContent, ImageContent],
     Field(discriminator="type"),
 ]
 
@@ -90,7 +92,7 @@ class ToolResultMessage(BaseModel):
 
 
 Message = Annotated[
-    UserMessage | AssistantMessage | ToolResultMessage,
+    Union[UserMessage, AssistantMessage, ToolResultMessage],
     Field(discriminator="role"),
 ]
 

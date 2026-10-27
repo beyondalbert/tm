@@ -26,12 +26,12 @@ overrides models on it.
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 from typing import Any
 
 from tm.ai.catalog import PRESETS, ProviderPreset
 from tm.ai.types import Model
+from tm.compat import TOMLDecodeError
 from tm.config import read_toml
 
 DEFAULT_CONTEXT_WINDOW = 128_000
@@ -123,7 +123,7 @@ def load_presets(config_dir: Path | None) -> dict[str, ProviderPreset]:
         return presets
     try:
         data = read_toml(path)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, TOMLDecodeError) as exc:
         raise UserModelError(f"could not read {path}: {exc}") from exc
 
     providers = data.get("providers", {})

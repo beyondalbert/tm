@@ -9,8 +9,8 @@ would otherwise stop.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 
 from tm.ai.event_stream import EventStream
 from tm.ai.providers.base import StreamOptions

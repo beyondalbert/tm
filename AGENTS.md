@@ -29,6 +29,24 @@ adapted from Pi's `AGENTS.md`, tuned for this Python/uv project.
 - Do not add backward compatibility shims unless the user asks.
 - Ask before removing functionality that appears intentional.
 
+## Python Compatibility
+
+TM supports Python 3.8 onward (`requires-python = ">=3.8"`), so newer syntax and
+stdlib additions need care:
+
+- `from __future__ import annotations` lets ordinary annotations use `X | None`
+  and `list[X]` on every supported version. Keep that style.
+- Anything evaluated at runtime must not use PEP 604/585. That covers module-level
+  type aliases, generic base classes, and pydantic model fields (pydantic evaluates
+  them; on 3.8/3.9 `eval-type-backport` provides PEP 604 support). Use
+  `typing.Optional`/`Union`/`List`/`Dict` in those places.
+- Import `Annotated`, `StrEnum`, TOML reading, and `to_thread` from `tm.compat`
+  instead of branching on the interpreter version.
+- Do not create `asyncio.Event`, `Lock`, or `Queue` when constructing objects that
+  may be built outside a running loop; create them lazily on first await.
+- CI runs the test suite on 3.8 through 3.12; ruff targets `py38` and mypy targets
+  `3.10` (mypy 2.x no longer accepts older targets).
+
 ## Commands
 
 - After code changes (not docs): `uv run ruff check src tests` and

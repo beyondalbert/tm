@@ -23,12 +23,12 @@ an :class:`Operation` that drives transitions through a :class:`Store`.
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
 from tm.ai.types import now_ms
+from tm.compat import StrEnum
 from tm.core.store import Store, operation_result, operation_state
 
 

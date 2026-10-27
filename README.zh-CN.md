@@ -76,7 +76,7 @@ tm --login deepseek        # 保存 API Key（输入可见）
 tm "list the files in this folder"
 ```
 
-需要 Python 3.11+，uv 会自动安装合适的解释器。
+需要 Python 3.8+，uv 会自动安装合适的解释器。Google provider 需要 Python 3.9+，TUI 需要 3.8.1+。
 
 ### 更新
 
@@ -556,7 +556,7 @@ python -m uv build                                 # wheel + sdist
   `UV_TOOL_DIR=$env:TEMP\tm-tool uv tool install ".[all]"`。
 
 `uv.lock` 已提交。CI（`.github/workflows/ci.yml`）在 Linux 上运行 ruff 与 mypy，并在
-Linux、Windows、macOS 上以 Python 3.11 与 3.12 运行测试。发布到 PyPI 见
+Linux、Windows、macOS 上以 Python 3.8 到 3.12 运行测试。发布到 PyPI 见
 [RELEASE.md](RELEASE.md)。
 
 ## 路线图

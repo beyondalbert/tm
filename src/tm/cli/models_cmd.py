@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import tomli_w
 import typer
@@ -297,21 +298,21 @@ def _configure(
 @app.command("add")
 def add_local(
     provider: str = typer.Option("local", "--provider", help="Provider id."),
-    base_url: str | None = typer.Option(
+    base_url: Optional[str] = typer.Option(
         None, "--base-url", help="OpenAI-compatible base URL (usually ends with /v1)."
     ),
-    model: str | None = typer.Option(None, "--model", help="Model id served by the endpoint."),
-    context_window: int | None = typer.Option(
+    model: Optional[str] = typer.Option(None, "--model", help="Model id served by the endpoint."),
+    context_window: Optional[int] = typer.Option(
         None, "--context-window", help="Model context window in tokens."
     ),
-    max_tokens: int | None = typer.Option(
+    max_tokens: Optional[int] = typer.Option(
         None, "--max-tokens", help="Maximum output tokens."
     ),
     reasoning: bool = typer.Option(False, "--reasoning/--no-reasoning", help="Reasoning model."),
-    api_key_env: str | None = typer.Option(
+    api_key_env: Optional[str] = typer.Option(
         None, "--api-key-env", help="Env var holding the key (omit for local servers)."
     ),
-    api_key: str | None = typer.Option(
+    api_key: Optional[str] = typer.Option(
         None, "--api-key", help="Store this API key for the provider (overrides env)."
     ),
     make_default: bool = typer.Option(
@@ -345,13 +346,13 @@ def add_local(
 @app.command("edit")
 def edit_local(
     provider: str = typer.Argument("local", help="Provider id to edit."),
-    base_url: str | None = typer.Option(None, "--base-url", help="New base URL."),
-    model: str | None = typer.Option(None, "--model", help="New model id."),
-    context_window: int | None = typer.Option(None, "--context-window"),
-    max_tokens: int | None = typer.Option(None, "--max-tokens"),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="New base URL."),
+    model: Optional[str] = typer.Option(None, "--model", help="New model id."),
+    context_window: Optional[int] = typer.Option(None, "--context-window"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens"),
     reasoning: bool = typer.Option(False, "--reasoning/--no-reasoning"),
-    api_key_env: str | None = typer.Option(None, "--api-key-env"),
-    api_key: str | None = typer.Option(
+    api_key_env: Optional[str] = typer.Option(None, "--api-key-env"),
+    api_key: Optional[str] = typer.Option(
         None, "--api-key", help="Store this API key for the provider (overrides env)."
     ),
     make_default: bool = typer.Option(True, "--default/--no-default"),

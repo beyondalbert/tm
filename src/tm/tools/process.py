@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
 
+from tm.compat import to_thread
 from tm.config import config_dir
 from tm.host import Host, detect_host
 from tm.jobs import Job, JobStore, new_job_id
@@ -99,7 +99,7 @@ class ProcessTool(Tool[ProcessParams]):
         job_id = existing.id if existing else new_job_id()
         log = store.root / f"{job_id}.log"
         try:
-            pid = await asyncio.to_thread(
+            pid = await to_thread(
                 host.spawn_detached, shell_argv(command), cwd=cwd, log_path=log
             )
         except (OSError, NotImplementedError) as exc:
@@ -128,7 +128,7 @@ class ProcessTool(Tool[ProcessParams]):
         lines = []
         for job in jobs:
             alive = (
-                await asyncio.to_thread(host.process_alive, job.pid)
+                await to_thread(host.process_alive, job.pid)
                 if job.status == "running"
                 else False
             )
@@ -142,7 +142,7 @@ class ProcessTool(Tool[ProcessParams]):
         if job is None:
             return text_result("No matching job. Use action 'list'.", is_error=True)
         host = self._host_instance()
-        alive = await asyncio.to_thread(host.process_alive, job.pid)
+        alive = await to_thread(host.process_alive, job.pid)
         if job.status == "running" and not alive:
             job.status = "exited"
             store.save(job)
@@ -166,7 +166,7 @@ class ProcessTool(Tool[ProcessParams]):
             return text_result("No matching job. Use action 'list'.", is_error=True)
         if ctx.dry_run:
             return text_result(f"[dry-run] would stop job {job.id} (pid {job.pid})")
-        await asyncio.to_thread(self._host_instance().kill_tree, job.pid)
+        await to_thread(self._host_instance().kill_tree, job.pid)
         job.status = "stopped"
         store.save(job)
         self._journal(ctx, job, "stop")
@@ -179,7 +179,7 @@ class ProcessTool(Tool[ProcessParams]):
             return text_result("No matching job. Use action 'list'.", is_error=True)
         if ctx.dry_run:
             return text_result(f"[dry-run] would restart job {job.id}")
-        await asyncio.to_thread(self._host_instance().kill_tree, job.pid)
+        await to_thread(self._host_instance().kill_tree, job.pid)
         return await self._spawn(
             job.command, job.description, Path(job.cwd), job, ctx
         )

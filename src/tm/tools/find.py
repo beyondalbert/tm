@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import fnmatch
 import shutil
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from tm.compat import to_thread
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.output import format_truncation
 from tm.tools.path_utils import resolve_path
@@ -74,7 +74,7 @@ class FindTool(Tool[FindParams]):
         else:
             # The fallback walks the tree synchronously; keep it off the event
             # loop so a large directory cannot freeze the UI.
-            results = await asyncio.to_thread(_python_find, base, args)
+            results = await to_thread(_python_find, base, args)
 
         if not results:
             return text_result(f"No files matching '{args.pattern}'")

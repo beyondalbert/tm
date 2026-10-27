@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Awaitable, Callable, Optional, Union
 
 from pydantic import BaseModel, ValidationError
 
@@ -63,11 +63,11 @@ class BeforeToolCallResult:
 
 BeforeToolCall = Callable[
     [ToolCall, "BaseModel"],
-    Awaitable[BeforeToolCallResult | None] | BeforeToolCallResult | None,
+    Union[Awaitable[Optional[BeforeToolCallResult]], BeforeToolCallResult, None],
 ]
 AfterToolCall = Callable[
     [ToolCall, "BaseModel", ToolResult],
-    Awaitable[ToolResult] | ToolResult,
+    Union[Awaitable[ToolResult], ToolResult],
 ]
 
 

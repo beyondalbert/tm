@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Literal
 
 from pydantic import BaseModel
 
+from tm.compat import to_thread
 from tm.host import Host, detect_host
 from tm.safety import new_change
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
@@ -39,15 +39,15 @@ class PackageTool(Tool[PackageParams]):
     ) -> ToolResult:
         host = self._host_instance()
         if args.action == "query":
-            installed, output = await asyncio.to_thread(host.package_query, args.name)
+            installed, output = await to_thread(host.package_query, args.name)
             state = "installed" if installed else "not installed"
             return text_result(f"{args.name}: {state}\n{output}")
 
         if ctx.dry_run:
             return text_result(f"[dry-run] would {args.action} package {args.name}")
 
-        was_installed, _ = await asyncio.to_thread(host.package_query, args.name)
-        ok, output = await asyncio.to_thread(
+        was_installed, _ = await to_thread(host.package_query, args.name)
+        ok, output = await to_thread(
             host.package_action, args.action, [args.name]
         )
         if ctx.journal is not None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import fnmatch
 import re
 import shutil
@@ -8,6 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from tm.compat import to_thread
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 from tm.tools.output import format_truncation
 from tm.tools.path_utils import resolve_path
@@ -98,7 +98,7 @@ class GrepTool(Tool[GrepParams]):
         else:
             # The fallback scans the filesystem synchronously; run it off the
             # event loop so a big tree cannot freeze the TUI or a modal.
-            shown, total = await asyncio.to_thread(_python_search, base, args)
+            shown, total = await to_thread(_python_search, base, args)
 
         if not shown:
             return text_result(f"No matches for '{args.pattern}'")

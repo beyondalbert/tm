@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import os
-import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
 
 import tomli_w
+
+from tm.compat import TOMLDecodeError, load_toml, loads_toml
 
 
 def config_dir() -> Path:
@@ -31,8 +32,8 @@ def read_toml(path: Path) -> dict:
     data = path.read_bytes()
     if data.startswith(b"\xef\xbb\xbf"):
         data = data[3:]
-    parsed = tomllib.loads(data.decode("utf-8"))
-    if not isinstance(parsed, dict):  # tomllib always returns a dict; guard for mypy
+    parsed = loads_toml(data.decode("utf-8"))
+    if not isinstance(parsed, dict):  # toml parsers always return a dict; guard for mypy
         return {}
     return parsed
 
@@ -104,7 +105,7 @@ def load_credentials() -> dict[str, str]:
         return {}
     try:
         data = read_toml(path)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, TOMLDecodeError):
         return {}
     providers = data.get("providers", {})
     if not isinstance(providers, dict):
@@ -122,8 +123,8 @@ def save_credential(provider: str, key: str) -> Path:
     if path.exists():
         try:
             with path.open("rb") as handle:
-                data = tomllib.load(handle)
-        except (OSError, tomllib.TOMLDecodeError):
+                data = load_toml(handle)
+        except (OSError, TOMLDecodeError):
             data = {}
     providers = data.get("providers")
     if not isinstance(providers, dict):

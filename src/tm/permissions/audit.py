@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from tm.permissions.actions import Action, Decision
@@ -24,7 +24,7 @@ class AuditLog:
         if self.path is None:
             return
         entry = {
-            "ts": datetime.now(UTC).isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "kind": action.kind.value,
             "target": action.target,
             "tool": action.tool_name,

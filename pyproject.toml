@@ -3,7 +3,7 @@ name = "the-machine"
 version = "0.9.7"
 description = "The Machine (TM): a local AI agent that can control your machine"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.8"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "albert", email = "beyondalbert@gmail.com" }]
@@ -13,6 +13,9 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
@@ -24,6 +27,10 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "tomli-w>=1.0",
+    "tomli>=2.0; python_version < '3.11'",
+    "typing-extensions>=4.12; python_version < '3.9'",
+    # Lets pydantic evaluate `X | None` and `list[X]` annotations on 3.8/3.9.
+    "eval-type-backport>=0.2; python_version < '3.10'",
 ]
 
 [project.urls]
@@ -33,12 +40,13 @@ Issues = "https://github.com/beyondalbert/tm/issues"
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.39"]
-google = ["google-genai>=0.3"]
-tui = ["textual>=0.80"]
+# google-genai requires Python 3.9+; textual requires 3.8.1+.
+google = ["google-genai>=0.3; python_version >= '3.9'"]
+tui = ["textual>=0.80; python_full_version >= '3.8.1'"]
 all = [
     "anthropic>=0.39",
-    "google-genai>=0.3",
-    "textual>=0.80",
+    "google-genai>=0.3; python_version >= '3.9'",
+    "textual>=0.80; python_full_version >= '3.8.1'",
 ]
 
 [project.scripts]
@@ -50,6 +58,11 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.7",
     "mypy>=1.11",
+    # tm.compat imports these on older interpreters; keep them installed so the
+    # mypy run and the 3.8 test job see the same modules.
+    "tomli>=2.0",
+    "typing-extensions>=4.12",
+    "eval-type-backport>=0.2",
 ]
 
 [build-system]
@@ -64,7 +77,7 @@ exclude = ["/tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py38"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -74,14 +87,28 @@ ignore = ["E501"]
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
+[tool.ruff.lint.per-file-ignores]
+# Typer resolves command parameter annotations at runtime, so they must stay
+# 3.8-compatible (Optional, List) even though future annotations are enabled.
+"src/tm/cli/main.py" = ["UP006", "UP007", "UP045"]
+"src/tm/cli/models_cmd.py" = ["UP006", "UP007", "UP045"]
+"src/tm/im/cli.py" = ["UP006", "UP007", "UP045"]
+
 [tool.mypy]
-python_version = "3.11"
+# mypy 2.x dropped 3.8/3.9 as analysis targets; 3.10 is the lowest it accepts.
+# Runtime support for 3.8 is covered by the CI test matrix.
+python_version = "3.10"
 mypy_path = "src"
 files = ["src", "tests"]
 strict = false
 warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+# google-genai needs Python 3.9+, so the extra cannot be installed on 3.8.
+module = ["google.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

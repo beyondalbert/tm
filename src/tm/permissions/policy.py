@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import contextlib
 import fnmatch
-import tomllib
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from tm.compat import load_toml
 from tm.permissions.actions import Action, ActionKind, Decision
 
 
@@ -122,7 +122,7 @@ class Policy(BaseModel):
             if not path.exists():
                 continue
             with path.open("rb") as handle:
-                data = tomllib.load(handle)
+                data = load_toml(handle)
             merged = _merge(merged, data)
         return cls.from_dict(merged, working_dir)
 

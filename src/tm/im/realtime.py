@@ -17,7 +17,7 @@ import contextlib
 import itertools
 import random
 import time
-from collections.abc import Awaitable, Callable
+from typing import Awaitable, Callable, Dict
 
 from tm.im.protocol import (
     AuthResponse,
@@ -61,7 +61,7 @@ def _next_backoff(backoff: float, authenticated: bool) -> tuple[float, float]:
     return delay, min(_MAX_BACKOFF, backoff * 2)
 
 MessageHandler = Callable[[ImMessage], Awaitable[None]]
-CursorsProvider = Callable[[], dict[int, int]]
+CursorsProvider = Callable[[], Dict[int, int]]
 LogFn = Callable[[str], None]
 
 

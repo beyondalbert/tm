@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Awaitable, Callable, ClassVar, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
