@@ -30,9 +30,11 @@ def test_env_overrides_file(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "im.toml").write_text('api_key = "file"\n', encoding="utf-8")
     monkeypatch.setenv("TM_IM_API_KEY", "env")
     monkeypatch.setenv("TM_IM_ACK_REPLY", "收到")
+    monkeypatch.setenv("TM_IM_BUSY_REPLY", "处理中")
     settings = load_im_settings()
     assert settings.api_key == "env"
     assert settings.ack_reply == "收到"
+    assert settings.busy_reply == "处理中"
 
 
 def test_unknown_choice_falls_back(tmp_path: Path, monkeypatch) -> None:

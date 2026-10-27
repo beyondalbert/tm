@@ -95,6 +95,7 @@ class ImSettings:
     sync_limit: int = 200
     ack_reply: str = "收到，正在处理：{preview}"
     ack_preview_chars: int = 60
+    busy_reply: str = "正在整理前一个消息任务，请稍等…"
     client_version: str = "tm"
     provider: str | None = None
     model: str | None = None
@@ -187,6 +188,8 @@ def load_im_settings(path: Path | None = None, *, apply_env: bool = True) -> ImS
             )
         if env := os.environ.get("TM_IM_ACK_REPLY"):
             settings.ack_reply = env
+        if env := os.environ.get("TM_IM_BUSY_REPLY"):
+            settings.busy_reply = env
 
     settings.allow_tools = _normalize_choice(settings.allow_tools, ALLOW_TOOLS, "full")
     settings.respond_in_groups = _normalize_choice(

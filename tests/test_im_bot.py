@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from tm.ai.event_stream import EventStream
 from tm.ai.types import (
@@ -11,6 +14,7 @@ from tm.ai.types import (
     StartEvent,
     TextContent,
     TextDeltaEvent,
+    ToolCall,
 )
 from tm.core.agent import Agent
 from tm.core.session import Session, SessionManager
@@ -19,8 +23,24 @@ from tm.im.client import ImApiError, ImClient
 from tm.im.config import ImSettings
 from tm.im.protocol import ImMessage
 from tm.im.state import ImState
+from tm.tools.base import Tool, ToolContext, ToolResult, text_result
 
 MODEL = Model(id="fake", provider="fake")
+
+
+class EchoParams(BaseModel):
+    text: str
+
+
+class EchoTool(Tool[EchoParams]):
+    name = "echo"
+    description = "Echo the given text back."
+    parameters_model = EchoParams
+
+    async def execute(self, call_id: str, args: EchoParams, ctx: ToolContext) -> ToolResult:
+        if ctx.on_update is not None:
+            await ctx.on_update("working")
+        return text_result(args.text)
 
 
 def _stream(text: str) -> EventStream:
@@ -53,6 +73,56 @@ def _error_factory(message: str):
             return stream
 
         return Agent(MODEL, stream_fn=stream_fn, session=session)
+
+    return factory
+
+
+def _gated_factory(gate: asyncio.Event, started: asyncio.Event):
+    """An agent that blocks its first model response until ``gate`` is set."""
+
+    def factory(_conv_id: int, session: Session) -> Agent:
+        def stream_fn(_m, _c, _o) -> EventStream:
+            message = AssistantMessage(content=[TextContent(text="pong")], stop_reason="stop")
+            stream: EventStream = EventStream()
+
+            async def produce() -> None:
+                started.set()
+                await gate.wait()
+                stream.push(StartEvent(partial=message))
+                stream.push(TextDeltaEvent(partial=message, delta="pong"))
+                stream.push(DoneEvent(partial=message, message=message))
+                stream.end(message)
+
+            stream.attach_task(asyncio.get_running_loop().create_task(produce()))
+            return stream
+
+        return Agent(MODEL, stream_fn=stream_fn, session=session)
+
+    return factory
+
+
+def _tool_factory(text: str = "done"):
+    """An agent that calls ``echo`` once and then answers with ``text``."""
+
+    def factory(_conv_id: int, session: Session) -> Agent:
+        tool_call = AssistantMessage(
+            tool_calls=[ToolCall(id="t1", name="echo", arguments={"text": "hi"})],
+            stop_reason="tool_use",
+        )
+        final = AssistantMessage(content=[TextContent(text=text)], stop_reason="stop")
+        messages = iter([tool_call, final])
+
+        def stream_fn(_m, _c, _o) -> EventStream:
+            message = next(messages)
+            stream: EventStream = EventStream()
+            stream.push(StartEvent(partial=message))
+            if message.text():
+                stream.push(TextDeltaEvent(partial=message, delta=message.text()))
+            stream.push(DoneEvent(partial=message, message=message))
+            stream.end(message)
+            return stream
+
+        return Agent(MODEL, stream_fn=stream_fn, tools=[EchoTool()], session=session)
 
     return factory
 
@@ -103,10 +173,13 @@ def _bot(
     conv_type: int = 1,
     respond: str = "always",
     ack_reply: str = "",
+    busy_reply: str = "",
     factory=None,
     log: list[str] | None = None,
 ) -> tuple[ImBot, FakeClient]:
-    settings = ImSettings(respond_in_groups=respond, ack_reply=ack_reply)
+    settings = ImSettings(
+        respond_in_groups=respond, ack_reply=ack_reply, busy_reply=busy_reply
+    )
     client = FakeClient(conv_type)
     state = ImState(tmp_path / "state.json")
     manager = SessionManager(tmp_path / "sessions")
@@ -234,3 +307,84 @@ async def test_logs_error_when_no_reply(tmp_path: Path) -> None:
     await bot.process(_msg(2))
     assert client.sent == []
     assert any("no reply" in line and "missing api key" in line for line in lines)
+
+
+async def test_busy_notice_while_previous_turn_runs(tmp_path: Path) -> None:
+    gate = asyncio.Event()
+    started = asyncio.Event()
+    lines: list[str] = []
+    bot, client = _bot(
+        tmp_path,
+        factory=_gated_factory(gate, started),
+        busy_reply="正在整理前一个消息任务",
+        log=lines,
+    )
+
+    first = asyncio.create_task(bot.process(_msg(2, text="first")))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    second = asyncio.create_task(bot.process(_msg(3, text="second")))
+    for _ in range(200):
+        if (1001, "正在整理前一个消息任务") in client.sent:
+            break
+        await asyncio.sleep(0.01)
+    # The queued message is acknowledged immediately, before the first finishes.
+    assert (1001, "正在整理前一个消息任务") in client.sent
+    assert not first.done()
+
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=2)
+    assert client.sent == [
+        (1001, "正在整理前一个消息任务"),
+        (1001, "pong"),
+        (1001, "pong"),
+    ]
+    assert any("sending busy notice" in line for line in lines)
+    assert bot.state.last_seq(1001) == 3
+
+
+async def test_busy_notice_can_be_disabled(tmp_path: Path) -> None:
+    gate = asyncio.Event()
+    started = asyncio.Event()
+    bot, client = _bot(
+        tmp_path, factory=_gated_factory(gate, started), busy_reply=""
+    )
+    first = asyncio.create_task(bot.process(_msg(2)))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    second = asyncio.create_task(bot.process(_msg(3)))
+    await asyncio.sleep(0.05)
+    assert client.sent == []
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=2)
+    assert client.sent == [(1001, "pong"), (1001, "pong")]
+
+
+async def test_logs_turn_progress(tmp_path: Path) -> None:
+    lines: list[str] = []
+    bot, _ = _bot(tmp_path, log=lines)
+    await bot.process(_msg(2))
+    assert any("[1001#2] turn 1 start" in line for line in lines)
+    assert any("[1001#2] model responding" in line for line in lines)
+    assert any("[1001#2] assistant: pong" in line for line in lines)
+    assert any("[1001#2] turn 1 end" in line for line in lines)
+    assert any("[1001#2] agent finished stop=stop" in line for line in lines)
+    assert any("[1001#2] turn finished in" in line for line in lines)
+
+
+async def test_logs_tool_progress(tmp_path: Path) -> None:
+    lines: list[str] = []
+    bot, client = _bot(tmp_path, factory=_tool_factory("done"), log=lines)
+    await bot.process(_msg(2))
+    assert client.sent == [(1001, "done")]
+    assert any('[1001#2] tool echo start {"text": "hi"}' in line for line in lines)
+    assert any("[1001#2] tool echo output: working" in line for line in lines)
+    assert any("[1001#2] tool echo ok in" in line for line in lines)
+    assert any("tool_calls=echo" in line for line in lines)
+
+
+async def test_logs_skipped_group_message(tmp_path: Path) -> None:
+    lines: list[str] = []
+    bot, client = _bot(tmp_path, conv_type=2, respond="mention", log=lines)
+    await bot.process(_msg(2, text="hello everyone"))
+    assert client.sent == []
+    assert any("skip [1001#2]" in line and "mention" in line for line in lines)
+    assert bot.state.last_seq(1001) == 2

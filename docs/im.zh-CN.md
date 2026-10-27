@@ -49,11 +49,13 @@ tm im stop  --config alice                     # 停止
 | `sync_limit` | `200` | 实时 `SYNC` 分页大小 |
 | `ack_reply` | `收到，正在处理：{preview}` | 收到消息后、Agent 处理前立即回复的确认句；`{preview}` 为收到的内容，留空则关闭 |
 | `ack_preview_chars` | `60` | `{preview}` 最多保留的字符数 |
+| `busy_reply` | `正在整理前一个消息任务，请稍等…` | 同一会话上一条还在处理时，新消息立即收到的提示；留空则关闭 |
 | `provider` | – | 回复所用 provider 覆盖 |
 | `model` | – | 回复所用模型覆盖 |
 
 环境变量可覆盖文件：`TM_IM_BASE_URL`、`TM_IM_API_KEY`、`TM_IM_TCP_ADDR`、
-`TM_IM_ALLOW_TOOLS`、`TM_IM_RESPOND_IN_GROUPS`、`TM_IM_ACK_REPLY`。
+`TM_IM_ALLOW_TOOLS`、`TM_IM_RESPOND_IN_GROUPS`、`TM_IM_ACK_REPLY`、
+`TM_IM_BUSY_REPLY`。
 
 ### `tm im login`
 
@@ -92,6 +94,41 @@ tm im run [--config <名字|路径>]
 ```
 tm im config set ack_reply="收到：{preview}"
 tm im config set ack_reply=      # 关闭
+```
+
+### 处理中再发消息
+
+同一会话一次只处理一个任务。上一条还在处理时又收到新消息，bot 会立即用
+`busy_reply`（默认 `正在整理前一个消息任务，请稍等…`）回一句，让对方知道消息已
+排队；前一条处理完后会按 `seq` 顺序继续处理。设为空字符串可关闭：
+
+```
+tm im config set busy_reply="还在处理上一条，请稍等"
+tm im config set busy_reply=      # 关闭
+```
+
+### 日志里的处理过程
+
+每条收到的消息都会连同会话号与 `seq` 写入日志，随后输出 Agent 的处理过程：
+回合、模型输出、思考内容、工具调用及参数、工具流式输出、工具结果（状态与耗时）、
+token 用量、结束原因。过长文本会合并空白并按行截断。查看：
+
+```
+tm im logs -f
+```
+
+```
+2026-01-01 12:00:00  im  <- [1001#2] 看一下磁盘占用
+2026-01-01 12:00:00  im  [1001#2] turn 1 start
+2026-01-01 12:00:00  im  [1001#2] model responding
+2026-01-01 12:00:02  im  [1001#2] tool_calls=shell | stop=tool_use | tokens in=830 out=12
+2026-01-01 12:00:02  im  [1001#2] tool shell start {"command": "du -sh ."}
+2026-01-01 12:00:06  im  [1001#2] tool shell ok in 3.4s: 128M\t.
+2026-01-01 12:00:08  im  [1001#2] turn 1 end
+2026-01-01 12:00:08  im  [1001#2] assistant: 128 MB | stop=stop | tokens in=911 out=8
+2026-01-01 12:00:08  im  [1001#2] agent finished stop=stop messages=4
+2026-01-01 12:00:08  im  [1001#2] turn finished in 7.6s
+2026-01-01 12:00:08  im  -> [1001#2] 128 MB
 ```
 
 ### 实时端点
@@ -218,5 +255,6 @@ tm_im 输入是**不可信的**：任何能给 bot 发消息的人都能让它�
 - **排序与去重用 `seq`**：`seq <= last` 忽略，每会话最后处理的 `seq` 持久化在
   `state.json`。
 - **每个会话一个 TM 会话**，保持多轮记忆；并发会话由小型 worker 池处理
-  （按会话加锁）。
+  （按会话加锁）。同一会话正在处理时收到的新消息会先回 `busy_reply`，
+  再按 `seq` 顺序处理。
 - 无新增依赖：REST 客户端、protobuf 编解码、TCP 客户端均只用 Python 标准库。

@@ -50,12 +50,13 @@ with `tm im config new`. See [section 4](#4-multiple-accounts-on-one-machine).
 | `sync_limit` | `200` | Realtime `SYNC` page size |
 | `ack_reply` | `收到，正在处理：{preview}` | Immediate acknowledgment sent before the agent runs; `{preview}` is the incoming text, empty disables it |
 | `ack_preview_chars` | `60` | Max characters of `{preview}` |
+| `busy_reply` | `正在整理前一个消息任务，请稍等…` | Reply when a new message arrives while the conversation is still processing an earlier one; empty disables it |
 | `provider` | – | Model provider override for replies |
 | `model` | – | Model override for replies |
 
 Environment variables override the file: `TM_IM_BASE_URL`, `TM_IM_API_KEY`,
 `TM_IM_TCP_ADDR`, `TM_IM_ALLOW_TOOLS`, `TM_IM_RESPOND_IN_GROUPS`,
-`TM_IM_ACK_REPLY`.
+`TM_IM_ACK_REPLY`, `TM_IM_BUSY_REPLY`.
 
 ### `tm im login`
 
@@ -96,6 +97,45 @@ collapsed, cut to `ack_preview_chars`). Set it to an empty string to disable it:
 ```
 tm im config set ack_reply="收到：{preview}"
 tm im config set ack_reply=      # disable
+```
+
+### Busy conversations
+
+A conversation is processed one turn at a time. If another message arrives
+while the previous turn is still running, the bot answers it at once with
+`busy_reply` (default `正在整理前一个消息任务，请稍等…`) so the sender knows it
+is queued, then runs it normally when the earlier turn finishes. Set it to an
+empty string to disable the notice:
+
+```
+tm im config set busy_reply="还在处理上一条，请稍等"
+tm im config set busy_reply=      # disable
+```
+
+### Progress in the log
+
+Every incoming message is logged with its conversation and `seq`, followed by
+the agent's progress: turns, model output, thinking text, tool calls with their
+arguments, streamed tool output, tool results (status and duration), token
+usage, and the final stop reason. Long text is collapsed and truncated per
+line. Watch it with:
+
+```
+tm im logs -f
+```
+
+```
+2026-01-01 12:00:00  im  <- [1001#2] check disk usage
+2026-01-01 12:00:00  im  [1001#2] turn 1 start
+2026-01-01 12:00:00  im  [1001#2] model responding
+2026-01-01 12:00:02  im  [1001#2] tool_calls=shell | stop=tool_use | tokens in=830 out=12
+2026-01-01 12:00:02  im  [1001#2] tool shell start {"command": "du -sh ."}
+2026-01-01 12:00:06  im  [1001#2] tool shell ok in 3.4s: 128M\t.
+2026-01-01 12:00:08  im  [1001#2] turn 1 end
+2026-01-01 12:00:08  im  [1001#2] assistant: 128 MB | stop=stop | tokens in=911 out=8
+2026-01-01 12:00:08  im  [1001#2] agent finished stop=stop messages=4
+2026-01-01 12:00:08  im  [1001#2] turn finished in 7.6s
+2026-01-01 12:00:08  im  -> [1001#2] 128 MB
 ```
 
 ### Realtime endpoint
@@ -228,5 +268,7 @@ allows. Replies are sent as plain text and split at `reply_max_chars`.
   processed `seq` per conversation is persisted in `state.json`.
 - **One TM session per conversation** keeps memory across messages; concurrent
   conversations are processed by a small worker pool (per-conversation locking).
+  A message that arrives while its conversation is busy gets `busy_reply` and
+  is processed in `seq` order after the running turn.
 - No new dependencies: the REST client, protobuf codec, and TCP client use only
   the Python standard library.
