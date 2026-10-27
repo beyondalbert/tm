@@ -11,6 +11,7 @@ import hashlib
 import re
 import sys
 from pathlib import Path
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -39,10 +40,10 @@ def script_path(workspace: Path, description: str | None, code: str) -> Path:
 
 class PythonParams(BaseModel):
     code: str
-    description: str | None = None
-    packages: list[str] = []
-    timeout: int | None = None
-    cwd: str | None = None
+    description: Optional[str] = None
+    packages: List[str] = []
+    timeout: Optional[int] = None
+    cwd: Optional[str] = None
 
 
 class PythonTool(Tool[PythonParams]):

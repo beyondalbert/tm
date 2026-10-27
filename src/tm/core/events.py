@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -66,9 +66,9 @@ class TurnEndEvent(AgentEvent):
 
 class AgentEndEvent(AgentEvent):
     type: Literal["agent_end"] = "agent_end"
-    messages: list[Message]
+    messages: List[Message]
     #: Why the run ended: "stop", "max_turns", "error", or "aborted".
-    stop_reason: str | None = None
+    stop_reason: Optional[str] = None
 
 
 class AgentNoticeEvent(AgentEvent):

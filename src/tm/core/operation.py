@@ -23,7 +23,7 @@ an :class:`Operation` that drives transitions through a :class:`Store`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -70,12 +70,12 @@ class OperationState(BaseModel):
     """
 
     operation_id: str
-    session_id: str | None = None
+    session_id: Optional[str] = None
     kind: str = "run"
     status: OperationStatus = OperationStatus.OPEN
     turn: int = 0
     message_count: int = 0
-    pending: PendingEffect | None = None
+    pending: Optional[PendingEffect] = None
     started_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 

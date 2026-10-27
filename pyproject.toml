@@ -29,8 +29,6 @@ dependencies = [
     "tomli-w>=1.0",
     "tomli>=2.0; python_version < '3.11'",
     "typing-extensions>=4.12; python_version < '3.9'",
-    # Lets pydantic evaluate `X | None` and `list[X]` annotations on 3.8/3.9.
-    "eval-type-backport>=0.2; python_version < '3.10'",
 ]
 
 [project.urls]
@@ -62,7 +60,6 @@ dev = [
     # mypy run and the 3.8 test job see the same modules.
     "tomli>=2.0",
     "typing-extensions>=4.12",
-    "eval-type-backport>=0.2",
 ]
 
 [build-system]
@@ -88,11 +85,24 @@ ignore = ["E501"]
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
-# Typer resolves command parameter annotations at runtime, so they must stay
-# 3.8-compatible (Optional, List) even though future annotations are enabled.
+# These annotations are evaluated at runtime (typer resolves command parameters,
+# pydantic resolves model fields), so they must stay 3.8-compatible: Optional,
+# Union, List. Future annotations do not help there.
 "src/tm/cli/main.py" = ["UP006", "UP007", "UP045"]
 "src/tm/cli/models_cmd.py" = ["UP006", "UP007", "UP045"]
 "src/tm/im/cli.py" = ["UP006", "UP007", "UP045"]
+"src/tm/ai/types.py" = ["UP006", "UP007", "UP045"]
+"src/tm/core/events.py" = ["UP006", "UP007", "UP045"]
+"src/tm/core/operation.py" = ["UP006", "UP007", "UP045"]
+"src/tm/permissions/policy.py" = ["UP006", "UP007", "UP045"]
+"src/tm/tools/base.py" = ["UP006", "UP007", "UP045"]
+"src/tm/tools/edit.py" = ["UP006", "UP007", "UP045"]
+"src/tm/tools/elevate.py" = ["UP006", "UP007", "UP045"]
+"src/tm/tools/grep.py" = ["UP006", "UP007", "UP045"]
+"src/tm/tools/process.py" = ["UP006", "UP007", "UP045"]
+"src/tm/tools/python.py" = ["UP006", "UP007", "UP045"]
+"src/tm/tools/read.py" = ["UP006", "UP007", "UP045"]
+"src/tm/tools/shell.py" = ["UP006", "UP007", "UP045"]
 
 [tool.mypy]
 # mypy 2.x dropped 3.8/3.9 as analysis targets; 3.10 is the lowest it accepts.

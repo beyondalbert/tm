@@ -7,7 +7,7 @@ streaming event union. Providers translate these to/from their wire formats.
 from __future__ import annotations
 
 import time
-from typing import Literal, Union
+from typing import List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -58,18 +58,18 @@ class ToolCall(BaseModel):
 
 class UserMessage(BaseModel):
     role: Literal["user"] = "user"
-    content: str | list[Content]
+    content: Union[str, List[Content]]
     timestamp: int = Field(default_factory=now_ms)
 
 
 class AssistantMessage(BaseModel):
     role: Literal["assistant"] = "assistant"
-    content: list[Content] = Field(default_factory=list)
-    tool_calls: list[ToolCall] = Field(default_factory=list)
-    stop_reason: StopReason | None = None
-    error_message: str | None = None
-    usage: Usage | None = None
-    model: str | None = None
+    content: List[Content] = Field(default_factory=list)
+    tool_calls: List[ToolCall] = Field(default_factory=list)
+    stop_reason: Optional[StopReason] = None
+    error_message: Optional[str] = None
+    usage: Optional[Usage] = None
+    model: Optional[str] = None
     timestamp: int = Field(default_factory=now_ms)
 
     def text(self) -> str:
@@ -83,7 +83,7 @@ class ToolResultMessage(BaseModel):
     role: Literal["tool"] = "tool"
     tool_call_id: str
     tool_name: str
-    content: list[Content]
+    content: List[Content]
     is_error: bool = False
     timestamp: int = Field(default_factory=now_ms)
 
@@ -109,14 +109,14 @@ class Model(BaseModel):
     id: str
     provider: str
     api: str = "openai-completions"
-    base_url: str | None = None
+    base_url: Optional[str] = None
     context_window: int = 128_000
     max_tokens: int = 8_192
     reasoning: bool = False
     # Optional pricing, USD per 1M tokens. Unset means cost is not reported.
-    input_cost: float | None = None
-    output_cost: float | None = None
-    cache_read_cost: float | None = None
+    input_cost: Optional[float] = None
+    output_cost: Optional[float] = None
+    cache_read_cost: Optional[float] = None
 
     def cost(self, usage: Usage) -> float | None:
         if self.input_cost is None and self.output_cost is None and self.cache_read_cost is None:
@@ -129,9 +129,9 @@ class Model(BaseModel):
 
 
 class Context(BaseModel):
-    system_prompt: str | None = None
-    messages: list[Message] = Field(default_factory=list)
-    tools: list[ToolSpec] = Field(default_factory=list)
+    system_prompt: Optional[str] = None
+    messages: List[Message] = Field(default_factory=list)
+    tools: List[ToolSpec] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ class Context(BaseModel):
 
 class AssistantMessageEvent(BaseModel):
     type: str
-    partial: AssistantMessage | None = None
+    partial: Optional[AssistantMessage] = None
 
 
 class StartEvent(AssistantMessageEvent):
@@ -184,7 +184,7 @@ class DoneEvent(AssistantMessageEvent):
 class ErrorEvent(AssistantMessageEvent):
     type: Literal["error"] = "error"
     error: str = ""
-    message: AssistantMessage | None = None
+    message: Optional[AssistantMessage] = None
 
 
 __all__ = [

@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, ClassVar, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Awaitable, Callable, ClassVar, Generic, List, Literal, TypeVar
 
 from pydantic import BaseModel
 
@@ -31,7 +31,7 @@ class ToolContext:
 
 
 class ToolResult(BaseModel):
-    content: list[Content]
+    content: List[Content]
     details: dict = {}
     is_error: bool = False
     terminate: bool = False

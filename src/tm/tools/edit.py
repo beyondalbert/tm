@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import List
+
 from pydantic import BaseModel
 
 from tm.safety import record_file_change
@@ -14,7 +16,7 @@ class EditOperation(BaseModel):
 
 class EditParams(BaseModel):
     path: str
-    edits: list[EditOperation]
+    edits: List[EditOperation]
 
 
 class EditTool(Tool[EditParams]):

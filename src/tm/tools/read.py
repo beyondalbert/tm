@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 from tm.compat import to_thread
@@ -10,8 +12,8 @@ from tm.tools.truncate import format_size, truncate_head
 
 class ReadParams(BaseModel):
     path: str
-    offset: int | None = None
-    limit: int | None = None
+    offset: Optional[int] = None
+    limit: Optional[int] = None
 
 
 class ReadTool(Tool[ReadParams]):

@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import fnmatch
 from pathlib import Path
+from typing import List
 
 from pydantic import BaseModel
 
@@ -18,8 +19,8 @@ from tm.permissions.actions import Action, ActionKind, Decision
 
 
 class RuleSet(BaseModel):
-    allow: list[str] = []
-    deny: list[str] = []
+    allow: List[str] = []
+    deny: List[str] = []
 
 
 def _posix(value: str) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -26,8 +27,8 @@ def shell_argv(command: str) -> list[str]:
 
 class ShellParams(BaseModel):
     command: str
-    timeout: int | None = None
-    cwd: str | None = None
+    timeout: Optional[int] = None
+    cwd: Optional[str] = None
 
 
 class ShellTool(Tool[ShellParams]):

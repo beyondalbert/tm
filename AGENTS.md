@@ -37,9 +37,10 @@ stdlib additions need care:
 - `from __future__ import annotations` lets ordinary annotations use `X | None`
   and `list[X]` on every supported version. Keep that style.
 - Anything evaluated at runtime must not use PEP 604/585. That covers module-level
-  type aliases, generic base classes, and pydantic model fields (pydantic evaluates
-  them; on 3.8/3.9 `eval-type-backport` provides PEP 604 support). Use
-  `typing.Optional`/`Union`/`List`/`Dict` in those places.
+  type aliases, generic base classes, typer command parameters, and pydantic model
+  fields (both libraries resolve annotations at runtime, and newer pydantic has no
+  3.9 backport). Use `typing.Optional`/`Union`/`List`/`Dict` there; the affected
+  files ignore the matching `UP` rules in `pyproject.toml`.
 - Import `Annotated`, `StrEnum`, TOML reading, and `to_thread` from `tm.compat`
   instead of branching on the interpreter version.
 - Do not create `asyncio.Event`, `Lock`, or `Queue` when constructing objects that

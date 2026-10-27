@@ -4,6 +4,7 @@ import fnmatch
 import re
 import shutil
 from pathlib import Path
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -20,7 +21,7 @@ _SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", ".m
 class GrepParams(BaseModel):
     pattern: str
     path: str = "."
-    glob: str | None = None
+    glob: Optional[str] = None
     ignore_case: bool = False
     fixed_strings: bool = False
     max_results: int = 200

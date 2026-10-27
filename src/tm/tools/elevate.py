@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -16,8 +17,8 @@ from tm.tools.truncate import truncate_tail
 
 class ElevateParams(BaseModel):
     command: str
-    cwd: str | None = None
-    timeout: int | None = None
+    cwd: Optional[str] = None
+    timeout: Optional[int] = None
 
 
 class ElevateTool(Tool[ElevateParams]):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -27,10 +27,10 @@ def _tail(path: Path, lines: int) -> str:
 
 class ProcessParams(BaseModel):
     action: Literal["start", "status", "logs", "stop", "restart", "list"] = "list"
-    command: str | None = None
-    description: str | None = None
-    cwd: str | None = None
-    job: str | None = None
+    command: Optional[str] = None
+    description: Optional[str] = None
+    cwd: Optional[str] = None
+    job: Optional[str] = None
     lines: int = 50
 
 
