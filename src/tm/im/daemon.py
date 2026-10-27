@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, cast
 
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _DETACHED_PROCESS = 0x00000008
@@ -59,7 +60,8 @@ def is_alive(pid: int) -> bool:
     if os.name == "nt":
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32
+        # ``ctypes.windll`` is Windows-only, and the stubs omit it elsewhere.
+        kernel32 = cast(Any, ctypes).windll.kernel32
         handle = kernel32.OpenProcess(0x1000, False, pid)
         if not handle:
             return False
