@@ -6,7 +6,7 @@ import inspect
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional
 
 from tm.ai.registry import Registry, RegistryError
 from tm.ai.types import AssistantMessage, Message, ToolResultMessage, UserMessage
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 Emit = Callable[[str], None]
 SessionPicker = Callable[[List[SessionInfo]], Awaitable[Optional[SessionInfo]]]
-SettingsEditor = Callable[[Settings], Awaitable[Optional[dict[str, object]]]]
+SettingsEditor = Callable[[Settings], Awaitable[Optional[Dict[str, object]]]]
 
 _SPEC_NAMES = (
     "help",

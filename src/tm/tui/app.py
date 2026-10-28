@@ -10,7 +10,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from rich.console import Console
 from rich.markdown import Markdown as RichMarkdown
@@ -463,7 +463,7 @@ class SessionScreen(ModalScreen[Optional[SessionInfo]]):
         self._answer(None)
 
 
-class SettingsScreen(ModalScreen[dict[str, object] | None]):
+class SettingsScreen(ModalScreen[Optional[Dict[str, object]]]):
     """Modal editor for the settings that can be changed at runtime."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
