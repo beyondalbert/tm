@@ -20,6 +20,7 @@ from tm.ai.registry import Registry, RegistryError, is_localhost_url
 from tm.ai.user_models import UserModelError, load_presets
 from tm.config import config_dir, load_credentials, load_settings
 from tm.core.agent import Agent
+from tm.core.pruning import policy_from_settings
 from tm.core.session import Session, SessionManager
 from tm.core.system_prompt import build_system_prompt
 from tm.host import detect_host, render_environment
@@ -128,10 +129,10 @@ def _require_key(settings: ImSettings) -> None:
         raise typer.Exit(code=1)
 
 
-def _select_tools(mode: str) -> list:
+def _select_tools(mode: str, *, read_dedupe: bool = True) -> list:
     if mode == "none":
         return []
-    tools = build_default_tools()
+    tools = build_default_tools(read_dedupe=read_dedupe)
     if mode == "read_only":
         return [tool for tool in tools if tool.name in READ_TOOLS]
     return tools
@@ -215,7 +216,7 @@ def run(
         )
 
     cwd = Path.cwd()
-    tools = _select_tools(settings.allow_tools)
+    tools = _select_tools(settings.allow_tools, read_dedupe=global_settings.read_dedupe)
     approver = (
         AutoAllowApprover() if settings.allow_tools == "full" else AutoDenyApprover()
     )
@@ -242,6 +243,8 @@ def run(
             auto_compact=global_settings.auto_compact,
             compact_threshold=global_settings.compact_threshold,
             compact_keep_recent=global_settings.compact_keep_recent,
+            compact_max_tokens=global_settings.compact_max_tokens,
+            prune=policy_from_settings(global_settings),
             max_turns=global_settings.max_turns,
             max_retries=global_settings.max_retries,
             journal=Journal(base / "changes.jsonl"),

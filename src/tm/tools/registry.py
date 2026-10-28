@@ -32,9 +32,9 @@ DEFAULT_TOOL_NAMES = (
 )
 
 
-def build_default_tools() -> list[Tool]:
+def build_default_tools(*, read_dedupe: bool = True) -> list[Tool]:
     return [
-        ReadTool(),
+        ReadTool(dedupe=read_dedupe),
         WriteTool(),
         EditTool(),
         ShellTool(),

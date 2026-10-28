@@ -178,3 +178,26 @@ async def test_read_reports_continuation_offset(tmp_path: Path) -> None:
     assert "row 1" in text
     assert "row 2200" not in text
     assert "Use offset=2001 to continue." in text
+
+
+async def test_read_dedupes_unchanged_reread(tmp_path: Path) -> None:
+    target = tmp_path / "f.txt"
+    target.write_text("a\nb\n")
+    tool = ReadTool(dedupe=True)
+
+    first = await tool.execute("1", ReadParams(path="f.txt"), ctx(tmp_path))
+    assert "1: a" in first.text()
+
+    again = await tool.execute("2", ReadParams(path="f.txt"), ctx(tmp_path))
+    assert "unchanged since the previous read" in again.text()
+
+    # A different range is a different request.
+    window = await tool.execute("3", ReadParams(path="f.txt", offset=2, limit=1), ctx(tmp_path))
+    assert "2: b" in window.text()
+
+    # A changed file is read again.
+    target.write_text("a\nc\n")
+    stat = target.stat()
+    os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    changed = await tool.execute("4", ReadParams(path="f.txt"), ctx(tmp_path))
+    assert "2: c" in changed.text()

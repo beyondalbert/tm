@@ -22,11 +22,17 @@ from tm.ai.types import (  # noqa: E402
     ToolCall,
     UserMessage,
 )
+from tm.config import Settings  # noqa: E402
 from tm.core.agent import Agent  # noqa: E402
 from tm.core.session import SessionInfo  # noqa: E402
 from tm.permissions import ApprovalOutcome  # noqa: E402
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result  # noqa: E402
-from tm.tui.app import PermissionScreen, SessionScreen, TMPromptApp  # noqa: E402
+from tm.tui.app import (  # noqa: E402
+    PermissionScreen,
+    SessionScreen,
+    SettingsScreen,
+    TMPromptApp,
+)
 
 FAKE_MODEL = Model(id="fake", provider="fake")
 
@@ -905,3 +911,60 @@ async def test_resize_does_not_rerender_markdown_for_scrollbar_jitter(monkeypatc
         widget._render_width = width - 5  # a real resize
         widget._render_body()
         assert calls["n"] == rendered + 1
+
+
+async def test_settings_screen_toggles_bool_and_saves() -> None:
+    results: list[dict[str, object] | None] = []
+
+    class Host(App):
+        def on_mount(self) -> None:
+            self.push_screen(SettingsScreen(Settings()), results.append)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")  # auto_compact: true -> false
+        await pilot.pause()
+        await pilot.click("#settings-save")
+        await pilot.pause()
+
+    assert results == [{"auto_compact": False}]
+
+
+async def test_settings_screen_edits_number() -> None:
+    results: list[dict[str, object] | None] = []
+
+    class Host(App):
+        def on_mount(self) -> None:
+            self.push_screen(SettingsScreen(Settings()), results.append)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        for _ in range(3):  # auto_compact -> compact_threshold -> keep_recent -> max_tokens
+            await pilot.press("down")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("1", "5", "0", "0", "0", "0")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.click("#settings-save")
+        await pilot.pause()
+
+    assert results == [{"compact_max_tokens": 150000}]
+
+
+async def test_settings_screen_escape_cancels() -> None:
+    results: list[dict[str, object] | None] = []
+
+    class Host(App):
+        def on_mount(self) -> None:
+            self.push_screen(SettingsScreen(Settings()), results.append)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+
+    assert results == [None]

@@ -68,6 +68,13 @@ class LoopHooks:
     take_follow_up: Callable[[], list[Message]]
     pause: Callable[[], Awaitable[None]]
     notice: Callable[[str, str], Awaitable[None]]
+    #: Before every request: returns (canonical history, request messages).
+    #: The canonical history may change (compaction); the request view may be
+    #: trimmed (old tool output rewritten) without touching the session.
+    prepare: (
+        Callable[[list[Message]], Awaitable[tuple[list[Message], list[Message]]]]
+        | None
+    ) = None
 
 
 _UPDATE_EVENTS = (TextDeltaEvent, ThinkingDeltaEvent, ToolCallDeltaEvent)
@@ -139,10 +146,15 @@ async def agent_loop(
         await hooks.emit(TurnStartEvent(turn=turn))
         turn_span = telemetry.start(Span(SPAN_TURN, {"turn": turn}), context)
         turn_status = "ok"
+        request_messages = history
+        if hooks.prepare is not None:
+            history, request_messages = await hooks.prepare(history)
 
         attempt = 0
         while True:
-            loop_context = Context(system_prompt=system_prompt, messages=history, tools=tools)
+            loop_context = Context(
+                system_prompt=system_prompt, messages=request_messages, tools=tools
+            )
             stream = stream_fn(model, loop_context, options)
             watcher: asyncio.Task[None] | None = None
             if options.signal is not None:

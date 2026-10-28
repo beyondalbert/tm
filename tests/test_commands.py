@@ -8,6 +8,7 @@ from tm.ai.event_stream import EventStream
 from tm.ai.registry import Registry
 from tm.ai.types import AssistantMessage, DoneEvent, Model, StartEvent, TextContent, UserMessage
 from tm.cli.commands import CommandContext, ExitSignal, SlashCommands
+from tm.config import Settings, read_toml
 from tm.core.agent import Agent
 from tm.extensions import ExtensionAPI
 from tm.prompts import PromptTemplate
@@ -422,3 +423,67 @@ async def test_lang_command_switches_language(tmp_path: Path) -> None:
         assert "zh" in emitted[-1]
     finally:
         set_language("en")
+
+
+async def test_settings_editor_saves_and_applies(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "settings.toml").write_text('provider = "qwen"\n', encoding="utf-8")
+    agent = make_agent()
+    emitted: list[str] = []
+
+    async def editor(settings: Settings) -> dict[str, object]:
+        return {"compact_max_tokens": 123456, "auto_compact": False, "read_dedupe": False}
+
+    ctx = CommandContext(
+        agent=agent,
+        registry=Registry(),
+        cwd=tmp_path,
+        emit=emitted.append,
+        settings=Settings(compact_max_tokens=0, auto_compact=True),
+        settings_editor=editor,
+    )
+    await SlashCommands(ctx).handle("settings")
+
+    assert agent.compact_max_tokens == 123456
+    assert agent.auto_compact is False
+    assert agent.prune.enabled is True
+    data = read_toml(tmp_path / "settings.toml")
+    assert data["provider"] == "qwen"
+    assert data["compact_max_tokens"] == 123456
+    assert data["auto_compact"] is False
+    assert "saved" in emitted[-1]
+
+
+async def test_settings_editor_cancel_keeps_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    agent = make_agent()
+    emitted: list[str] = []
+
+    async def editor(settings: Settings) -> None:
+        return None
+
+    ctx = CommandContext(
+        agent=agent,
+        registry=Registry(),
+        cwd=tmp_path,
+        emit=emitted.append,
+        settings=Settings(),
+        settings_editor=editor,
+    )
+    await SlashCommands(ctx).handle("config")
+
+    assert not (tmp_path / "settings.toml").exists()
+    assert "unchanged" in emitted[-1]
+
+
+async def test_settings_without_editor_lists_values(tmp_path: Path) -> None:
+    emitted: list[str] = []
+    ctx = CommandContext(
+        agent=make_agent(),
+        registry=Registry(),
+        cwd=tmp_path,
+        emit=emitted.append,
+        settings=Settings(compact_max_tokens=999),
+    )
+    await SlashCommands(ctx).handle("settings")
+    assert any("compact_max_tokens = 999" in line for line in emitted)

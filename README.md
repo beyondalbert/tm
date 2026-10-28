@@ -338,11 +338,18 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 | `/undo [n]` | roll back the last n reversible changes |
 | `/copy [n]` | copy the nth-from-last reply to the clipboard |
 | `/lang [en\|zh\|auto]` | set the UI language |
+| `/settings` | edit settings.toml interactively |
 | `/skills` | list available skills |
 | `/skill:<name>` | load a skill into the conversation |
 | `/prompts` | list prompt templates |
 | `/<template> [args]` | expand a prompt template |
 | `/exit` | quit |
+
+`/settings` opens a modal editor in the TUI (a numbered prompt in the plain
+console): pick a field, toggle a boolean with Enter, or type a number/string.
+Saving merges only the changed keys into `settings.toml`; the running agent
+adopts compaction, pruning, read-dedupe, turn/retry, and temperature changes
+immediately (other fields apply on the next start).
 
 **Completion.** In the TUI, press `Tab` to accept a suggestion: type `/` to
 complete a command, or `@` to fuzzy-search a file path. `Up`/`Down` move the
@@ -421,6 +428,13 @@ system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true      # summarize older context when nearing the limit
 compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
+compact_max_tokens = 0   # hard trigger ceiling in tokens; 0 = window ratio only
+prune_tool_output = true            # rewrite old tool output in the prompt only
+prune_tool_output_keep_turns = 8    # last N assistant turns are kept verbatim
+prune_tool_output_min_chars = 4000  # only rewrite results at least this long
+prune_tool_output_keep_chars = 400  # chars of the original kept in the stub (its tail)
+spill_dir = ""           # full rewritten output is saved here (default <config>/workspace/spill)
+read_dedupe = true       # repeated reads of an unchanged file/range return a short note
 max_turns = 300          # max agent turns per prompt (also `tm --max-turns N`)
 max_retries = 3          # retries for transient network errors (also `--max-retries N`)
 default_project_trust = "ask"  # ask | always | never
@@ -434,7 +448,9 @@ language = "auto"              # UI language: en | zh | auto (also --lang, /lang
 ```
 
 Automatic compaction runs before a prompt when the estimated context exceeds
-`context_window * compact_threshold`. Disable per run with `--no-auto-compact`.
+`context_window * compact_threshold` (or `compact_max_tokens`, whichever is
+smaller). It is also checked before every model request, so one long autonomous
+turn cannot grow far past the budget. Disable per run with `--no-auto-compact`.
 If a turn ends truncated or with an overflow error, TM compacts and retries,
 keeping a smaller tail each attempt (down to just the summary) until it fits;
 the summarizer itself gets a size-bounded transcript, and if it still fails TM
@@ -442,6 +458,15 @@ drops the oldest messages. Summaries are structured (goal, progress, decisions,
 next steps) and updated incrementally on each compaction, and list the files that
 were read or modified. Compaction is stored as a durable entry, so the summarized
 context survives a restart.
+
+Old tool output is also rewritten in the prompt without touching the session:
+results older than the last `prune_tool_output_keep_turns` assistant turns and
+larger than `prune_tool_output_min_chars` become a short stub with the last
+`prune_tool_output_keep_chars` characters, the total size, and the path of the
+spill file holding the full text (under `spill_dir`, default
+`<config>/workspace/spill`). `read_dedupe` answers a repeated read of an
+unchanged file and line range with a short note instead of the same content
+again. Set `prune_tool_output = false` to send every tool result verbatim.
 
 Per-model pricing (`input_cost`, `output_cost`, `cache_read_cost`, USD per 1M
 tokens) can be set in `models.toml`; the footer then shows `$cost` and the cache

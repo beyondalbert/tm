@@ -11,6 +11,14 @@ from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
 from tm.ai.registry import Registry, RegistryError
 from tm.ai.types import AssistantMessage, Message, ToolResultMessage, UserMessage
 from tm.clipboard import copy_to_clipboard
+from tm.config import (
+    SETTING_FIELDS,
+    Settings,
+    format_setting_value,
+    load_settings,
+    save_settings_values,
+    settings_path,
+)
 from tm.core.agent import Agent
 from tm.core.session import Session, SessionInfo, SessionManager
 from tm.extensions import ExtensionAPI
@@ -27,6 +35,7 @@ if TYPE_CHECKING:
 
 Emit = Callable[[str], None]
 SessionPicker = Callable[[List[SessionInfo]], Awaitable[Optional[SessionInfo]]]
+SettingsEditor = Callable[[Settings], Awaitable[Optional[dict[str, object]]]]
 
 _SPEC_NAMES = (
     "help",
@@ -43,6 +52,7 @@ _SPEC_NAMES = (
     "auto",
     "lang",
     "trust",
+    "settings",
     "skills",
     "prompts",
     "exit",
@@ -96,6 +106,8 @@ class CommandContext:
     trust_manager: TrustManager | None = None
     journal: Journal | None = None
     approver: SessionApprover | None = None
+    settings: Settings | None = None
+    settings_editor: SettingsEditor | None = None
 
 
 class SlashCommands:
@@ -165,6 +177,9 @@ class SlashCommands:
             return None
         if command == "trust":
             self._trust(argument)
+            return None
+        if command in ("settings", "config"):
+            await self._settings()
             return None
 
         templates = self.ctx.templates or {}
@@ -463,13 +478,61 @@ class SlashCommands:
         key = "cmd.trusted" if trusted else "cmd.untrusted"
         self._emit(_t(key, cwd=self.ctx.cwd))
 
+    async def _settings(self) -> None:
+        settings = self.ctx.settings or load_settings()
+        editor = self.ctx.settings_editor
+        if editor is None:
+            self._emit(_settings_summary(settings))
+            return
+        values = await editor(settings)
+        if not values:
+            self._emit(_t("cmd.settings_cancelled"))
+            return
+        path = save_settings_values(values)
+        fresh = load_settings()
+        self.ctx.settings = fresh
+        apply_live_settings(fresh, self.ctx.agent)
+        if "language" in values:
+            set_language(fresh.language)
+        self._emit(_t("cmd.settings_saved", count=len(values), path=path))
+
+
+def _settings_summary(settings: Settings) -> str:
+    lines = [_t("cmd.settings_header", path=settings_path())]
+    for field in SETTING_FIELDS:
+        lines.append(
+            f"  {field.name} = {format_setting_value(field, getattr(settings, field.name))}"
+        )
+    lines.append(_t("cmd.settings_no_editor"))
+    return "\n".join(lines)
+
+
+def apply_live_settings(settings: Settings, agent: Agent) -> None:
+    """Apply settings that the running agent can adopt without a restart."""
+    from tm.core.pruning import policy_from_settings
+    from tm.tools.read import ReadTool
+
+    agent.auto_compact = settings.auto_compact
+    agent.compact_threshold = settings.compact_threshold
+    agent.compact_keep_recent = settings.compact_keep_recent
+    agent.compact_max_tokens = settings.compact_max_tokens
+    agent.prune = policy_from_settings(settings)
+    agent.max_turns = settings.max_turns
+    agent.max_retries = settings.max_retries
+    agent.temperature = settings.temperature
+    for tool in agent.tools:
+        if isinstance(tool, ReadTool):
+            tool.dedupe = settings.read_dedupe
+
 
 __all__ = [
     "CommandContext",
     "Emit",
     "ExitSignal",
     "SessionPicker",
+    "SettingsEditor",
     "SlashCommands",
+    "apply_live_settings",
     "command_specs",
     "help_text",
 ]

@@ -81,6 +81,66 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "tui.resumed_notice": ("resumed", "已恢复"),
     "tui.auto_on": ("auto-approve on", "自动放行已开启"),
     "tui.auto_off": ("auto-approve off", "自动放行已关闭"),
+    "tui.settings_title": ("Settings", "设置"),
+    "tui.settings_hint": ("{name} ({kind}): {description}", "{name}（{kind}）：{description}"),
+    "tui.settings_choices": ("choices: {choices}", "可选值：{choices}"),
+    "tui.settings_value": ("current: {value}", "当前：{value}"),
+    "tui.settings_save": ("Save", "保存"),
+    "tui.settings_cancel": ("Cancel", "取消"),
+    "settings.auto_compact": (
+        "compact older context automatically",
+        "自动压缩较早的上下文",
+    ),
+    "settings.compact_threshold": (
+        "fraction of the context window that triggers compaction",
+        "触发压缩的上下文窗口比例",
+    ),
+    "settings.compact_keep_recent": (
+        "recent messages kept verbatim after compaction",
+        "压缩后原样保留的最近消息数",
+    ),
+    "settings.compact_max_tokens": (
+        "hard token ceiling for compaction (0 = window ratio only)",
+        "压缩触发的硬 token 上限（0 表示只用窗口比例）",
+    ),
+    "settings.prune_tool_output": (
+        "rewrite old tool output in the prompt",
+        "在提示词中改写旧工具输出",
+    ),
+    "settings.prune_tool_output_keep_turns": (
+        "assistant turns whose tool output is kept verbatim",
+        "保留原样工具输出的最近 assistant 回合数",
+    ),
+    "settings.prune_tool_output_min_chars": (
+        "only rewrite tool results at least this long",
+        "只改写长度达到该值的工具结果",
+    ),
+    "settings.prune_tool_output_keep_chars": (
+        "characters of the original kept in the stub",
+        "改写提示中保留的原文尾部字符数",
+    ),
+    "settings.spill_dir": (
+        "where full rewritten output is saved (blank = default)",
+        "被改写输出的完整内容保存目录（空 = 默认）",
+    ),
+    "settings.read_dedupe": (
+        "short answer for an unchanged repeated read",
+        "重复读取未变化文件时只回提示",
+    ),
+    "settings.max_turns": ("max agent turns per prompt", "每次提示的最大回合数"),
+    "settings.max_retries": (
+        "retries for transient network errors",
+        "瞬时网络错误的重试次数",
+    ),
+    "settings.temperature": (
+        "sampling temperature (blank = provider default)",
+        "采样温度（空 = 使用 provider 默认）",
+    ),
+    "settings.language": ("UI language: en | zh | auto", "界面语言：en | zh | auto"),
+    "settings.env_probe": (
+        "add a machine summary to the system prompt",
+        "在系统提示词中加入本机摘要",
+    ),
     # -- slash commands ---------------------------------------------------
     "cmd.unknown": ("unknown command: /{command} (try /help)", "未知命令：/{command}（可试 /help）"),
     "cmd.lang_set": ("language set to {lang}", "语言已设为 {lang}"),
@@ -135,6 +195,20 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "cmd.trusted": ("trusted {cwd} (restart to apply)", "已信任 {cwd}（重启后生效）"),
     "cmd.untrusted": ("untrusted {cwd} (restart to apply)", "已取消信任 {cwd}（重启后生效）"),
     "cmd.only_n": ("only {n} assistant message(s)", "只有 {n} 条回复"),
+    "cmd.settings_header": ("settings ({path}):", "设置（{path}）："),
+    "cmd.settings_hint": (
+        "enter n=value (e.g. 4=150000), blank to cancel",
+        "输入 序号=值（如 4=150000），空行取消",
+    ),
+    "cmd.settings_prompt": ("setting> ", "设置> "),
+    "cmd.settings_bad_line": ("expected n=value", "格式应为 序号=值"),
+    "cmd.settings_invalid": ("invalid {name}: {error}", "{name} 无效：{error}"),
+    "cmd.settings_saved": ("saved {count} setting(s) to {path}", "已保存 {count} 项设置到 {path}"),
+    "cmd.settings_cancelled": ("settings unchanged", "设置未修改"),
+    "cmd.settings_no_editor": (
+        "edit the file directly, or run /settings in the TUI",
+        "可直接编辑该文件，或在 TUI 中运行 /settings",
+    ),
     # -- command specs ----------------------------------------------------
     "spec.help": ("show this help", "显示帮助"),
     "spec.model": ("list models or switch model", "列出模型或切换模型"),
@@ -150,6 +224,7 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "spec.auto": ("toggle auto-approve for this session", "切换本次会话的自动放行"),
     "spec.lang": ("set the language (en|zh|auto)", "设置语言（en|zh|auto）"),
     "spec.trust": ("trust or untrust this project", "信任或取消信任本项目"),
+    "spec.settings": ("edit settings interactively", "交互修改设置"),
     "spec.skills": ("list available skills", "列出可用技能"),
     "spec.prompts": ("list prompt templates", "列出提示词模板"),
     "spec.exit": ("quit", "退出"),
@@ -169,6 +244,7 @@ _STRINGS: dict[str, tuple[str, str]] = {
   /auto [on|off]        toggle auto-approve for this session
   /lang [en|zh|auto]    set the language
   /trust [off]          trust (or untrust) this project for future sessions
+  /settings             edit settings.toml interactively
   /skills               list available skills
   /skill:<name>         load a skill into the conversation
   /prompts              list prompt templates
@@ -189,6 +265,7 @@ _STRINGS: dict[str, tuple[str, str]] = {
   /auto [on|off]        切换本次会话的自动放行
   /lang [en|zh|auto]    设置语言
   /trust [off]          信任（或取消信任）本项目，供后续会话使用
+  /settings             交互修改 settings.toml
   /skills               列出可用技能
   /skill:<name>         将技能载入对话
   /prompts              列出提示词模板

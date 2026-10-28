@@ -30,16 +30,21 @@ from tm.cli.commands import CommandContext, ExitSignal, SlashCommands, _format_t
 from tm.cli.console_ui import ConsoleAgentUI
 from tm.compat import to_thread
 from tm.config import (
+    SETTING_FIELDS,
     Settings,
     config_dir,
+    format_setting_value,
     load_credentials,
     load_settings,
+    parse_setting_value,
     sanitize_api_key,
     save_credential,
+    settings_path,
 )
 from tm.context import build_context_section, load_context_files
 from tm.core.agent import Agent
 from tm.core.events import AgentEvent
+from tm.core.pruning import policy_from_settings
 from tm.core.session import Session, SessionInfo, SessionManager
 from tm.core.store import Store
 from tm.core.system_prompt import build_system_prompt
@@ -152,10 +157,12 @@ async def _json_listener(event: AgentEvent) -> None:
     print(event.model_dump_json(), flush=True)
 
 
-def _select_tools(no_tools: bool, read_only: bool, *, no_python: bool = False) -> list:
+def _select_tools(
+    no_tools: bool, read_only: bool, *, no_python: bool = False, read_dedupe: bool = True
+) -> list:
     if no_tools:
         return []
-    tools = build_default_tools()
+    tools = build_default_tools(read_dedupe=read_dedupe)
     if read_only:
         tools = [tool for tool in tools if tool.name in READ_TOOLS]
     if no_python:
@@ -307,6 +314,8 @@ def _build_agent(
         auto_compact=settings.auto_compact and not no_auto_compact,
         compact_threshold=settings.compact_threshold,
         compact_keep_recent=settings.compact_keep_recent,
+        compact_max_tokens=settings.compact_max_tokens,
+        prune=policy_from_settings(settings),
         max_turns=max_turns if max_turns is not None else settings.max_turns,
         max_retries=max_retries if max_retries is not None else settings.max_retries,
         telemetry=telemetry,
@@ -334,6 +343,8 @@ def _command_context(
     emit,
     picker=None,
     approver: SessionApprover | None = None,
+    settings: Settings | None = None,
+    settings_editor=None,
 ) -> SlashCommands:
     return SlashCommands(
         CommandContext(
@@ -350,6 +361,8 @@ def _command_context(
             trust_manager=TrustManager(config_dir() / "trust.json"),
             journal=agent.journal,
             approver=approver,
+            settings=settings,
+            settings_editor=settings_editor,
         )
     )
 
@@ -410,6 +423,37 @@ def _pick_session_console(
 
 async def _console_picker(infos: list[SessionInfo]) -> SessionInfo | None:
     return await to_thread(_pick_session_console, infos, console)
+
+
+async def _console_settings_editor(settings: Settings) -> dict[str, object] | None:
+    """Numbered editor used by the plain console REPL (the TUI has a modal)."""
+    console.print(_t("cmd.settings_header", path=settings_path()))
+    for index, item in enumerate(SETTING_FIELDS, start=1):
+        value = format_setting_value(item, getattr(settings, item.name))
+        console.print(f"  {index:2d}. {item.name} = {value}")
+    console.print(_t("cmd.settings_hint"))
+    updates: dict[str, object] = {}
+    while True:
+        try:
+            line = (await to_thread(input, _t("cmd.settings_prompt"))).strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        if not line:
+            break
+        number, separator, raw = line.partition("=")
+        index = int(number.strip()) if number.strip().isdigit() else 0
+        if not separator or not 1 <= index <= len(SETTING_FIELDS):
+            console.print(_t("cmd.settings_bad_line"))
+            continue
+        field = SETTING_FIELDS[index - 1]
+        try:
+            updates[field.name] = parse_setting_value(field, raw)
+        except ValueError as error:
+            console.print(_t("cmd.settings_invalid", name=field.name, error=str(error)))
+            continue
+        shown = format_setting_value(field, updates[field.name])
+        console.print(f"  {field.name} = {shown}")
+    return updates or None
 
 
 def _startup_banner(model: Model, resources: Resources, no_context_files: bool) -> str:
@@ -526,6 +570,8 @@ def _run_tui(
         prompt_app.write_line,
         picker=prompt_app.pick_session,
         approver=approver,
+        settings=settings,
+        settings_editor=prompt_app.edit_settings,
     )
     prompt_app.command_handler = commands.handle
     deferred.set(TextualApprover(prompt_app))
@@ -536,6 +582,7 @@ async def _agent_repl(
     agent: Agent, model: Model, registry: Registry, session_manager: SessionManager | None,
     resources: Resources, session: Session | None,
     approver: SessionApprover | None = None,
+    settings: Settings | None = None,
 ) -> None:
     commands = _command_context(
         agent,
@@ -546,6 +593,8 @@ async def _agent_repl(
         console.print,
         picker=_console_picker,
         approver=approver,
+        settings=settings,
+        settings_editor=_console_settings_editor,
     )
     console.print(
         f"[bold]TM[/bold] {__version__} | {agent.model.provider}/{agent.model.id} | /help | /exit"
@@ -762,7 +811,9 @@ def main(
             f"reject them. Store the key with `tm --login {selected_provider.id}` and restart."
         )
 
-    tools = _select_tools(no_tools, read_only, no_python=no_python)
+    tools = _select_tools(
+        no_tools, read_only, no_python=no_python, read_dedupe=settings.read_dedupe
+    )
     trusted = _resolve_trust(settings, approve, no_approve)
     if not trusted:
         console.print(_t("cli.untrusted_note"), style="dim")
@@ -833,7 +884,7 @@ def main(
                 else:
                     await _agent_repl(
                         agent, selected_model, registry, session_manager, resources, session,
-                        approver,
+                        approver, settings,
                     )
             elif text:
                 await _chat_once(

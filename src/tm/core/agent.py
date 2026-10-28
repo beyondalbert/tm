@@ -21,7 +21,7 @@ from tm.ai.types import (
     ToolResultMessage,
     UserMessage,
 )
-from tm.core.compaction import SUMMARY_PREFIX
+from tm.core.compaction import SUMMARY_PREFIX, estimate_context_tokens
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
@@ -35,6 +35,7 @@ from tm.core.events import (
 from tm.core.loop import LoopHooks, StreamFn, agent_loop
 from tm.core.messages import repair_tool_messages
 from tm.core.operation import Operation, OperationState, OperationStatus, PendingEffect
+from tm.core.pruning import PrunePolicy, prune_tool_results
 from tm.core.session import Session
 from tm.core.store import Store
 from tm.i18n import t as _t
@@ -111,6 +112,8 @@ class Agent:
         auto_compact: bool = False,
         compact_threshold: float = 0.8,
         compact_keep_recent: int = 6,
+        compact_max_tokens: int = 0,
+        prune: PrunePolicy | None = None,
         telemetry: Telemetry | None = None,
         store: Store | None = None,
         cache_retention: str | None = None,
@@ -128,6 +131,8 @@ class Agent:
         self.auto_compact = auto_compact
         self.compact_threshold = compact_threshold
         self.compact_keep_recent = compact_keep_recent
+        self.compact_max_tokens = compact_max_tokens
+        self.prune = prune or PrunePolicy()
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.before_tool_call: BeforeToolCall | None = None
@@ -142,6 +147,9 @@ class Agent:
         self.operation: Operation | None = None
         self._trace_id = ""
         self._operation_span_id: str | None = None
+        #: Assistant messages in the last compacted history; used to avoid
+        #: compacting twice without any new model output in between.
+        self._compacted_assistants: int | None = None
         #: Why the last run ended: "stop", "max_turns", "error", or "aborted".
         self.last_stop_reason: str | None = None
 
@@ -231,6 +239,7 @@ class Agent:
             ]
         if self.after_compact is not None:
             await _maybe_await(self.after_compact(summary))
+        self._compacted_assistants = self._assistant_count(self._messages)
         return True
 
     def _trim_oldest(self) -> bool:
@@ -269,16 +278,65 @@ class Agent:
         return False
 
     async def _maybe_auto_compact(self) -> bool:
-        from tm.core.compaction import estimate_context_tokens
-
-        if len(self._messages) <= self.compact_keep_recent:
+        view = self._request_view(self._messages)
+        if not self._can_compact(self._messages) or not self._over_budget(view):
             return False
-        estimated = estimate_context_tokens(self._messages, self.system_prompt)
-        limit = int(self.model.context_window * self.compact_threshold)
-        if estimated < limit:
-            return False
+        estimated = estimate_context_tokens(view, self.system_prompt)
         await self._notice(_t("notice.compacting", tokens=estimated), "info")
         return await self.compact(keep_recent=self.compact_keep_recent, signal=self._signal)
+
+    @staticmethod
+    def _assistant_count(messages: list[Message]) -> int:
+        return sum(1 for message in messages if isinstance(message, AssistantMessage))
+
+    def _can_compact(self, messages: list[Message]) -> bool:
+        """False right after a compaction that had no new assistant output since."""
+        if self._compacted_assistants is None:
+            return True
+        return self._assistant_count(messages) > self._compacted_assistants
+
+    def _token_budget(self) -> int:
+        """Tokens that trigger compaction: the window ratio with an optional ceiling."""
+        limits: list[int] = []
+        if self.model.context_window > 0 and self.compact_threshold > 0:
+            limits.append(int(self.model.context_window * self.compact_threshold))
+        if self.compact_max_tokens > 0:
+            limits.append(self.compact_max_tokens)
+        return min(limits) if limits else 0
+
+    def _request_view(self, messages: list[Message]) -> list[Message]:
+        """Messages sent to the model; old tool output may be rewritten here only."""
+        return prune_tool_results(messages, self.prune)
+
+    def _over_budget(self, view: list[Message]) -> bool:
+        if not self.auto_compact or len(view) <= self.compact_keep_recent:
+            return False
+        budget = self._token_budget()
+        if budget <= 0:
+            return False
+        return estimate_context_tokens(view, self.system_prompt) >= budget
+
+    async def _prepare_request(
+        self, history: list[Message]
+    ) -> tuple[list[Message], list[Message]]:
+        """Check the budget before every request, including mid-turn.
+
+        pi does the same: a single long autonomous turn can otherwise grow far
+        past the threshold and only recover after an overflow error.
+        """
+        view = self._request_view(history)
+        if not self._can_compact(history) or not self._over_budget(view):
+            return history, view
+        # The loop's history includes messages emitted this turn that are not in
+        # the session yet; persist them before the compaction entry cuts history.
+        self._messages = list(history)
+        self._flush_messages()
+        estimated = estimate_context_tokens(view, self.system_prompt)
+        await self._notice(_t("notice.compacting", tokens=estimated), "info")
+        if await self.compact(keep_recent=self.compact_keep_recent, signal=self._signal):
+            history = list(self._messages)
+            view = self._request_view(history)
+        return history, view
 
     @property
     def is_running(self) -> bool:
@@ -389,6 +447,7 @@ class Agent:
             take_follow_up=self._take_follow_up,
             pause=self._wait_if_paused,
             notice=self._notice,
+            prepare=self._prepare_request,
         )
         context = TelemetryContext(trace_id=uuid.uuid4().hex)
         span_id = self.telemetry.start(

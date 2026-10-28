@@ -24,7 +24,7 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widget import Widget
-from textual.widgets import Button, Label, OptionList, Static, TextArea
+from textual.widgets import Button, Input, Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
 from tm.ai.types import AssistantMessage, Model, TextContent, ToolResultMessage, Usage, UserMessage
@@ -38,6 +38,13 @@ from tm.cli.autocomplete import (
 )
 from tm.cli.commands import ExitSignal, command_specs
 from tm.clipboard import copy_to_clipboard
+from tm.config import (
+    SETTING_FIELDS,
+    SettingField,
+    Settings,
+    format_setting_value,
+    parse_setting_value,
+)
 from tm.core.agent import Agent
 from tm.core.compaction import estimate_context_tokens
 from tm.core.events import (
@@ -456,6 +463,135 @@ class SessionScreen(ModalScreen[Optional[SessionInfo]]):
         self._answer(None)
 
 
+class SettingsScreen(ModalScreen[dict[str, object] | None]):
+    """Modal editor for the settings that can be changed at runtime."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(
+        self, settings: Settings, fields: tuple[SettingField, ...] = SETTING_FIELDS
+    ) -> None:
+        super().__init__()
+        self._settings = settings
+        self._fields = list(fields)
+        self._draft: dict[str, object] = {
+            field.name: getattr(settings, field.name) for field in self._fields
+        }
+        self._editing: SettingField | None = None
+        self._answered = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="settings-box"):
+            yield Label(_t("tui.settings_title"), id="settings-title")
+            yield OptionList(id="settings-list")
+            yield Input(id="settings-input")
+            yield Static("", id="settings-hint")
+            with Horizontal(id="settings-buttons"):
+                yield Button(_t("tui.settings_save"), id="settings-save", variant="success")
+                yield Button(_t("tui.settings_cancel"), id="settings-cancel")
+
+    def on_mount(self) -> None:
+        self._refresh()
+        self._show_hint(self._fields[0])
+        options = self.query_one(OptionList)
+        options.highlighted = 0
+        options.focus()
+
+    def _refresh(self, highlight: int | None = None) -> None:
+        options = self.query_one(OptionList)
+        current = highlight if highlight is not None else options.highlighted
+        options.clear_options()
+        for field in self._fields:
+            value = format_setting_value(field, self._draft[field.name])
+            options.add_option(Option(f"{field.name} = {value}", id=field.name))
+        if current is not None and self._fields:
+            options.highlighted = max(0, min(current, len(self._fields) - 1))
+
+    def _field(self, name: str | None) -> SettingField | None:
+        return next((field for field in self._fields if field.name == name), None)
+
+    def _show_hint(self, field: SettingField) -> None:
+        parts = [
+            _t(
+                "tui.settings_hint",
+                name=field.name,
+                kind=field.kind,
+                description=_t(f"settings.{field.name}"),
+            )
+        ]
+        if field.choices:
+            parts.append(_t("tui.settings_choices", choices=", ".join(field.choices)))
+        parts.append(
+            _t(
+                "tui.settings_value",
+                value=format_setting_value(field, self._draft[field.name]),
+            )
+        )
+        self.query_one("#settings-hint", Static).update("\n".join(parts))
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        field = self._field(event.option.id)
+        if field is not None:
+            self._show_hint(field)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        field = self._field(event.option.id)
+        if field is None:
+            return
+        if field.kind == "bool":
+            self._draft[field.name] = not bool(self._draft[field.name])
+            self._refresh()
+            self._show_hint(field)
+            return
+        editor = self.query_one(Input)
+        editor.value = format_setting_value(field, self._draft[field.name])
+        editor.display = True
+        editor.focus()
+        self._editing = field
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        field = self._editing
+        if field is None:
+            return
+        try:
+            value = parse_setting_value(field, event.value)
+        except ValueError as error:
+            self.query_one("#settings-hint", Static).update(Text(str(error), style=_ERROR))
+            return
+        self._draft[field.name] = value
+        self._editing = None
+        editor = self.query_one(Input)
+        editor.display = False
+        self._refresh()
+        self._show_hint(field)
+        self.query_one(OptionList).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "settings-save":
+            changed = {
+                name: value
+                for name, value in self._draft.items()
+                if value != getattr(self._settings, name)
+            }
+            self._answer(changed)
+        else:
+            self._answer(None)
+
+    def _answer(self, values: dict[str, object] | None) -> None:
+        if self._answered:
+            return
+        self._answered = True
+        self.dismiss(values)
+
+    def action_cancel(self) -> None:
+        if self._editing is not None:
+            self._editing = None
+            self.query_one(Input).display = False
+            self.query_one(OptionList).focus()
+            return
+        self._answer(None)
+
+
 class TextualApprover:
     def __init__(self, app: TMPromptApp) -> None:
         self._app = app
@@ -596,6 +732,12 @@ class TMPromptApp(App[None]):
     #session-box {{ width: 70%; height: auto; max-height: 70%; padding: 1 2; background: $panel; border: round {_ACCENT}; }}
     #session-title {{ text-style: bold; padding-bottom: 1; }}
     #session-list {{ height: auto; max-height: 20; }}
+    #settings-box {{ width: 76%; height: auto; max-height: 80%; padding: 1 2; background: $panel; border: round {_ACCENT}; }}
+    #settings-title {{ text-style: bold; padding-bottom: 1; }}
+    #settings-list {{ height: auto; max-height: 16; }}
+    #settings-input {{ display: none; margin-top: 1; }}
+    #settings-hint {{ color: {_DIM}; height: auto; padding: 1 0; }}
+    #settings-buttons {{ height: auto; align-horizontal: right; }}
     """
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
@@ -644,6 +786,9 @@ class TMPromptApp(App[None]):
 
     async def pick_session(self, infos: list[SessionInfo]) -> SessionInfo | None:
         return await self.push_screen_wait(SessionScreen(infos))
+
+    async def edit_settings(self, settings: Settings) -> dict[str, object] | None:
+        return await self.push_screen_wait(SettingsScreen(settings))
 
     # -- layout -----------------------------------------------------------
     def compose(self) -> ComposeResult:

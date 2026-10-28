@@ -314,6 +314,7 @@ allow = ["api.deepseek.com"]
 | `/undo [n]` | 回退最近 n 个可逆变更 |
 | `/copy [n]` | 复制倒数第 n 条回复到剪贴板 |
 | `/lang [en\|zh\|auto]` | 设置界面语言 |
+| `/settings` | 交互修改 settings.toml |
 | `/skills` | 列出可用技能 |
 | `/skill:<name>` | 将技能载入对话 |
 | `/prompts` | 列出提示词模板 |
@@ -322,6 +323,10 @@ allow = ["api.deepseek.com"]
 
 **补全。** TUI 中按 `Tab` 接受候选：输入 `/` 补全命令，输入 `@` 模糊搜索文件路径。
 `Up`/`Down` 移动选择，`Escape` 关闭候选。
+
+`/settings` 在 TUI 中打开设置面板（纯控制台为编号输入）：选择字段后，布尔值按
+回车切换，数字/字符串直接输入。保存时只把改动的键合并进 `settings.toml`；压缩、
+裁剪、read 去重、回合/重试次数和温度会立即生效（其他字段在下次启动时生效）。
 
 **输入。** TUI 输入框支持多行：`Enter` 发送，`Shift+Enter`（或 `Ctrl+J`）插入换行；
 粘贴会保留每一行。运行中按 `Esc` 或 `Ctrl+C` 停止当前回合，按 `Ctrl+P` 暂停/恢复（状态行会显示）。
@@ -386,6 +391,13 @@ system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true      # summarize older context when nearing the limit
 compact_threshold = 0.8  # fraction of the context window that triggers it
 compact_keep_recent = 6  # recent messages kept verbatim
+compact_max_tokens = 0   # 压缩触发的硬上限（token）；0 表示只用窗口比例
+prune_tool_output = true            # 仅在请求里改写旧工具输出（会话仍保留原文）
+prune_tool_output_keep_turns = 8    # 最近 N 个 assistant 回合的输出不裁剪
+prune_tool_output_min_chars = 4000  # 只裁剪长度达到该值的工具结果
+prune_tool_output_keep_chars = 400  # 改写后保留的原文尾部字符数
+spill_dir = ""           # 被裁剪的完整输出保存目录（默认 <config>/workspace/spill）
+read_dedupe = true       # 同一会话重复读取未变化的文件/范围时只回一句提示
 max_turns = 300          # 每次提示的最大回合数（也可 `tm --max-turns N`）
 max_retries = 3          # 瞬时网络错误的重试次数（也可 `--max-retries N`）
 default_project_trust = "ask"  # ask | always | never
@@ -398,11 +410,18 @@ auto_install = true            # 自动安装 python 工具声明的缺失 pip �
 language = "auto"              # 界面语言：en | zh | auto（也可 --lang、/lang）
 ```
 
-当估算上下文超过 `context_window * compact_threshold` 时，会在发送提示词前自动压缩。
+当估算上下文超过 `context_window * compact_threshold`（或更小的 `compact_max_tokens`）时，
+会在发送提示词前自动压缩；每次模型请求前也会检查，因此单个很长的自主回合不会远超预算。
 单次运行可用 `--no-auto-compact` 关闭。若某回合被截断或报上下文溢出，TM 会压缩并重试，且每次
 保留更小的尾部（最终只留摘要）直到放得下；总结请求本身也按窗口做了长度上限，若仍失败则直接丢弃
 最旧的消息。摘要为结构化（目标、进度、决定、下一步）并在每次压缩时**增量更新**，同时附带读取/修改
 过的文件清单。压缩会作为持久化条目存储，因此摘要后的上下文在重启后仍然保留。
+
+旧工具输出只会在请求里被改写，会话中仍保留原文：早于最近 `prune_tool_output_keep_turns` 个
+assistant 回合、且长度超过 `prune_tool_output_min_chars` 的结果，会被替换为一段短提示，包含原文尾部的
+`prune_tool_output_keep_chars` 个字符、总长度，以及保存完整输出的 spill 文件路径（位于 `spill_dir`，
+默认 `<config>/workspace/spill`）。`read_dedupe` 会对同一会话中重复读取且未变化的文件/行范围只返回
+一条提示，而不是重复内容。设 `prune_tool_output = false` 可让所有工具结果原样发送。
 
 可在 `models.toml` 里为模型设置价格（`input_cost`、`output_cost`、`cache_read_cost`，USD/百万
 token），页脚随后会显示 `$cost` 与缓存命中率（`CH%`）。

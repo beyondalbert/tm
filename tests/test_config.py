@@ -20,10 +20,26 @@ def test_config_dir_env_override(tmp_path: Path, monkeypatch) -> None:
 
 def test_load_settings_reads_toml(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
-    (tmp_path / "settings.toml").write_text('provider = "qwen"\nmodel = "qwen-max"\n')
+    (tmp_path / "settings.toml").write_text(
+        'provider = "qwen"\nmodel = "qwen-max"\n'
+        "compact_max_tokens = 150000\n"
+        "prune_tool_output = false\n"
+        "prune_tool_output_keep_turns = 4\n"
+        "prune_tool_output_min_chars = 2000\n"
+        "prune_tool_output_keep_chars = 100\n"
+        'spill_dir = "D:/tmp/spill"\n'
+        "read_dedupe = false\n"
+    )
     settings = load_settings()
     assert settings.provider == "qwen"
     assert settings.model == "qwen-max"
+    assert settings.compact_max_tokens == 150000
+    assert settings.prune_tool_output is False
+    assert settings.prune_tool_output_keep_turns == 4
+    assert settings.prune_tool_output_min_chars == 2000
+    assert settings.prune_tool_output_keep_chars == 100
+    assert settings.spill_dir == "D:/tmp/spill"
+    assert settings.read_dedupe is False
 
 
 def test_load_settings_tolerates_bom(tmp_path: Path, monkeypatch) -> None:
