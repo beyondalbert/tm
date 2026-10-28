@@ -388,3 +388,19 @@ async def test_logs_skipped_group_message(tmp_path: Path) -> None:
     assert client.sent == []
     assert any("skip [1001#2]" in line and "mention" in line for line in lines)
     assert bot.state.last_seq(1001) == 2
+
+
+def test_workers_created_outside_running_loop(tmp_path: Path) -> None:
+    bot, client = _bot(tmp_path)  # constructed before any event loop exists
+
+    async def main() -> None:
+        bot.start_workers()
+        await bot.enqueue(_msg(2))
+        for _ in range(100):
+            if client.sent:
+                break
+            await asyncio.sleep(0.01)
+        await bot.stop_workers()
+
+    asyncio.run(main())
+    assert client.sent == [(1001, "pong")]

@@ -163,7 +163,9 @@ class ImBot:
 
         self.actor_id: int | None = None
         self.handle = ""
-        self._queue: asyncio.Queue[ImMessage] = asyncio.Queue()
+        # Created on first use inside the running loop: constructing a Queue
+        # before ``asyncio.run`` binds it to a different loop on Python 3.8.
+        self._queue: asyncio.Queue[ImMessage] | None = None
         self._agents: dict[int, Agent] = {}
         self._progress: dict[int, _TurnLog] = {}
         self._locks: dict[int, asyncio.Lock] = {}
@@ -210,10 +212,16 @@ class ImBot:
         return handle in self.settings.owner_handles or f"@{handle}" in self.settings.owner_handles
 
     # -- queue / workers --------------------------------------------------
+    def _message_queue(self) -> asyncio.Queue[ImMessage]:
+        if self._queue is None:
+            self._queue = asyncio.Queue()
+        return self._queue
+
     async def enqueue(self, message: ImMessage) -> None:
-        await self._queue.put(message)
+        await self._message_queue().put(message)
 
     def start_workers(self) -> None:
+        self._message_queue()
         self._tasks = [asyncio.create_task(self._worker()) for _ in range(self.workers)]
 
     async def stop_workers(self) -> None:
@@ -225,8 +233,9 @@ class ImBot:
         self._tasks = []
 
     async def _worker(self) -> None:
+        queue = self._message_queue()
         while True:
-            message = await self._queue.get()
+            message = await queue.get()
             try:
                 await self.process(message)
             except asyncio.CancelledError:
@@ -234,7 +243,7 @@ class ImBot:
             except Exception as error:  # noqa: BLE001 - one bad message must not stop the bot
                 self.log(f"error handling conv={message.conv_id} seq={message.seq}: {error}")
             finally:
-                self._queue.task_done()
+                queue.task_done()
 
     # -- message handling -------------------------------------------------
     async def process(self, message: ImMessage) -> None:

@@ -146,7 +146,9 @@ class RealtimeClient:
         self.heartbeat_sec = 30
 
         self._transport: _TcpTransport | _WsTransport | None = None
-        self._stop = asyncio.Event()
+        # Created on first use inside the running loop: constructing an Event
+        # before ``asyncio.run`` binds it to a different loop on Python 3.8.
+        self._stop_event: asyncio.Event | None = None
         self._req = itertools.count(1)
         self._cursors: dict[int, int] = {}
         self._last_recv = time.monotonic()
@@ -159,9 +161,15 @@ class RealtimeClient:
         self._reconnect_delay: float | None = None
 
     # -- public -----------------------------------------------------------
+    def _stop_signal(self) -> asyncio.Event:
+        if self._stop_event is None:
+            self._stop_event = asyncio.Event()
+        return self._stop_event
+
     async def run(self) -> None:
+        stop = self._stop_signal()
         backoff = 1.0
-        while not self._stop.is_set():
+        while not stop.is_set():
             self._reconnect_delay = None
             self._authenticated = False
             self._sync_active = False
@@ -174,10 +182,10 @@ class RealtimeClient:
             except asyncio.CancelledError:
                 raise
             except Exception as error:  # noqa: BLE001 - reconnect on any failure
-                if self._stop.is_set():
+                if stop.is_set():
                     return
                 self.log(f"connection lost: {type(error).__name__}: {error}")
-            if self._stop.is_set():
+            if stop.is_set():
                 return
             delay, backoff = _next_backoff(backoff, self._authenticated)
             if self._reconnect_delay is not None:
@@ -186,10 +194,10 @@ class RealtimeClient:
                 delay *= 1 + random.uniform(-0.3, 0.3)
             self.log(f"reconnecting in {delay:.1f}s")
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._stop.wait(), timeout=delay)
+                await asyncio.wait_for(stop.wait(), timeout=delay)
 
     async def stop(self) -> None:
-        self._stop.set()
+        self._stop_signal().set()
         if self._transport is not None:
             self._transport.abort()
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 from tm.im.protocol import Cmd, Frame, ImMessage
@@ -95,3 +96,14 @@ def test_backoff_resets_after_authentication() -> None:
     assert _next_backoff(1.0, False) == (1.0, 2.0)
     assert _next_backoff(16.0, False) == (16.0, 30.0)
     assert _next_backoff(30.0, False) == (30.0, 30.0)
+
+
+def test_stop_signal_is_created_inside_the_running_loop() -> None:
+    client = _make_client([])
+
+    async def main() -> None:
+        waiter = asyncio.ensure_future(client._stop_signal().wait())
+        await client.stop()
+        await asyncio.wait_for(waiter, timeout=1)
+
+    asyncio.run(main())
