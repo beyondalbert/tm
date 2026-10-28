@@ -115,6 +115,11 @@ class ImSettings:
     def websocket_url(self) -> str | None:
         """The realtime WebSocket URL, normalized from ``ws_url``.
 
+        When ``ws_url`` is unset and no ``tcp_addr`` is configured, default to
+        WebSocket on the REST host at ``/ws`` (the public server's endpoint)
+        instead of guessing the legacy native TCP port 8090. An explicit
+        ``tcp_addr`` with ``ws_url`` unset keeps using native TCP.
+
         Accepts ``host/ws``, ``ws://host/ws``, ``wss://host:9000/ws``, or even a
         full REST URL like ``http://host/ws`` (``http`` -> ``ws``, ``https`` ->
         ``wss``). A value without a scheme inherits ``ws``/``wss`` from
@@ -122,7 +127,9 @@ class ImSettings:
         """
         raw = (self.ws_url or "").strip()
         if not raw:
-            return None
+            if self.tcp_addr:
+                return None
+            raw = f"{self.host}/ws"
         # Collapse a doubled scheme such as "ws://http://host/ws".
         raw = re.sub(
             r"^[A-Za-z][A-Za-z0-9+.\-]*://(?=[A-Za-z][A-Za-z0-9+.\-]*://)", "", raw

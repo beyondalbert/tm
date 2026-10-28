@@ -29,8 +29,9 @@ tm im login                     # default config (im.toml)
 tm im config new alice          # named config (configs/alice.toml), prompts for the key
 ```
 
-Use a named config when you run more than one account. To use a different
-server:
+Use a named config when you run more than one account. The public server's
+long connection defaults to `ws://tmim.stkg.ltd/ws`, so nothing else is needed.
+To use a different server:
 
 ```
 tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
@@ -93,9 +94,9 @@ The sections below are the full reference for every field and subcommand.
 ## 1. Requirements
 
 - A reachable tm_im server. The defaults target the public server: REST on
-  `http://tmim.stkg.ltd/v1` and the realtime long connection on
-  `tmim.stkg.ltd:8090` (native TCP). Override `base_url` plus `ws_url` or
-  `tcp_addr` for your own deployment.
+  `http://tmim.stkg.ltd/v1` and the realtime WebSocket on
+  `ws://tmim.stkg.ltd/ws` (derived from the REST host at `/ws`). Override
+  `base_url` plus `ws_url` (or set `tcp_addr`) for your own deployment.
 - A tm_im credential. For a bot, create a **dedicated Agent** account in the
   tm_im client and copy its `api_key` (`sk_live_...`). Do not reuse a human
   account you also log into elsewhere (see [Troubleshooting](#7-troubleshooting)).
@@ -118,8 +119,8 @@ with `tm im config new`. See [section 4](#4-multiple-accounts-on-one-machine).
 |---|---|---|
 | `base_url` | `http://tmim.stkg.ltd/v1` | REST base URL |
 | `api_key` | – | Agent credential (`sk_live_...`) |
-| `tcp_addr` | `<host from base_url>:8090` | Realtime host:port (native TCP) |
-| `ws_url` | – | Realtime WebSocket URL; takes precedence over `tcp_addr` |
+| `tcp_addr` | – | Realtime host:port (native TCP); used only when set |
+| `ws_url` | `ws(s)://<host from base_url>/ws` | Realtime WebSocket URL; takes precedence over `tcp_addr` |
 | `device_id` | `tm` | Reported device id |
 | `allow_tools` | `full` | `none` \| `read_only` \| `full` (see [Safety](#6-safety)) |
 | `respond_in_groups` | `always` | `mention` \| `always` \| `never` |
@@ -246,17 +247,20 @@ tm im logs -f
 
 ### Realtime endpoint
 
-The long connection is chosen explicitly (it is not just inferred from
-`base_url`):
+The long connection is chosen explicitly:
 
-- `ws_url` set → **WebSocket** (e.g. `tmim.stkg.ltd/ws`, `wss://host/ws`).
+- `ws_url` set → **WebSocket** (e.g. `ws://host/ws`, `wss://host/ws`).
 - else `tcp_addr` set → **native TCP** `host:port`.
-- else → `<host from base_url>:8090` (native TCP).
+- else → **WebSocket** `ws(s)://<host from base_url>/ws`; the scheme follows
+  `base_url` (`http` → `ws`, `https` → `wss`).
+
+For the public server this resolves to `ws://tmim.stkg.ltd/ws`; no setting is
+needed. For another deployment set both the REST and realtime endpoints:
 
 ```
-tm im config set ws_url=tmim.stkg.ltd/ws     # ws/wss inherited from base_url
-tm im config set tcp_addr=host:8090          # or native TCP
-tm im run --ws-url wss://tmim.stkg.ltd/ws    # per run
+tm im config set ws_url=other.example/ws   # ws/wss inherited from base_url
+tm im config set tcp_addr=host:8090        # or native TCP
+tm im run --ws-url wss://other.example/ws  # per run
 ```
 
 A `ws_url` without a scheme inherits `ws`/`wss` from `base_url`
@@ -373,9 +377,10 @@ allows. Replies are sent as plain text and split at `reply_max_chars`.
 
 - **Writes go over REST** (`POST /conversations/{id}/messages`); replies use a
   per-message `client_msg_id` for idempotency.
-- **Receive uses the realtime TCP long connection**: authenticate (`AUTH`),
-  application heartbeat, `PUSH` for new messages, and `SYNC` after every
-  reconnect (and whenever a `seq` gap is detected) to backfill in order.
+- **Receive uses the realtime long connection** (WebSocket by default, or
+  native TCP when `tcp_addr` is set): authenticate (`AUTH`), application
+  heartbeat, `PUSH` for new messages, and `SYNC` after every reconnect (and
+  whenever a `seq` gap is detected) to backfill in order.
 - **Ordering and dedupe use `seq`**: `seq <= last` is ignored, and the last
   processed `seq` per conversation is persisted in `state.json`.
 - **One TM session per conversation** keeps memory across messages; concurrent

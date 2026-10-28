@@ -61,4 +61,14 @@ def test_websocket_url_normalization() -> None:
     assert ImSettings(ws_url="https://tmim.stkg.ltd/ws").websocket_url() == "wss://tmim.stkg.ltd/ws"
     # A doubled scheme (e.g. from an earlier bug) is recovered.
     assert ImSettings(ws_url="ws://http://tmim.stkg.ltd/ws").websocket_url() == "ws://tmim.stkg.ltd/ws"
-    assert ImSettings().websocket_url() is None
+
+
+def test_websocket_url_defaults_to_host_ws() -> None:
+    assert ImSettings().websocket_url() == "ws://tmim.stkg.ltd/ws"
+    https = ImSettings(base_url="https://example.com/v1")
+    assert https.websocket_url() == "wss://example.com/ws"
+    # An explicit tcp_addr opts into native TCP when ws_url is unset.
+    assert ImSettings(tcp_addr="example.com:9000").websocket_url() is None
+    # An explicit ws_url still wins over tcp_addr.
+    both = ImSettings(tcp_addr="example.com:9000", ws_url="example.com/ws")
+    assert both.websocket_url() == "ws://example.com/ws"

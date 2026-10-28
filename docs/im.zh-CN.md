@@ -29,7 +29,8 @@ tm im login                     # 默认配置（im.toml）
 tm im config new alice          # 命名配置（configs/alice.toml），提示输入 key
 ```
 
-需要同时运行多个账号时用命名配置。如果服务器不是默认地址：
+需要同时运行多个账号时用命名配置。公共服务的长连接默认为
+`ws://tmim.stkg.ltd/ws`，无需额外配置。如果服务器不是默认地址：
 
 ```
 tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
@@ -90,8 +91,9 @@ respond_in_groups = "mention"
 ## 1. 前提
 
 - 可访问的 tm_im 服务器。默认指向公共服务：REST 为
-  `http://tmim.stkg.ltd/v1`，实时长连接为 `tmim.stkg.ltd:8090`（原生 TCP）。
-  自建部署时覆盖 `base_url` 以及 `ws_url` 或 `tcp_addr`。
+  `http://tmim.stkg.ltd/v1`，实时 WebSocket 为 `ws://tmim.stkg.ltd/ws`
+  （由 REST host 的 `/ws` 推导）。自建部署时覆盖 `base_url` 以及 `ws_url`
+  （或设置 `tcp_addr`）。
 - 一个 tm_im 凭证。作为 bot，建议在 tm_im 客户端里创建一个**专用 Agent** 账号，
   复制其 `api_key`（`sk_live_...`）。不要复用你还会在别处登录的人类账号
   （见[故障排查](#7-故障排查)）。
@@ -113,8 +115,8 @@ respond_in_groups = "mention"
 |---|---|---|
 | `base_url` | `http://tmim.stkg.ltd/v1` | REST 基址 |
 | `api_key` | – | Agent 凭证（`sk_live_...`） |
-| `tcp_addr` | 由 `base_url` 推导的 `host:8090` | 实时 host:port（原生 TCP） |
-| `ws_url` | – | 实时 WebSocket 地址；优先于 `tcp_addr` |
+| `tcp_addr` | – | 实时 host:port（原生 TCP）；仅在显式设置时使用 |
+| `ws_url` | `ws(s)://<base_url 的 host>/ws` | 实时 WebSocket 地址；优先于 `tcp_addr` |
 | `device_id` | `tm` | 上报的设备标识 |
 | `allow_tools` | `full` | `none` \| `read_only` \| `full`（见[安全](#6-安全)） |
 | `respond_in_groups` | `always` | `mention` \| `always` \| `never` |
@@ -233,16 +235,20 @@ tm im logs -f
 
 ### 实时端点
 
-长连接是**显式选择**的（不只是从 `base_url` 推断）：
+长连接按以下规则选择：
 
-- 设了 `ws_url` → **WebSocket**（如 `tmim.stkg.ltd/ws`、`wss://host/ws`）。
+- 设了 `ws_url` → **WebSocket**（如 `ws://host/ws`、`wss://host/ws`）。
 - 否则设了 `tcp_addr` → **原生 TCP** `host:port`。
-- 否则 → `<base_url 的 host>:8090`（原生 TCP）。
+- 否则 → **WebSocket** `ws(s)://<base_url 的 host>/ws`，协议按 `base_url`
+  推断（`http` → `ws`，`https` → `wss`）。
+
+公共服务因此解析为 `ws://tmim.stkg.ltd/ws`，无需额外设置。其它部署需同时设置
+REST 与实时端点：
 
 ```
-tm im config set ws_url=tmim.stkg.ltd/ws     # 协议按 base_url 推断 ws/wss
-tm im config set tcp_addr=host:8090          # 或用原生 TCP
-tm im run --ws-url wss://tmim.stkg.ltd/ws    # 单次运行
+tm im config set ws_url=other.example/ws   # 协议按 base_url 推断 ws/wss
+tm im config set tcp_addr=host:8090        # 或用原生 TCP
+tm im run --ws-url wss://other.example/ws  # 单次运行
 ```
 
 不带协议时，`ws_url` 会按 `base_url` 继承协议（`http` → `ws`，`https` → `wss`）。
@@ -356,7 +362,8 @@ tm_im 输入是**不可信的**：任何能给 bot 发消息的人都能让它�
 
 - **写操作走 REST**（`POST /conversations/{id}/messages`），每条回复带
   `client_msg_id` 保证幂等。
-- **收消息走实时 TCP 长连接**：鉴权（`AUTH`）、应用层心跳、`PUSH` 推送新消息；
+- **收消息走实时长连接**（默认 WebSocket，设置 `tcp_addr` 时走原生 TCP）：
+  鉴权（`AUTH`）、应用层心跳、`PUSH` 推送新消息；
   每次重连（以及检测到 `seq` 空洞时）用 `SYNC` 按序补齐。
 - **排序与去重用 `seq`**：`seq <= last` 忽略，每会话最后处理的 `seq` 持久化在
   `state.json`。
