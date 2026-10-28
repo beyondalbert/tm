@@ -107,3 +107,24 @@ def test_stop_signal_is_created_inside_the_running_loop() -> None:
         await asyncio.wait_for(waiter, timeout=1)
 
     asyncio.run(main())
+
+
+class _FailingClient(RecordingClient):
+    async def _session(self) -> None:
+        self._reconnect_delay = 0.01
+        raise RuntimeError("boom")
+
+
+def test_run_treats_reconnect_wait_timeout_as_normal() -> None:
+    async def on_message(_message: ImMessage) -> None:
+        return None
+
+    client = _FailingClient(on_message)  # constructed before any event loop
+
+    async def main() -> None:
+        task = asyncio.create_task(client.run())
+        await asyncio.sleep(0.1)
+        await client.stop()
+        await asyncio.wait_for(task, timeout=1)
+
+    asyncio.run(main())

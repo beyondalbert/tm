@@ -193,7 +193,9 @@ class RealtimeClient:
             else:
                 delay *= 1 + random.uniform(-0.3, 0.3)
             self.log(f"reconnecting in {delay:.1f}s")
-            with contextlib.suppress(TimeoutError):
+            # Python 3.8 raises asyncio.TimeoutError, which is not the builtin
+            # TimeoutError until Python 3.11.
+            with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=delay)
 
     async def stop(self) -> None:
