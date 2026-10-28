@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import shlex
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -570,10 +571,17 @@ def _validate(value: str, allowed: tuple[str, ...], flag: str) -> str:
     return normalized
 
 
+def _validate_bare_name(name: str) -> None:
+    seps = (os.sep, os.altsep) if os.altsep else (os.sep,)
+    if any(sep and sep in name for sep in seps) or name.endswith(".toml"):
+        console.print("[red]name must be a bare name (no path separators, no .toml)[/red]")
+        raise typer.Exit(code=1)
+
+
 @config_app.command("new")
 def config_new(
     name: str = typer.Argument(..., help="Config name (stored at <config>/configs/<name>.toml)."),
-    base_url: str = typer.Option("http://localhost:8080/v1", "--base-url", help="REST base URL."),
+    base_url: str = typer.Option("http://tmim.stkg.ltd/v1", "--base-url", help="REST base URL."),
     api_key: Optional[str] = typer.Option(
         None, "--api-key", help="Agent api_key (prompted if omitted)."
     ),
@@ -596,10 +604,7 @@ def config_new(
     force: bool = typer.Option(False, "--force", help="Overwrite an existing config."),
 ) -> None:
     """Create a named config file for one account."""
-    seps = (os.sep, os.altsep) if os.altsep else (os.sep,)
-    if any(sep and sep in name for sep in seps) or name.endswith(".toml"):
-        console.print("[red]name must be a bare name (no path separators, no .toml)[/red]")
-        raise typer.Exit(code=1)
+    _validate_bare_name(name)
     path = named_config_path(name)
     if path.exists() and not force:
         console.print(f"[yellow]{path} already exists[/yellow]; pass --force to overwrite")
@@ -667,6 +672,40 @@ def config_path(
 def _target_config_path(config: str | None) -> Path:
     resolved = resolve_config(config)
     return Path(resolved) if resolved else im_path()
+
+
+@config_app.command("delete")
+def config_delete(
+    name: str = typer.Argument(..., help="Config name to delete."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    keep_state: bool = typer.Option(
+        False, "--keep-state", help="Keep logs, sessions, and state for this instance."
+    ),
+) -> None:
+    """Delete a named config and its instance state."""
+    _validate_bare_name(name)
+    path = named_config_path(name)
+    if not path.exists():
+        console.print(f"[red]{path} not found[/red]")
+        raise typer.Exit(code=1)
+    base = instance_dir(str(path))
+    pid = daemon.running_pid(base)
+    if pid is not None:
+        console.print(
+            f"[yellow]{name} is running (pid {pid})[/yellow]; "
+            f"stop it first: [bold]tm im stop --config {name}[/bold]"
+        )
+        raise typer.Exit(code=1)
+    remove_state = not keep_state and base.exists()
+    if not yes:
+        target = f"{path} and {base}" if remove_state else str(path)
+        typer.confirm(f"delete {target}?", abort=True)
+    path.unlink()
+    if remove_state:
+        shutil.rmtree(base, ignore_errors=True)
+    console.print(f"deleted [bold]{path}[/bold]")
+    if keep_state and base.exists():
+        console.print(f"[dim]kept instance state at {base}[/dim]")
 
 
 @config_app.command("set")

@@ -82,7 +82,7 @@ def _normalize_choice(value: str, allowed: tuple[str, ...], default: str) -> str
 
 @dataclass
 class ImSettings:
-    base_url: str = "http://localhost:8080/v1"
+    base_url: str = "http://tmim.stkg.ltd/v1"
     api_key: str = ""
     tcp_addr: str | None = None
     ws_url: str | None = None

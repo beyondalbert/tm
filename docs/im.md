@@ -22,14 +22,15 @@ Five minutes from zero to a replying bot. Everything below uses a named config
 account and copy its `api_key` (`sk_live_...`). Do not reuse a human account you
 also log into: tm_im allows one connection per account and will kick the bot.
 
-**2. Save the credential.** This writes the key and endpoints to the config.
+**2. Save the credential.** Pick one: the default config or a named config.
 
 ```
-tm im config new alice          # prompts for the api_key; writes configs/alice.toml
-tm im login --config alice      # or update an existing config
+tm im login                     # default config (im.toml)
+tm im config new alice          # named config (configs/alice.toml), prompts for the key
 ```
 
-Point it at your server if it is not localhost:
+Use a named config when you run more than one account. To use a different
+server:
 
 ```
 tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
@@ -91,8 +92,10 @@ The sections below are the full reference for every field and subcommand.
 
 ## 1. Requirements
 
-- A reachable tm_im server. Defaults assume REST on `http://<host>:8080/v1` and
-  the realtime long connection on `<host>:8090` (native TCP).
+- A reachable tm_im server. The defaults target the public server: REST on
+  `http://tmim.stkg.ltd/v1` and the realtime long connection on
+  `tmim.stkg.ltd:8090` (native TCP). Override `base_url` plus `ws_url` or
+  `tcp_addr` for your own deployment.
 - A tm_im credential. For a bot, create a **dedicated Agent** account in the
   tm_im client and copy its `api_key` (`sk_live_...`). Do not reuse a human
   account you also log into elsewhere (see [Troubleshooting](#7-troubleshooting)).
@@ -113,7 +116,7 @@ with `tm im config new`. See [section 4](#4-multiple-accounts-on-one-machine).
 
 | Field | Default | Meaning |
 |---|---|---|
-| `base_url` | `http://localhost:8080/v1` | REST base URL |
+| `base_url` | `http://tmim.stkg.ltd/v1` | REST base URL |
 | `api_key` | – | Agent credential (`sk_live_...`) |
 | `tcp_addr` | `<host from base_url>:8090` | Realtime host:port (native TCP) |
 | `ws_url` | – | Realtime WebSocket URL; takes precedence over `tcp_addr` |
@@ -134,14 +137,41 @@ Environment variables override the file: `TM_IM_BASE_URL`, `TM_IM_API_KEY`,
 `TM_IM_TCP_ADDR`, `TM_IM_ALLOW_TOOLS`, `TM_IM_RESPOND_IN_GROUPS`,
 `TM_IM_ACK_REPLY`, `TM_IM_BUSY_REPLY`.
 
-### `tm im login`
+### `tm im login`: default config vs named config
 
-Store or update the credential and endpoint in a config file:
+`tm im login` writes credentials to exactly one config file. Without `--config`
+it updates the **default** config `<config>/im.toml`, which `tm im run` and
+`tm im start` use when `--config` is omitted. With `--config <name>` it updates
+the **named** config `<config>/configs/<name>.toml` (creating it if needed),
+which you select with `--config <name>`.
+
+Default config:
 
 ```
-tm im login                                  # prompts for the key, writes im.toml
+tm im login                                # prompts for the key
+tm im login --api-key sk_live_...          # non-interactive
+tm im start                                # uses im.toml
+```
+
+Named config:
+
+```
+tm im login --config alice                 # prompts; creates configs/alice.toml
 tm im login --config alice --api-key sk_live_...
+tm im start --config alice                 # uses configs/alice.toml
 ```
+
+`tm im config new <name>` is the other way to create a named config: it prompts
+for the key and lets you set the model, tools, and group policy in the same
+step. `tm im login --config alice` sets only the credential and endpoints, but
+it also creates the file when it does not exist.
+
+| | Default config | Named config |
+|---|---|---|
+| Create/update | `tm im login` | `tm im login --config alice` or `tm im config new alice` |
+| File | `<config>/im.toml` | `<config>/configs/alice.toml` |
+| Select at run time | omit `--config` | `--config alice` |
+| Use when | one account | several accounts side by side |
 
 Options: `--api-key --base-url --tcp-addr --ws-url --config`.
 
@@ -269,9 +299,15 @@ tm im start --config bob
 | `tm im config edit [--config <name\|path>]` | Open the config in `$EDITOR` / `$VISUAL` |
 | `tm im config list` | List configs with base URL, model, and running state |
 | `tm im config path <name>` | Print a named config's path |
+| `tm im config delete <name>` | Delete `<name>.toml` and its instance state. Refuses while the instance is running; `--yes` skips the confirmation, `--keep-state` keeps logs/sessions/state |
 
 Defaults for `config new` match the default `im.toml`: `allow_tools=full`,
 `respond_in_groups=always`, `auto_accept_friends=none`.
+
+`config delete` removes both the config file and `<instance>/` (log, sessions,
+`state.json`, audit files) so a recreated config starts fresh. Stop the instance
+first with `tm im stop --config <name>`. The default `im.toml` is not a named
+config; delete it directly, along with `<config>/im/`.
 
 ### `--config` resolution
 

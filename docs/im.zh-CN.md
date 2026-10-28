@@ -22,14 +22,14 @@ tm im stop  --config alice                     # 停止
 `api_key`（`sk_live_...`）。不要复用你还会在别处登录的人类账号：tm_im 每个账号
 只允许一条连接，会把 bot 踢下线。
 
-**2. 保存凭证。** 写入 key 与端点：
+**2. 保存凭证。** 二选一：默认配置或命名配置。
 
 ```
-tm im config new alice          # 提示输入 api_key，写入 configs/alice.toml
-tm im login --config alice      # 或更新已有配置
+tm im login                     # 默认配置（im.toml）
+tm im config new alice          # 命名配置（configs/alice.toml），提示输入 key
 ```
 
-如果服务器不是本机，指向它：
+需要同时运行多个账号时用命名配置。如果服务器不是默认地址：
 
 ```
 tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
@@ -89,8 +89,9 @@ respond_in_groups = "mention"
 
 ## 1. 前提
 
-- 可访问的 tm_im 服务器。默认 REST 为 `http://<host>:8080/v1`，实时长连接为
-  `<host>:8090`（原生 TCP）。
+- 可访问的 tm_im 服务器。默认指向公共服务：REST 为
+  `http://tmim.stkg.ltd/v1`，实时长连接为 `tmim.stkg.ltd:8090`（原生 TCP）。
+  自建部署时覆盖 `base_url` 以及 `ws_url` 或 `tcp_addr`。
 - 一个 tm_im 凭证。作为 bot，建议在 tm_im 客户端里创建一个**专用 Agent** 账号，
   复制其 `api_key`（`sk_live_...`）。不要复用你还会在别处登录的人类账号
   （见[故障排查](#7-故障排查)）。
@@ -110,7 +111,7 @@ respond_in_groups = "mention"
 
 | 字段 | 默认 | 含义 |
 |---|---|---|
-| `base_url` | `http://localhost:8080/v1` | REST 基址 |
+| `base_url` | `http://tmim.stkg.ltd/v1` | REST 基址 |
 | `api_key` | – | Agent 凭证（`sk_live_...`） |
 | `tcp_addr` | 由 `base_url` 推导的 `host:8090` | 实时 host:port（原生 TCP） |
 | `ws_url` | – | 实时 WebSocket 地址；优先于 `tcp_addr` |
@@ -131,14 +132,39 @@ respond_in_groups = "mention"
 `TM_IM_ALLOW_TOOLS`、`TM_IM_RESPOND_IN_GROUPS`、`TM_IM_ACK_REPLY`、
 `TM_IM_BUSY_REPLY`。
 
-### `tm im login`
+### `tm im login`：默认配置与命名配置
 
-写入或更新配置文件中的凭证与端点：
+`tm im login` 只写入一个配置文件。不带 `--config` 时更新**默认配置**
+`<config>/im.toml`，`tm im run` / `tm im start` 省略 `--config` 时就用它。带
+`--config <名字>` 时更新**命名配置** `<config>/configs/<名字>.toml`（不存在则
+创建），运行时用 `--config <名字>` 选择。
+
+默认配置：
 
 ```
-tm im login                                  # 提示输入 key，写入 im.toml
+tm im login                                # 交互输入 key
+tm im login --api-key sk_live_...          # 非交互
+tm im start                                # 使用 im.toml
+```
+
+命名配置：
+
+```
+tm im login --config alice                 # 交互输入 key，创建 configs/alice.toml
 tm im login --config alice --api-key sk_live_...
+tm im start --config alice                 # 使用 configs/alice.toml
 ```
+
+`tm im config new <名字>` 是创建命名配置的另一种方式：它会提示输入 key，并可在
+同一步设置模型、工具与群聊策略。`tm im login --config alice` 只设置凭证与端点，
+但文件不存在时同样会创建。
+
+| | 默认配置 | 命名配置 |
+|---|---|---|
+| 创建/更新 | `tm im login` | `tm im login --config alice` 或 `tm im config new alice` |
+| 文件 | `<config>/im.toml` | `<config>/configs/alice.toml` |
+| 运行时选择 | 省略 `--config` | `--config alice` |
+| 适用场景 | 单个账号 | 多个账号并行 |
 
 选项：`--api-key --base-url --tcp-addr --ws-url --config`。
 
@@ -258,9 +284,15 @@ tm im start --config bob
 | `tm im config edit [--config <名字\|路径>]` | 用 `$EDITOR` / `$VISUAL` 打开配置文件 |
 | `tm im config list` | 列出配置及其 base URL、模型、运行状态 |
 | `tm im config path <name>` | 打印命名配置的路径 |
+| `tm im config delete <name>` | 删除 `<name>.toml` 及其实例状态。运行中会拒绝；`--yes` 跳过确认，`--keep-state` 保留日志/会话/状态 |
 
 `config new` 的默认与默认 `im.toml` 一致：`allow_tools=full`、
 `respond_in_groups=always`、`auto_accept_friends=none`。
+
+`config delete` 会同时删除配置文件和 `<instance>/`（日志、会话、`state.json`、
+审计文件），因此重建同名配置时从全新状态开始。删除前先用
+`tm im stop --config <name>` 停止实例。默认的 `im.toml` 不是命名配置，需直接删除
+该文件及 `<config>/im/`。
 
 ### `--config` 解析规则
 

@@ -44,6 +44,10 @@ def test_unknown_choice_falls_back(tmp_path: Path, monkeypatch) -> None:
     assert load_im_settings().allow_tools == "full"
 
 
+def test_default_base_url() -> None:
+    assert ImSettings().base_url == "http://tmim.stkg.ltd/v1"
+
+
 def test_realtime_address_defaults() -> None:
     settings = ImSettings(base_url="https://host:8080/v1")
     assert settings.host == "host"
