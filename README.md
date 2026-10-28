@@ -412,8 +412,8 @@ tm im stop  --config alice
 
 `tm im --help` lists every subcommand (`run`, `start`, `stop`, `status`, `logs`,
 `me`, `conversations`, `send`, `login`, `config`). See **[docs/im.md](docs/im.md)**
-for the full reference (config fields, multiple accounts, model selection,
-safety, troubleshooting).
+for a step-by-step **Quick start** and the full reference (config fields,
+multiple accounts, model selection, safety, troubleshooting).
 
 ## Settings
 

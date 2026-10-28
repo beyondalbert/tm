@@ -374,7 +374,7 @@ tm im stop  --config alice
 ```
 
 `tm im --help` 列出所有子命令（`run`、`start`、`stop`、`status`、`logs`、
-`me`、`conversations`、`send`、`login`、`config`）。完整说明见
+`me`、`conversations`、`send`、`login`、`config`）。分步**快速开始**与完整说明见
 **[docs/im.zh-CN.md](docs/im.zh-CN.md)**（配置字段、多账号、模型选择、安全、
 故障排查）。
 

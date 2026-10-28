@@ -13,6 +13,80 @@ tm im stop  --config alice                     # 停止
 
 所有子命令见 `tm im --help`。
 
+## 快速开始
+
+五分钟从零到能回复的 bot。下面以命名配置 `alice` 为例；省略 `--config alice`
+则使用默认的 `im.toml`。
+
+**1. 创建专用 Agent 账号。** 在 tm_im 客户端里创建一个 Agent 账号，复制它的
+`api_key`（`sk_live_...`）。不要复用你还会在别处登录的人类账号：tm_im 每个账号
+只允许一条连接，会把 bot 踢下线。
+
+**2. 保存凭证。** 写入 key 与端点：
+
+```
+tm im config new alice          # 提示输入 api_key，写入 configs/alice.toml
+tm im login --config alice      # 或更新已有配置
+```
+
+如果服务器不是本机，指向它：
+
+```
+tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
+```
+
+**3. 选择回复模型。** `tm --list-models` 中带 `*` 的 provider 已存 key，用
+`tm --login <provider>` 存 key。内置默认为 `deepseek` / `deepseek-v4-pro`。
+
+```
+tm im config set --config alice provider=deepseek model=deepseek-chat
+```
+
+**4. 收紧工具权限。** `allow_tools=full`（默认）意味着任何能给 bot 发消息的人
+都能在本机执行 shell 命令。
+
+```
+tm im config set --config alice allow_tools=read_only   # none | read_only | full
+```
+
+**5. 启动并确认。** 启动正常时日志会打印 `connected as @<handle>`。若显示未运行，
+查看日志末尾。
+
+```
+tm im start --config alice
+tm im status --config alice
+tm im logs -f --config alice     # Ctrl+C 只停跟随，不停 bot
+tm im me --config alice          # 从服务器打印 bot 身份
+```
+
+**6. 发一条测试消息。** 单聊要求双方是好友（否则返回 `40003`）；群聊无此限制。
+应立刻收到 `ack_reply`，随后收到回答。调试时用 `tm im run --config alice`
+前台运行，而不是 `start`。
+
+最小配置文件示例（其余字段都有默认值）：
+
+```toml
+base_url = "https://tmim.example.com/v1"
+api_key = "sk_live_..."
+ws_url = "tmim.example.com/ws"
+provider = "deepseek"
+model = "deepseek-chat"
+allow_tools = "read_only"
+respond_in_groups = "mention"
+```
+
+常用调整，统一用 `tm im config set --config alice KEY=VALUE`：
+
+| 目标 | 命令 |
+|---|---|
+| 群聊只在被 @ 时回复 | `respond_in_groups=mention` |
+| 自动接受指定好友请求 | `auto_accept_friends=allowlist owner_handles=@a,@b` |
+| 修改即时确认句 | `ack_reply="收到：{preview}"`（留空关闭） |
+| 修改处理中提示 | `busy_reply="还在处理上一条，请稍等"`（留空关闭） |
+| 直接编辑配置文件 | `tm im config edit --config alice` |
+
+以下章节是每个字段与子命令的完整参考。
+
 ## 1. 前提
 
 - 可访问的 tm_im 服务器。默认 REST 为 `http://<host>:8080/v1`，实时长连接为

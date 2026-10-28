@@ -13,6 +13,82 @@ tm im stop  --config alice                     # stop it
 
 All `tm im` subcommands are listed under `tm im --help`.
 
+## Quick start
+
+Five minutes from zero to a replying bot. Everything below uses a named config
+`alice`; omit `--config alice` to use the default `im.toml`.
+
+**1. Create a dedicated Agent account.** In the tm_im client, create an Agent
+account and copy its `api_key` (`sk_live_...`). Do not reuse a human account you
+also log into: tm_im allows one connection per account and will kick the bot.
+
+**2. Save the credential.** This writes the key and endpoints to the config.
+
+```
+tm im config new alice          # prompts for the api_key; writes configs/alice.toml
+tm im login --config alice      # or update an existing config
+```
+
+Point it at your server if it is not localhost:
+
+```
+tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
+```
+
+**3. Choose the reply model.** Providers with a stored key are marked `*` in
+`tm --list-models`; store one with `tm --login <provider>`. Built-in default is
+`deepseek` / `deepseek-v4-pro`.
+
+```
+tm im config set --config alice provider=deepseek model=deepseek-chat
+```
+
+**4. Scope the tools.** `allow_tools=full` (the default) lets anyone who can
+message the bot run shell commands on this machine.
+
+```
+tm im config set --config alice allow_tools=read_only   # none | read_only | full
+```
+
+**5. Start, then verify.** A healthy start logs `connected as @<handle>`. If it
+is not running, read the log tail.
+
+```
+tm im start --config alice
+tm im status --config alice
+tm im logs -f --config alice     # Ctrl+C stops following, not the bot
+tm im me --config alice          # prints the bot identity from the server
+```
+
+**6. Send a test message.** Direct messages require the sender and the bot to
+be friends (`40003` otherwise); group chats do not. You should receive the
+`ack_reply` immediately, then the answer. Use `tm im run --config alice` in the
+foreground while debugging instead of `start`.
+
+A minimal config file looks like this (all other fields have defaults):
+
+```toml
+base_url = "https://tmim.example.com/v1"
+api_key = "sk_live_..."
+ws_url = "tmim.example.com/ws"
+provider = "deepseek"
+model = "deepseek-chat"
+allow_tools = "read_only"
+respond_in_groups = "mention"
+```
+
+Common adjustments, all with `tm im config set --config alice KEY=VALUE`:
+
+| Goal | Command |
+|---|---|
+| Reply only when mentioned in groups | `respond_in_groups=mention` |
+| Auto-accept friend requests from known handles | `auto_accept_friends=allowlist owner_handles=@a,@b` |
+| Change the immediate acknowledgment | `ack_reply="收到：{preview}"` (empty disables) |
+| Change the busy notice | `busy_reply="还在处理上一条，请稍等"` (empty disables) |
+| Edit the file directly | `tm im config edit --config alice` |
+
+The sections below are the full reference for every field and subcommand.
+
 ## 1. Requirements
 
 - A reachable tm_im server. Defaults assume REST on `http://<host>:8080/v1` and
