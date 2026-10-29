@@ -39,6 +39,8 @@ tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim
 **3. 选择回复模型。** 详见 [快速配置](quickstart.zh-CN.md)。
 `tm --list-models` 中带 `*` 的 provider 已存 key，用
 `tm --login <provider>` 存 key。内置默认为 `deepseek` / `deepseek-v4-pro`。
+想交互式选择并登录某个配置，运行 `tm im config setup --config alice`：
+它会把模型 key 存到共享 credentials，并把 `provider`/`model` 写进该配置。
 
 ```
 tm im config set --config alice provider=deepseek model=deepseek-chat
@@ -286,6 +288,7 @@ tm im start --config bob
 
 | 命令 | 说明 |
 |---|---|
+| `tm im config setup [--config <名字\|路径>]` | 交互选择回复 provider/model，并补存模型 key 与 tm_im key |
 | `tm im config new <name>` | 创建 `<config>/configs/<name>.toml`。选项：`--base-url --api-key --tcp-addr --allow-tools --respond-in-groups --auto-accept-friends --provider/-p --model/-m --owner（可重复） --force` |
 | `tm im config set [--config <名字\|路径>] KEY=VALUE...` | 修改已有配置的任意字段，例如 `model=deepseek-chat allow_tools=read_only owner_handles=@a,@b` |
 | `tm im config edit [--config <名字\|路径>]` | 用 `$EDITOR` / `$VISUAL` 打开配置文件 |

@@ -40,7 +40,9 @@ tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim
 **3. Choose the reply model.** See the [quick start](quickstart.md).
 Providers with a stored key are marked `*` in
 `tm --list-models`; store one with `tm --login <provider>`. Built-in default is
-`deepseek` / `deepseek-v4-pro`.
+`deepseek` / `deepseek-v4-pro`. To choose and log in interactively for one
+config, run `tm im config setup --config alice` (it stores the model key in
+the shared credentials file and writes `provider`/`model` into the config).
 
 ```
 tm im config set --config alice provider=deepseek model=deepseek-chat
@@ -299,6 +301,7 @@ tm im start --config bob
 
 | Command | Description |
 |---|---|
+| `tm im config setup [--config <name\|path>]` | Interactively choose the reply provider/model and store missing model/tm_im keys |
 | `tm im config new <name>` | Create `<config>/configs/<name>.toml`. Options: `--base-url --api-key --tcp-addr --allow-tools --respond-in-groups --auto-accept-friends --provider/-p --model/-m --owner (repeatable) --force` |
 | `tm im config set [--config <name\|path>] KEY=VALUE...` | Update any field of an existing config, e.g. `model=deepseek-chat allow_tools=read_only owner_handles=@a,@b` |
 | `tm im config edit [--config <name\|path>]` | Open the config in `$EDITOR` / `$VISUAL` |

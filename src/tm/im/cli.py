@@ -19,7 +19,7 @@ from rich.text import Text
 from tm import __version__
 from tm.ai.registry import Registry, RegistryError, is_localhost_url
 from tm.ai.user_models import UserModelError, load_presets
-from tm.config import config_dir, load_credentials, load_settings
+from tm.config import config_dir, load_credentials, load_settings, save_credential
 from tm.core.agent import Agent
 from tm.core.pruning import policy_from_settings
 from tm.core.session import Session, SessionManager
@@ -669,6 +669,16 @@ def _settings_lines(settings: ImSettings) -> list[str]:
     ]
 
 
+def _config_entries() -> list[Path]:
+    entries: list[Path] = []
+    if im_path().exists():
+        entries.append(im_path())
+    directory = configs_dir()
+    if directory.exists():
+        entries.extend(sorted(directory.glob("*.toml")))
+    return entries
+
+
 @config_app.command("list")
 def config_list() -> None:
     """List every config file, its running state, and all of its settings.
@@ -676,12 +686,7 @@ def config_list() -> None:
     Values are effective values (environment overrides applied); the API key is
     masked.
     """
-    entries: list[Path] = []
-    if im_path().exists():
-        entries.append(im_path())
-    directory = configs_dir()
-    if directory.exists():
-        entries.extend(sorted(directory.glob("*.toml")))
+    entries = _config_entries()
     if not entries:
         console.print("no config files (create one with `tm im config new <name>`)")
         return
@@ -695,6 +700,159 @@ def config_list() -> None:
         )
         for line in _settings_lines(settings):
             console.print(line, markup=False, highlight=False, soft_wrap=True)
+
+
+def _select_config(config: str | None) -> Path:
+    if config:
+        path = Path(resolve_config(config) or im_path())
+        if not path.exists():
+            console.print(f"[red]{path} not found[/red]")
+            raise typer.Exit(code=1)
+        return path
+    if im_path().exists():
+        return im_path()
+    entries = _config_entries()
+    if not entries:
+        console.print(
+            "[red]no config files[/red]; create one with `tm im config new <name>`"
+        )
+        raise typer.Exit(code=1)
+    if len(entries) == 1:
+        return entries[0]
+    console.print("configs:")
+    for index, path in enumerate(entries, start=1):
+        label = "default" if path == im_path() else path.stem
+        console.print(f"  {index}. {label} | {path}")
+    answer = typer.prompt("Config name or number", default="1").strip()
+    if answer.isdigit() and 1 <= int(answer) <= len(entries):
+        return entries[int(answer) - 1]
+    match = next(
+        (path for path in entries if (path.stem if path != im_path() else "default") == answer),
+        None,
+    )
+    if match is None:
+        console.print(f"[red]no config matching '{answer}'[/red]")
+        raise typer.Exit(code=1)
+    return match
+
+
+def _choose_provider(registry: Registry, current: str | None) -> str:
+    presets = registry.presets()
+    if not presets:
+        console.print("[red]no model providers configured[/red]")
+        raise typer.Exit(code=1)
+    ids = [preset.id for preset in presets]
+    default = current if current in ids else ("deepseek" if "deepseek" in ids else ids[0])
+    console.print("providers (* = key available):")
+    for preset in presets:
+        marker = "*" if registry.has_credentials(preset) else "-"
+        console.print(f"  {marker} {preset.id:16s} {preset.name}")
+    answer = typer.prompt("Provider id or number", default=default).strip()
+    if answer.isdigit() and 1 <= int(answer) <= len(presets):
+        return presets[int(answer) - 1].id
+    if answer not in ids:
+        console.print(f"[red]unknown provider: {answer}[/red]")
+        raise typer.Exit(code=1)
+    return answer
+
+
+def _choose_model(registry: Registry, provider_id: str, current: str | None) -> str:
+    preset = next((item for item in registry.presets() if item.id == provider_id), None)
+    if preset is None:
+        console.print(f"[red]unknown provider: {provider_id}[/red]")
+        raise typer.Exit(code=1)
+    ids = [model.id for model in preset.models]
+    default = current if current in ids else (preset.default_model or (ids[0] if ids else ""))
+    if ids:
+        console.print(f"models for {provider_id} (* = default):")
+        for model in preset.models:
+            marker = "*" if model.id == default else " "
+            console.print(f"  {marker} {model.id}")
+    answer = typer.prompt("Model id or number", default=default or "").strip()
+    if answer.isdigit() and ids and 1 <= int(answer) <= len(ids):
+        return ids[int(answer) - 1]
+    if not answer:
+        console.print("[red]a model id is required[/red]")
+        raise typer.Exit(code=1)
+    return answer
+
+
+@config_app.command("setup")
+def config_setup(
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Config name or path (default: im.toml or pick one)."
+    ),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="Provider id."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model id."),
+    login: bool = typer.Option(
+        True, "--login/--no-login", help="Prompt for missing model/tm_im API keys."
+    ),
+) -> None:
+    """Interactively choose the reply provider/model and store missing keys.
+
+    This is the tm im counterpart of `tm --login` + `/model`: it can store the
+    model provider key in the shared credentials file, the tm_im Agent key in
+    the config, and the provider/model used for replies.
+    """
+    path = _select_config(config)
+    settings = load_im_settings(path, apply_env=False)
+    registry = _make_registry()
+
+    provider_id = provider or _choose_provider(registry, settings.provider)
+    preset = next((item for item in registry.presets() if item.id == provider_id), None)
+    if preset is None:
+        console.print(f"[red]unknown provider: {provider_id}[/red]")
+        raise typer.Exit(code=1)
+    model_id = model or _choose_model(registry, provider_id, settings.model)
+
+    if login and preset.api_key_env and not registry.provider_key_present(provider_id):
+        env_names = ", ".join(preset.api_key_env)
+        console.print(
+            f"[yellow]no model API key for {provider_id}[/yellow] "
+            f"(checked credentials.toml and {env_names})"
+        )
+        key = typer.prompt(
+            f"Paste the model API key for {provider_id} (blank to skip)",
+            hide_input=True,
+            default="",
+            show_default=False,
+        ).strip()
+        if key:
+            saved = save_credential(provider_id, key)
+            console.print(
+                f"stored model key for {provider_id} in [bold]{saved}[/bold]: "
+                f"{_mask_secret(key)}"
+            )
+
+    if login and not settings.api_key:
+        key = typer.prompt(
+            "Paste the tm_im Agent api_key (sk_live_..., blank to skip)",
+            hide_input=True,
+            default="",
+            show_default=False,
+        ).strip()
+        if key:
+            settings.api_key = key
+
+    settings.provider = provider_id
+    settings.model = model_id
+    saved = save_im_settings(settings, path)
+    effective = load_im_settings(path)
+    console.print(f"updated [bold]{saved}[/bold]")
+    console.print(f"  provider = {provider_id}")
+    console.print(f"  model = {model_id}")
+    console.print(f"  tm_im key = {_mask_secret(effective.api_key)}")
+    if not effective.api_key:
+        console.print(
+            "[yellow]tm_im api_key is not set[/yellow]; run `tm im config setup` "
+            "again or `tm im login --config <name>`"
+        )
+    if path == im_path():
+        console.print("start or restart it with: [bold]tm im start[/bold]")
+    else:
+        console.print(
+            f'start or restart it with: [bold]tm im start --config "{path}"[/bold]'
+        )
 
 
 @config_app.command("path")

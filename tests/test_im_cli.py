@@ -7,7 +7,13 @@ from typer.testing import CliRunner
 
 from tm.im import daemon
 from tm.im.cli import _format_setting_value, _mask_secret, _settings_lines, app
-from tm.im.config import ImSettings, instance_dir, named_config_path, save_im_settings
+from tm.im.config import (
+    ImSettings,
+    instance_dir,
+    load_im_settings,
+    named_config_path,
+    save_im_settings,
+)
 
 runner = CliRunner()
 
@@ -126,3 +132,99 @@ def test_config_list_shows_all_fields_and_masks_key(tmp_path: Path, monkeypatch)
         assert f"{name} =" in result.output, name
     assert "sk_live_test" not in result.output
     assert "sk_liv...test (12 chars)" in result.output
+
+
+def test_config_setup_sets_provider_model_and_stores_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from unittest.mock import patch
+
+    from tm.config import load_credentials
+
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    path = _create(tmp_path)
+
+    with patch("tm.im.cli.typer.prompt", return_value="sk-test-key"):
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "setup",
+                "--config",
+                "alice",
+                "-p",
+                "deepseek",
+                "-m",
+                "deepseek-chat",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    settings = load_im_settings(path, apply_env=False)
+    assert settings.provider == "deepseek"
+    assert settings.model == "deepseek-chat"
+    assert load_credentials()["deepseek"] == "sk-test-key"
+    assert "sk-test-key" not in result.output
+
+
+def test_config_setup_no_login_skips_key_prompts(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    from tm.config import load_credentials
+
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    path = _create(tmp_path)
+
+    with patch("tm.im.cli.typer.prompt") as prompt:
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "setup",
+                "--config",
+                "alice",
+                "-p",
+                "deepseek",
+                "-m",
+                "deepseek-chat",
+                "--no-login",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    prompt.assert_not_called()
+    assert load_im_settings(path, apply_env=False).model == "deepseek-chat"
+    assert "deepseek" not in load_credentials()
+
+
+def test_config_setup_prompts_for_missing_tm_im_key(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    path = named_config_path("bob")
+    save_im_settings(ImSettings(), path)
+
+    with patch(
+        "tm.im.cli.typer.prompt", side_effect=["sk-model-key", "sk_live_agent"]
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "setup",
+                "--config",
+                "bob",
+                "-p",
+                "deepseek",
+                "-m",
+                "deepseek-chat",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    settings = load_im_settings(path, apply_env=False)
+    assert settings.api_key == "sk_live_agent"
+    assert settings.provider == "deepseek"
