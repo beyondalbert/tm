@@ -833,16 +833,17 @@ def model_setup(
         )
         key = typer.prompt(
             f"Paste the model API key for {provider_id} (blank to skip)",
-            hide_input=True,
+            hide_input=not rekey,
             default="",
             show_default=False,
         ).strip()
         if key:
             saved = save_credential(provider_id, key)
             has_model_key = True
+            shown_key = key if rekey else _mask_secret(key)
             console.print(
                 f"stored model key for {provider_id} in [bold]{saved}[/bold]: "
-                f"{_mask_secret(key)}"
+                f"{shown_key}"
             )
 
     if login and not settings.api_key:

@@ -353,7 +353,7 @@ def test_model_setup_rekey_replaces_existing_model_key(
     save_credential("deepseek", "sk-old-key")
     _create(tmp_path)
 
-    with patch("tm.im.cli.typer.prompt", return_value="sk-new-key"):
+    with patch("tm.im.cli.typer.prompt", return_value="sk-new-key") as prompt:
         result = runner.invoke(
             app,
             [
@@ -371,6 +371,9 @@ def test_model_setup_rekey_replaces_existing_model_key(
         )
 
     assert result.exit_code == 0, result.output
+    assert prompt.call_args.kwargs["hide_input"] is False
     assert load_credentials()["deepseek"] == "sk-new-key"
     assert "replacing the stored model key" in result.output
     assert "model key = configured" in result.output
+    assert "sk-new-key" in result.output
+    assert "sk-old-key" not in result.output
