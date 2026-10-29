@@ -638,9 +638,44 @@ def config_new(
     console.print(f"start it with: [bold]tm im start --config {name}[/bold]")
 
 
+def _mask_secret(value: str) -> str:
+    if not value:
+        return "(not set)"
+    if len(value) <= 10:
+        return "*" * len(value)
+    return f"{value[:6]}...{value[-4:]} ({len(value)} chars)"
+
+
+def _format_setting_value(name: str, value: object) -> str:
+    if name == "api_key":
+        return _mask_secret(str(value or ""))
+    if value is None:
+        return "(not set)"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(json.dumps(str(item), ensure_ascii=False) for item in value) + "]"
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _settings_lines(settings: ImSettings) -> list[str]:
+    """Every ImSettings field, with the API key masked."""
+    return [
+        f"  {field} = {_format_setting_value(field, getattr(settings, field))}"
+        for field in ImSettings.__dataclass_fields__
+        if not field.startswith("_")
+    ]
+
+
 @config_app.command("list")
 def config_list() -> None:
-    """List config files and whether each instance is running."""
+    """List every config file, its running state, and all of its settings.
+
+    Values are effective values (environment overrides applied); the API key is
+    masked.
+    """
     entries: list[Path] = []
     if im_path().exists():
         entries.append(im_path())
@@ -656,9 +691,10 @@ def config_list() -> None:
         label = "default" if path == im_path() else path.stem
         state = f"running pid={pid}" if pid else "stopped"
         console.print(
-            f"{label} | {settings.base_url} | "
-            f"{settings.provider or '-'}/{settings.model or '-'} | {state} | {path}"
+            f"{label} | {state} | {path}", markup=False, highlight=False, soft_wrap=True
         )
+        for line in _settings_lines(settings):
+            console.print(line, markup=False, highlight=False, soft_wrap=True)
 
 
 @config_app.command("path")

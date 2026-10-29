@@ -290,7 +290,7 @@ by side without sharing state, sessions, pids, or logs.
 ```
 tm im config new alice --model deepseek-chat
 tm im config new bob   --model deepseek-chat
-tm im config list                          # shows each config and if it is running
+tm im config list                          # all fields of each config + running state
 tm im start --config alice
 tm im start --config bob
 ```
@@ -302,7 +302,7 @@ tm im start --config bob
 | `tm im config new <name>` | Create `<config>/configs/<name>.toml`. Options: `--base-url --api-key --tcp-addr --allow-tools --respond-in-groups --auto-accept-friends --provider/-p --model/-m --owner (repeatable) --force` |
 | `tm im config set [--config <name\|path>] KEY=VALUE...` | Update any field of an existing config, e.g. `model=deepseek-chat allow_tools=read_only owner_handles=@a,@b` |
 | `tm im config edit [--config <name\|path>]` | Open the config in `$EDITOR` / `$VISUAL` |
-| `tm im config list` | List configs with base URL, model, and running state |
+| `tm im config list` | List every config with all its settings (API key masked) and running state |
 | `tm im config path <name>` | Print a named config's path |
 | `tm im config delete <name>` | Delete `<name>.toml` and its instance state. Refuses while the instance is running; `--yes` skips the confirmation, `--keep-state` keeps logs/sessions/state |
 

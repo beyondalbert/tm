@@ -277,7 +277,7 @@ pid、日志。
 ```
 tm im config new alice --model deepseek-chat
 tm im config new bob   --model deepseek-chat
-tm im config list                          # 列出配置及是否在运行
+tm im config list                          # 列出每个配置的全部字段及运行状态
 tm im start --config alice
 tm im start --config bob
 ```
@@ -289,7 +289,7 @@ tm im start --config bob
 | `tm im config new <name>` | 创建 `<config>/configs/<name>.toml`。选项：`--base-url --api-key --tcp-addr --allow-tools --respond-in-groups --auto-accept-friends --provider/-p --model/-m --owner（可重复） --force` |
 | `tm im config set [--config <名字\|路径>] KEY=VALUE...` | 修改已有配置的任意字段，例如 `model=deepseek-chat allow_tools=read_only owner_handles=@a,@b` |
 | `tm im config edit [--config <名字\|路径>]` | 用 `$EDITOR` / `$VISUAL` 打开配置文件 |
-| `tm im config list` | 列出配置及其 base URL、模型、运行状态 |
+| `tm im config list` | 列出每个配置的全部字段（API key 打码）及运行状态 |
 | `tm im config path <name>` | 打印命名配置的路径 |
 | `tm im config delete <name>` | 删除 `<name>.toml` 及其实例状态。运行中会拒绝；`--yes` 跳过确认，`--keep-state` 保留日志/会话/状态 |
 
