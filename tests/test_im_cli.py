@@ -150,6 +150,7 @@ def test_config_setup_sets_provider_model_and_stores_key(
             app,
             [
                 "config",
+                "model",
                 "setup",
                 "--config",
                 "alice",
@@ -182,6 +183,7 @@ def test_config_setup_no_login_skips_key_prompts(tmp_path: Path, monkeypatch) ->
             app,
             [
                 "config",
+                "model",
                 "setup",
                 "--config",
                 "alice",
@@ -214,6 +216,7 @@ def test_config_setup_prompts_for_missing_tm_im_key(tmp_path: Path, monkeypatch)
             app,
             [
                 "config",
+                "model",
                 "setup",
                 "--config",
                 "bob",
@@ -228,3 +231,111 @@ def test_config_setup_prompts_for_missing_tm_im_key(tmp_path: Path, monkeypatch)
     settings = load_im_settings(path, apply_env=False)
     assert settings.api_key == "sk_live_agent"
     assert settings.provider == "deepseek"
+
+
+def _write_custom_provider(tmp_path: Path, *, base_url: str) -> None:
+    (tmp_path / "models.toml").write_text(
+        f'''[providers.custom]
+name = "Custom"
+api = "openai-completions"
+base_url = "{base_url}"
+default_model = "custom-model"
+
+[[providers.custom.models]]
+id = "custom-model"
+''',
+        encoding="utf-8",
+    )
+
+
+def test_model_setup_prompts_for_custom_hosted_provider_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from unittest.mock import patch
+
+    from tm.config import load_credentials
+
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    path = _create(tmp_path)
+    _write_custom_provider(tmp_path, base_url="https://api.example.com/v1")
+
+    with patch("tm.im.cli.typer.prompt", return_value="sk-custom-key"):
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "model",
+                "setup",
+                "--config",
+                "alice",
+                "-p",
+                "custom",
+                "-m",
+                "custom-model",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert load_im_settings(path, apply_env=False).provider == "custom"
+    assert load_credentials()["custom"] == "sk-custom-key"
+    assert "stored model key for custom" in result.output
+    assert "model key = configured" in result.output
+
+
+def test_model_setup_does_not_prompt_for_local_endpoint(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from unittest.mock import patch
+
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    path = _create(tmp_path)
+    _write_custom_provider(tmp_path, base_url="http://127.0.0.1:11434/v1")
+
+    with patch("tm.im.cli.typer.prompt") as prompt:
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "model",
+                "setup",
+                "--config",
+                "alice",
+                "-p",
+                "custom",
+                "-m",
+                "custom-model",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    prompt.assert_not_called()
+    assert load_im_settings(path, apply_env=False).model == "custom-model"
+    assert "not required (local endpoint)" in result.output
+
+
+def test_config_setup_alias_still_works(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    path = _create(tmp_path)
+
+    with patch("tm.im.cli.typer.prompt", return_value="sk-test-key"):
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "setup",
+                "--config",
+                "alice",
+                "-p",
+                "deepseek",
+                "-m",
+                "deepseek-chat",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert load_im_settings(path, apply_env=False).model == "deepseek-chat"

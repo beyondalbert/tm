@@ -191,7 +191,7 @@ tm 会自动把 `TERM=xterm` 提升为 256 色；需要强制时用
 tm --login deepseek                              # 1) 模型 key（与 tm 共用）
 tm im config new alice -p deepseek -m deepseek-v4-pro   # 2) tm_im 凭证 + 模型
 # 已存在的配置也可以交互式选择 provider/model 并补 key：
-tm im config setup --config alice
+tm im config model setup --config alice
 tm im start --config alice
 tm im logs -f --config alice
 tm im status --config alice

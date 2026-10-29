@@ -562,6 +562,8 @@ def logs(
 # ---------------------------------------------------------------------------
 config_app = typer.Typer(help="Create and list tm im config files.")
 app.add_typer(config_app, name="config")
+model_app = typer.Typer(help="Choose and authenticate the reply model.")
+config_app.add_typer(model_app, name="model")
 
 
 def _validate(value: str, allowed: tuple[str, ...], flag: str) -> str:
@@ -736,6 +738,13 @@ def _select_config(config: str | None) -> Path:
     return match
 
 
+def _key_available(registry: Registry, preset) -> bool:
+    """Whether this provider can call the model (a key exists or none is needed)."""
+    if registry.provider_key_present(preset.id):
+        return True
+    return not preset.api_key_env and is_localhost_url(preset.base_url)
+
+
 def _choose_provider(registry: Registry, current: str | None) -> str:
     presets = registry.presets()
     if not presets:
@@ -745,7 +754,7 @@ def _choose_provider(registry: Registry, current: str | None) -> str:
     default = current if current in ids else ("deepseek" if "deepseek" in ids else ids[0])
     console.print("providers (* = key available):")
     for preset in presets:
-        marker = "*" if registry.has_credentials(preset) else "-"
+        marker = "*" if _key_available(registry, preset) else "-"
         console.print(f"  {marker} {preset.id:16s} {preset.name}")
     answer = typer.prompt("Provider id or number", default=default).strip()
     if answer.isdigit() and 1 <= int(answer) <= len(presets):
@@ -777,8 +786,8 @@ def _choose_model(registry: Registry, provider_id: str, current: str | None) -> 
     return answer
 
 
-@config_app.command("setup")
-def config_setup(
+@model_app.command("setup")
+def model_setup(
     config: Optional[str] = typer.Option(
         None, "--config", help="Config name or path (default: im.toml or pick one)."
     ),
@@ -805,11 +814,15 @@ def config_setup(
         raise typer.Exit(code=1)
     model_id = model or _choose_model(registry, provider_id, settings.model)
 
-    if login and preset.api_key_env and not registry.provider_key_present(provider_id):
-        env_names = ", ".join(preset.api_key_env)
+    key_required = bool(preset.api_key_env) or not is_localhost_url(preset.base_url)
+    has_model_key = registry.provider_key_present(provider_id)
+    if login and key_required and not has_model_key:
+        sources = "credentials.toml"
+        if preset.api_key_env:
+            sources += " or " + ", ".join(preset.api_key_env)
         console.print(
             f"[yellow]no model API key for {provider_id}[/yellow] "
-            f"(checked credentials.toml and {env_names})"
+            f"(checked {sources})"
         )
         key = typer.prompt(
             f"Paste the model API key for {provider_id} (blank to skip)",
@@ -819,6 +832,7 @@ def config_setup(
         ).strip()
         if key:
             saved = save_credential(provider_id, key)
+            has_model_key = True
             console.print(
                 f"stored model key for {provider_id} in [bold]{saved}[/bold]: "
                 f"{_mask_secret(key)}"
@@ -841,18 +855,46 @@ def config_setup(
     console.print(f"updated [bold]{saved}[/bold]")
     console.print(f"  provider = {provider_id}")
     console.print(f"  model = {model_id}")
+    if has_model_key:
+        console.print("  model key = configured")
+    elif not key_required:
+        console.print("  model key = not required (local endpoint)")
+    else:
+        console.print("  model key = [yellow]not set[/yellow]")
     console.print(f"  tm_im key = {_mask_secret(effective.api_key)}")
+    if key_required and not has_model_key:
+        console.print(
+            "[yellow]the model has no API key[/yellow]; if this endpoint requires one, "
+            f"replies will fail. Store it with `tm --login {provider_id}` (or rerun "
+            "this command) and restart."
+        )
     if not effective.api_key:
         console.print(
-            "[yellow]tm_im api_key is not set[/yellow]; run `tm im config setup` "
+            "[yellow]tm_im api_key is not set[/yellow]; run `tm im config model setup` "
             "again or `tm im login --config <name>`"
         )
     if path == im_path():
         console.print("start or restart it with: [bold]tm im start[/bold]")
     else:
         console.print(
-            f'start or restart it with: [bold]tm im start --config "{path}"[/bold]'
+            f'start or restart it with: [bold]tm im start --config "{path}"[/bold]',
+            soft_wrap=True,
         )
+
+
+@config_app.command("setup", hidden=True)
+def config_setup_alias(
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Config name or path (default: im.toml or pick one)."
+    ),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="Provider id."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model id."),
+    login: bool = typer.Option(
+        True, "--login/--no-login", help="Prompt for missing model/tm_im API keys."
+    ),
+) -> None:
+    """Deprecated alias for `tm im config model setup`."""
+    model_setup(config=config, provider=provider, model=model, login=login)
 
 
 @config_app.command("path")

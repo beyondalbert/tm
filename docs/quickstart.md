@@ -201,7 +201,7 @@ CJK font.
 tm --login deepseek                                      # 1) model key
 tm im config new alice -p deepseek -m deepseek-v4-pro    # 2) tm_im key + model
 # or, for an existing config, choose everything interactively:
-tm im config setup --config alice
+tm im config model setup --config alice
 tm im start --config alice
 tm im logs -f --config alice
 tm im status --config alice
