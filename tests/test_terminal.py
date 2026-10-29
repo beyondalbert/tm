@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 
 from tm.terminal import (
@@ -8,6 +9,8 @@ from tm.terminal import (
     TerminalInfo,
     ensure_utf8,
     format_terminal_info,
+    preferred_color_system,
+    prepare_tui_env,
     terminal_info,
     tui_problem,
 )
@@ -90,3 +93,56 @@ def test_format_terminal_info_reports_diagnostics() -> None:
     assert "tui: not usable" in text
     assert "TERM is dumb" in text
     assert "--tui-inline" in text
+
+
+def _clear_color_env(monkeypatch) -> None:
+    for name in ("TERM", "COLORTERM", "TEXTUAL_COLOR_SYSTEM", "TM_TUI_COLOR_SYSTEM"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_preferred_color_system_upgrades_plain_xterm(monkeypatch) -> None:
+    _clear_color_env(monkeypatch)
+    monkeypatch.setenv("TERM", "xterm")
+
+    assert preferred_color_system() == "256"
+
+
+def test_preferred_color_system_leaves_256color_alone(monkeypatch) -> None:
+    _clear_color_env(monkeypatch)
+    monkeypatch.setenv("TERM", "xterm-256color")
+
+    assert preferred_color_system() is None
+
+
+def test_preferred_color_system_respects_truecolor_and_overrides(monkeypatch) -> None:
+    _clear_color_env(monkeypatch)
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    assert preferred_color_system() is None
+
+    monkeypatch.delenv("COLORTERM")
+    monkeypatch.setenv("TM_TUI_COLOR_SYSTEM", "16")
+    assert preferred_color_system() == "standard"
+
+    monkeypatch.setenv("TM_TUI_COLOR_SYSTEM", "auto")
+    assert preferred_color_system() == "256"
+
+    monkeypatch.setenv("TEXTUAL_COLOR_SYSTEM", "standard")
+    assert preferred_color_system() is None
+
+
+def test_prepare_tui_env_sets_textual_color_system(monkeypatch) -> None:
+    _clear_color_env(monkeypatch)
+    monkeypatch.setenv("TERM", "xterm")
+
+    assert prepare_tui_env() == "256"
+    assert os.environ["TEXTUAL_COLOR_SYSTEM"] == "256"
+
+
+def test_format_terminal_info_reports_color_system(monkeypatch) -> None:
+    _clear_color_env(monkeypatch)
+    monkeypatch.setenv("TERM", "xterm")
+
+    text = format_terminal_info(_info(term="xterm"))
+
+    assert "color_system: 256" in text

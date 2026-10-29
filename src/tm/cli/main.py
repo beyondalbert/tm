@@ -68,7 +68,7 @@ from tm.prompts import PromptTemplate, load_prompt_templates, prompt_roots
 from tm.safety import Journal
 from tm.skills import Skill, build_skills_section, load_skills, skill_roots
 from tm.telemetry import FileTelemetry, NoopTelemetry, Telemetry
-from tm.terminal import ensure_utf8, format_terminal_info, tui_problem
+from tm.terminal import ensure_utf8, format_terminal_info, prepare_tui_env, tui_problem
 from tm.tools import build_default_tools
 from tm.trust import TrustManager, project_resources
 from tm.update import run_update
@@ -856,6 +856,8 @@ def main(
         "yes",
         "on",
     )
+    # Must run before Textual is imported: its color system is read at import.
+    prepare_tui_env()
     use_tui = _use_tui(
         tui=tui or inline, no_tui=no_tui, tools=tools, text=text, json_output=json_output
     )

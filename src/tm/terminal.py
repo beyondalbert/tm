@@ -89,7 +89,9 @@ def terminal_info() -> TerminalInfo:
     if ssh and multiplexer is None:
         notes.append("SSH session without tmux/screen; if rendering is broken try --tui-inline or tmux")
     if not colorterm:
-        notes.append("COLORTERM is unset; the TUI falls back to 256/16 colors")
+        notes.append(
+            "COLORTERM is unset; color support comes from TERM (xterm is stepped up to 256)"
+        )
     return TerminalInfo(
         term=term,
         colorterm=colorterm,
@@ -102,6 +104,46 @@ def terminal_info() -> TerminalInfo:
         multiplexer=multiplexer,
         notes=tuple(notes),
     )
+
+
+_COLOR_SYSTEM_ALIASES = {
+    "16": "standard",
+    "standard": "standard",
+    "ansi": "standard",
+    "256": "256",
+    "256color": "256",
+    "truecolor": "truecolor",
+    "24bit": "truecolor",
+    "rgb": "truecolor",
+}
+
+
+def preferred_color_system() -> str | None:
+    """The Textual color system to force, or None to let it auto-detect.
+
+    ``TERM=xterm`` (common when an SSH client does not advertise 256 colors)
+    makes Rich fall back to 16 colors, which collapses backgrounds and text on
+    terminals such as Xshell. Xshell and most xterm emulators do support 256
+    colors, so step up unless the user overrides it.
+    """
+    if os.environ.get("TEXTUAL_COLOR_SYSTEM"):
+        return None
+    requested = os.environ.get("TM_TUI_COLOR_SYSTEM", "").strip().lower()
+    if not requested or requested == "auto":
+        if os.environ.get("COLORTERM"):
+            return None
+        if os.environ.get("TERM", "") not in ("xterm", "xterm-color"):
+            return None
+        requested = "256"
+    return _COLOR_SYSTEM_ALIASES.get(requested)
+
+
+def prepare_tui_env() -> str | None:
+    """Set ``TEXTUAL_COLOR_SYSTEM`` before Textual is imported."""
+    value = preferred_color_system()
+    if value is not None:
+        os.environ["TEXTUAL_COLOR_SYSTEM"] = value
+    return value
 
 
 def tui_problem(info: TerminalInfo | None = None) -> str | None:
@@ -130,6 +172,7 @@ def format_terminal_info(info: TerminalInfo | None = None) -> str:
         f"size: {info.columns}x{info.rows}",
         f"session: {'ssh' if info.ssh else 'local'}"
         + (f" + {info.multiplexer}" if info.multiplexer else ""),
+        f"color_system: {preferred_color_system() or 'auto'}",
         f"textual: {_version('textual')}",
         f"rich: {_version('rich')}",
     ]
@@ -155,6 +198,8 @@ __all__ = [
     "TerminalInfo",
     "ensure_utf8",
     "format_terminal_info",
+    "preferred_color_system",
+    "prepare_tui_env",
     "terminal_info",
     "tui_problem",
 ]
