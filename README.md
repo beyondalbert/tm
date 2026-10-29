@@ -81,6 +81,9 @@ tm "list the files in this folder"
 Requires Python 3.8+. uv installs a suitable interpreter automatically. The
 Google provider needs Python 3.9+ and the TUI needs 3.8.1+.
 
+For a copy-paste setup (key, model, recommended `settings.toml`), see
+**[docs/quickstart.md](docs/quickstart.md)**.
+
 ### Updating
 
 ```bash
@@ -247,16 +250,17 @@ When stdout is not a terminal (piped or redirected), `TERM` is `dumb`, the
 terminal is too small, or `textual` is not installed, `tm` falls back to the
 console REPL automatically.
 
-**Terminal compatibility (SSH / Xshell / SecureCRT).** If the TUI shows
-overlapping text, missing lines, or a frozen screen over SSH, first make sure
-the client decodes UTF-8 and uses an `xterm-256color` terminal type. The TUI
-forces UTF-8 output, because a server locale such as `zh_CN.GBK` would otherwise
-crash the renderer on box-drawing and CJK glyphs. `tm --terminal-info` prints
-the detected `TERM`, encoding, size, and session type. Two reliable fallbacks:
-`tm --tui-inline` draws the TUI inline without the alternate screen (also
-`TM_TUI_INLINE=1`), and `tm --no-tui` uses the plain console REPL. Running tm
-inside `tmux` is another workaround for terminals that mishandle full-screen
-redraws.
+**Terminal compatibility (SSH / Xshell / SecureCRT).** The TUI forces UTF-8
+output, because a server locale such as `zh_CN.GBK` would otherwise crash the
+renderer on box-drawing and CJK glyphs. It also steps `TERM=xterm` up to 256
+colors automatically: Rich/Textual would otherwise use 16 colors, which can make
+text and backgrounds collapse on Xshell. Override the color system with
+`TM_TUI_COLOR_SYSTEM=16|256|truecolor` (or set `TEXTUAL_COLOR_SYSTEM`), and use
+`tm --terminal-info` to see the detected `TERM`, encoding, size, color system,
+and session type. Two reliable fallbacks: `tm --tui-inline` draws the TUI inline
+without the alternate screen (also `TM_TUI_INLINE=1`), and `tm --no-tui` uses the
+plain console REPL. Running tm inside `tmux` is another workaround for terminals
+that mishandle full-screen redraws.
 
 **Copying text.** The TUI captures the mouse for in-app selection and scrolling.
 Drag to select text and press `Ctrl+Shift+C` to copy it. Copying uses the real

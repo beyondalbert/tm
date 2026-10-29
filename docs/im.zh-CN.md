@@ -36,7 +36,8 @@ tm im config new alice          # 命名配置（configs/alice.toml），提示�
 tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
 ```
 
-**3. 选择回复模型。** `tm --list-models` 中带 `*` 的 provider 已存 key，用
+**3. 选择回复模型。** 详见 [快速配置](quickstart.zh-CN.md)。
+`tm --list-models` 中带 `*` 的 provider 已存 key，用
 `tm --login <provider>` 存 key。内置默认为 `deepseek` / `deepseek-v4-pro`。
 
 ```

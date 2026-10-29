@@ -78,6 +78,9 @@ tm "list the files in this folder"
 
 需要 Python 3.8+，uv 会自动安装合适的解释器。Google provider 需要 Python 3.9+，TUI 需要 3.8.1+。
 
+想直接复制配置（key、模型、推荐的 `settings.toml`），见
+**[docs/quickstart.zh-CN.md](docs/quickstart.zh-CN.md)**。
+
 ### 更新
 
 ```bash
@@ -237,11 +240,12 @@ context_window = 65536
 当 stdout 不是终端（被管道/重定向）、`TERM` 为 `dumb`、终端过小或未安装 `textual` 时，
 `tm` 会自动回退为控制台 REPL。
 
-**终端兼容性（SSH / Xshell / SecureCRT）。** 如果通过 SSH 运行时 TUI 出现文字重叠、缺行或
-画面卡住，先确认客户端使用 **UTF-8** 编码、终端类型为 `xterm-256color`。TUI 会强制以 UTF-8
-输出，否则服务器 locale 为 `zh_CN.GBK` 时，制表符和中文会让渲染线程报错并冻结画面。
-`tm --terminal-info` 会打印检测到的 `TERM`、编码、尺寸和会话类型。两个可靠的兜底方式：
-`tm --tui-inline` 以内联方式绘制 TUI、不切换备用屏幕（也可设 `TM_TUI_INLINE=1`）；
+**终端兼容性（SSH / Xshell / SecureCRT）。** TUI 会强制以 UTF-8 输出，否则服务器
+locale 为 `zh_CN.GBK` 时，制表符和中文会让渲染线程报错并冻结画面。它还会把 `TERM=xterm`
+自动提升为 **256 色**：否则 Rich/Textual 只用 16 色，Xshell 下文字和背景可能混在一起。
+可用 `TM_TUI_COLOR_SYSTEM=16|256|truecolor`（或直接设 `TEXTUAL_COLOR_SYSTEM`）覆盖；
+`tm --terminal-info` 会显示检测到的 `TERM`、编码、尺寸、色彩系统和会话类型。两个可靠的
+兜底方式：`tm --tui-inline` 以内联方式绘制 TUI、不切换备用屏幕（也可设 `TM_TUI_INLINE=1`）；
 `tm --no-tui` 使用纯控制台 REPL。在 `tmux` 里运行也是终端全屏重绘异常的常用规避方法。
 
 **复制文本。** TUI 会捕获鼠标以便内置选择与滚动。按住拖动选中文字后按 `Ctrl+Shift+C` 复制。

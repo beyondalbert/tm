@@ -37,7 +37,8 @@ To use a different server:
 tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
 ```
 
-**3. Choose the reply model.** Providers with a stored key are marked `*` in
+**3. Choose the reply model.** See the [quick start](quickstart.md).
+Providers with a stored key are marked `*` in
 `tm --list-models`; store one with `tm --login <provider>`. Built-in default is
 `deepseek` / `deepseek-v4-pro`.
 
