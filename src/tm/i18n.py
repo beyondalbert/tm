@@ -293,8 +293,8 @@ _STRINGS: dict[str, tuple[str, str]] = {
     ),
     "cli.aborted": ("aborted", "已中止"),
     "cli.banner_hint": (
-        "Esc to stop  ·  / for commands  ·  ! to run a shell command  ·  Ctrl+Q to quit",
-        "Esc 停止  ·  / 命令  ·  ! 执行 shell 命令  ·  Ctrl+Q 退出",
+        "Esc to stop  ·  / for commands  ·  ! to run a shell command  ·  Ctrl+Shift+Q to quit",
+        "Esc 停止  ·  / 命令  ·  ! 执行 shell 命令  ·  Ctrl+Shift+Q 退出",
     ),
     "cli.banner_ask": (
         "Ask TM to explain its features, or type /help.",

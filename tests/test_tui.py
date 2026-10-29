@@ -292,6 +292,29 @@ def test_tui_has_copy_binding() -> None:
     assert "ctrl+shift+c" in keys
 
 
+def test_tui_quits_with_ctrl_shift_q() -> None:
+    from textual.binding import Binding
+
+    bindings = {
+        (binding.key if isinstance(binding, Binding) else binding[0]): (
+            binding.action if isinstance(binding, Binding) else binding[1]
+        )
+        for binding in TMPromptApp.BINDINGS
+    }
+    assert bindings["ctrl+shift+q"] == "quit"
+    assert bindings["ctrl+q"] == "noop"
+
+
+async def test_ctrl_q_no_longer_quits() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+q")
+        await pilot.pause()
+        assert app.is_running
+
+
 def test_sanitize_strips_terminal_controls() -> None:
     from tm.tui.app import _sanitize
 

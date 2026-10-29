@@ -135,7 +135,7 @@ In the TUI:
 - `/help` lists commands
 - `/settings` edits configuration interactively
 - `/model` switches models
-- `Esc` stops a turn, `Ctrl+O` expands tool details, `Ctrl+Q` quits
+- `Esc` stops a turn, `Ctrl+O` expands tool details, `Ctrl+Shift+Q` quits
 - sensitive actions ask for permission; `/auto on` or `tm --yolo` auto-approves
   (use carefully)
 
@@ -200,6 +200,8 @@ CJK font.
 ```bash
 tm --login deepseek                                      # 1) model key
 tm im config new alice -p deepseek -m deepseek-v4-pro    # 2) tm_im key + model
+# or, for an existing config, choose everything interactively:
+tm im config setup --config alice
 tm im start --config alice
 tm im logs -f --config alice
 tm im status --config alice

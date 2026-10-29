@@ -740,7 +740,10 @@ class TMPromptApp(App[None]):
     #settings-buttons {{ height: auto; align-horizontal: right; }}
     """
     BINDINGS = [
-        Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+shift+q", "quit", "Quit"),
+        # Textual's default ctrl+q quit stays in the MRO; override it so the
+        # visible shortcut is the only quit key.
+        Binding("ctrl+q", "noop", show=False, priority=True),
         Binding("ctrl+o", "toggle_tools", "Expand details"),
         Binding("ctrl+y", "toggle_auto", "Auto-approve"),
         Binding("ctrl+p", "toggle_pause", "Pause"),
@@ -1047,6 +1050,10 @@ class TMPromptApp(App[None]):
     @property
     def is_working(self) -> bool:
         return self._status != "idle"
+
+    def action_noop(self) -> None:
+        """Swallow Textual's default ctrl+q quit; use Ctrl+Shift+Q."""
+        return None
 
     def action_abort_run(self) -> None:
         """Stop the current turn (Esc, or Ctrl+C in the prompt)."""

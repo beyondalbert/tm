@@ -129,7 +129,7 @@ TUI 里：
 - `/help` 查看命令
 - `/settings` 交互修改配置
 - `/model` 切换模型
-- `Esc` 停止当前回合，`Ctrl+O` 展开工具详情，`Ctrl+Q` 退出
+- `Esc` 停止当前回合，`Ctrl+O` 展开工具详情，`Ctrl+Shift+Q` 退出
 - 首次执行敏感操作会询问权限；`/auto on` 或 `tm --yolo` 可自动放行（谨慎）
 
 ## 6. 常用场景
@@ -190,6 +190,8 @@ tm 会自动把 `TERM=xterm` 提升为 256 色；需要强制时用
 ```bash
 tm --login deepseek                              # 1) 模型 key（与 tm 共用）
 tm im config new alice -p deepseek -m deepseek-v4-pro   # 2) tm_im 凭证 + 模型
+# 已存在的配置也可以交互式选择 provider/model 并补 key：
+tm im config setup --config alice
 tm im start --config alice
 tm im logs -f --config alice
 tm im status --config alice
