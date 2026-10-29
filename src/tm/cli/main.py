@@ -68,6 +68,7 @@ from tm.prompts import PromptTemplate, load_prompt_templates, prompt_roots
 from tm.safety import Journal
 from tm.skills import Skill, build_skills_section, load_skills, skill_roots
 from tm.telemetry import FileTelemetry, NoopTelemetry, Telemetry
+from tm.terminal import ensure_utf8, format_terminal_info, tui_problem
 from tm.tools import build_default_tools
 from tm.trust import TrustManager, project_resources
 from tm.update import run_update
@@ -504,7 +505,14 @@ def _use_tui(
         return False
     if tui:
         return True
-    return text is None and sys.stdout.isatty() and _textual_available()
+    if text is not None or not sys.stdout.isatty() or not _textual_available():
+        return False
+    problem = tui_problem()
+    if problem is not None:
+        console.print(_t("cli.tui_fallback", reason=problem), style="yellow")
+        console.print(_t("cli.tui_fallback_hint"), style="dim")
+        return False
+    return True
 
 
 def _run_tui(
@@ -528,8 +536,11 @@ def _run_tui(
     yolo: bool = False,
     max_turns: int | None = None,
     max_retries: int | None = None,
+    inline: bool = False,
 ) -> None:
     from tm.tui import DeferredApprover, TextualApprover, TMPromptApp
+
+    ensure_utf8()
 
     deferred = DeferredApprover()
     approver = SessionApprover(deferred, auto=yolo)
@@ -575,7 +586,7 @@ def _run_tui(
     )
     prompt_app.command_handler = commands.handle
     deferred.set(TextualApprover(prompt_app))
-    prompt_app.run(mouse=mouse)
+    prompt_app.run(mouse=mouse, inline=inline)
 
 
 async def _agent_repl(
@@ -682,6 +693,14 @@ def main(
     no_tui: bool = typer.Option(
         False, "--no-tui", help="Use the plain console REPL instead of the TUI."
     ),
+    tui_inline: bool = typer.Option(
+        False,
+        "--tui-inline",
+        help="Draw the TUI inline (no alternate screen); try this if SSH/Xshell mangles the screen.",
+    ),
+    terminal_info_only: bool = typer.Option(
+        False, "--terminal-info", help="Print terminal capabilities and exit."
+    ),
     print_mode: bool = typer.Option(False, "--print", help="One-shot; read stdin if no prompt."),
     json_output: bool = typer.Option(False, "--json", help="Emit agent events as JSON lines."),
     continue_session: bool = typer.Option(
@@ -756,6 +775,11 @@ def main(
 
     settings = load_settings()
     set_language(lang if lang is not None else settings.language)
+    if terminal_info_only:
+        console.print(
+            format_terminal_info(), markup=False, highlight=False, soft_wrap=True
+        )
+        return
     registry = _make_registry()
 
     if login is not None:
@@ -826,8 +850,14 @@ def main(
         console.print("[red]--json requires a prompt or piped stdin[/red]")
         raise typer.Exit(code=1)
 
+    inline = tui_inline or os.environ.get("TM_TUI_INLINE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     use_tui = _use_tui(
-        tui=tui, no_tui=no_tui, tools=tools, text=text, json_output=json_output
+        tui=tui or inline, no_tui=no_tui, tools=tools, text=text, json_output=json_output
     )
     if tui and not _textual_available():
         console.print("[red]TUI requested but 'textual' is not installed. Install with: pip install 'the-machine[tui]'[/red]")
@@ -921,6 +951,7 @@ def main(
                 yolo,
                 max_turns,
                 max_retries,
+                inline=inline,
             )
         else:
             asyncio.run(run())

@@ -208,6 +208,8 @@ context_window = 65536
 | `tm "prompt"` | 一次性执行 |
 | `tm --no-tui` | 使用普通控制台 REPL（不用 TUI） |
 | `tm --tui` | 强制使用 TUI（交互时默认） |
+| `tm --tui-inline` | 以内联方式绘制 TUI（不切换备用屏幕）；SSH/Xshell 显示异常时尝试 |
+| `tm --terminal-info` | 打印终端类型、编码、尺寸和会话诊断 |
 | `tm --read-only` | 仅启用 read/grep/find/ls 工具 |
 | `tm --no-python` | 禁用 python 工具（保留 shell） |
 | `tm --dry-run` | 只预览将要发生的变更，不真正修改本机 |
@@ -232,7 +234,15 @@ context_window = 65536
 上下文文件（`AGENTS.md` / `CLAUDE.md`，从当前目录向上查找，外加全局配置目录）会追加到
 系统提示词。用 `--no-context-files` 关闭。
 
-当 stdout 不是终端（被管道/重定向）或未安装 `textual` 时，`tm` 会自动回退为控制台 REPL。
+当 stdout 不是终端（被管道/重定向）、`TERM` 为 `dumb`、终端过小或未安装 `textual` 时，
+`tm` 会自动回退为控制台 REPL。
+
+**终端兼容性（SSH / Xshell / SecureCRT）。** 如果通过 SSH 运行时 TUI 出现文字重叠、缺行或
+画面卡住，先确认客户端使用 **UTF-8** 编码、终端类型为 `xterm-256color`。TUI 会强制以 UTF-8
+输出，否则服务器 locale 为 `zh_CN.GBK` 时，制表符和中文会让渲染线程报错并冻结画面。
+`tm --terminal-info` 会打印检测到的 `TERM`、编码、尺寸和会话类型。两个可靠的兜底方式：
+`tm --tui-inline` 以内联方式绘制 TUI、不切换备用屏幕（也可设 `TM_TUI_INLINE=1`）；
+`tm --no-tui` 使用纯控制台 REPL。在 `tmux` 里运行也是终端全屏重绘异常的常用规避方法。
 
 **复制文本。** TUI 会捕获鼠标以便内置选择与滚动。按住拖动选中文字后按 `Ctrl+Shift+C` 复制。
 复制走**系统真实剪贴板**（Windows 用 `clip`/`Set-Clipboard`，macOS 用 `pbcopy`，Linux 用

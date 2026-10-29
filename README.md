@@ -217,6 +217,8 @@ Switch to a custom model with `/model my-model` or `tm --model my-model`.
 | `tm "prompt"` | One-shot agent run |
 | `tm --no-tui` | Plain console REPL instead of the TUI |
 | `tm --tui` | Force the TUI (default when interactive) |
+| `tm --tui-inline` | Draw the TUI inline (no alternate screen); try this if SSH/Xshell mangles the screen |
+| `tm --terminal-info` | Print terminal type, encoding, size, and session diagnostics |
 | `tm --read-only` | Only read/grep/find/ls tools |
 | `tm --no-python` | Disable the python tool (shell stays) |
 | `tm --dry-run` | Show what would change without mutating the machine |
@@ -241,8 +243,20 @@ Switch to a custom model with `/model my-model` or `tm --model my-model`.
 Context files (`AGENTS.md` / `CLAUDE.md`, walking up from cwd, plus the global
 config dir) are appended to the system prompt. Disable with `--no-context-files`.
 
-When stdout is not a terminal (piped or redirected) or `textual` is not
-installed, `tm` falls back to the console REPL automatically.
+When stdout is not a terminal (piped or redirected), `TERM` is `dumb`, the
+terminal is too small, or `textual` is not installed, `tm` falls back to the
+console REPL automatically.
+
+**Terminal compatibility (SSH / Xshell / SecureCRT).** If the TUI shows
+overlapping text, missing lines, or a frozen screen over SSH, first make sure
+the client decodes UTF-8 and uses an `xterm-256color` terminal type. The TUI
+forces UTF-8 output, because a server locale such as `zh_CN.GBK` would otherwise
+crash the renderer on box-drawing and CJK glyphs. `tm --terminal-info` prints
+the detected `TERM`, encoding, size, and session type. Two reliable fallbacks:
+`tm --tui-inline` draws the TUI inline without the alternate screen (also
+`TM_TUI_INLINE=1`), and `tm --no-tui` uses the plain console REPL. Running tm
+inside `tmux` is another workaround for terminals that mishandle full-screen
+redraws.
 
 **Copying text.** The TUI captures the mouse for in-app selection and scrolling.
 Drag to select text and press `Ctrl+Shift+C` to copy it. Copying uses the real

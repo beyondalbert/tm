@@ -283,6 +283,14 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "已忽略项目本地 extensions/skills/prompts/policy（未信任）；可用 --approve 或 /trust",
     ),
     "cli.resuming": ("resuming session {id}", "正在恢复会话 {id}"),
+    "cli.tui_fallback": (
+        "TUI unavailable: {reason}; using the plain console.",
+        "TUI 不可用：{reason}；改用纯控制台。",
+    ),
+    "cli.tui_fallback_hint": (
+        "use --tui to force it, --tui-inline for SSH/Xshell, or --no-tui to choose the console",
+        "可用 --tui 强制启用、--tui-inline 适配 SSH/Xshell，或 --no-tui 使用控制台",
+    ),
     "cli.aborted": ("aborted", "已中止"),
     "cli.banner_hint": (
         "Esc to stop  ·  / for commands  ·  ! to run a shell command  ·  Ctrl+Q to quit",
