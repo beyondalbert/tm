@@ -64,7 +64,7 @@ try {
         Step "checking metadata (twine check)"
         $distFiles = Get-ChildItem dist\the_machine-* | ForEach-Object { $_.FullName }
         if (-not $distFiles) { Write-Error "no artifacts found under dist/"; exit 1 }
-        Invoke-Native { & uvx twine check @distFiles }
+        Invoke-Native { & uvx --from "twine>=7" twine check @distFiles }
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
         $wheel = Get-ChildItem dist\the_machine-*.whl | Sort-Object LastWriteTime | Select-Object -Last 1

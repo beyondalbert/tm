@@ -19,7 +19,7 @@ Commit the version bump.
 
 ```bash
 uv build                 # writes dist/*.whl and dist/*.tar.gz
-uvx twine check dist/*   # validates metadata (README, license, classifiers)
+uvx --from "twine>=7" twine check dist/*   # validates metadata (README, license, classifiers)
 ```
 
 On Windows, `scripts/release-smoke.ps1` does build + metadata check + installs
