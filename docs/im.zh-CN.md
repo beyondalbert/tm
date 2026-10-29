@@ -40,7 +40,8 @@ tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim
 `tm --list-models` 中带 `*` 的 provider 已存 key，用
 `tm --login <provider>` 存 key。内置默认为 `deepseek` / `deepseek-v4-pro`。
 想交互式选择并登录某个配置，运行 `tm im config model setup --config alice`：
-它会把模型 key 存到共享 credentials，并把 `provider`/`model` 写进该配置。
+它会把模型 key 存到共享 credentials，并把 `provider`/`model` 写进该配置；
+已存过 key 时加 `--rekey` 可重新输入并覆盖。
 
 ```
 tm im config set --config alice provider=deepseek model=deepseek-chat

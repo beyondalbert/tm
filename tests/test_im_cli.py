@@ -339,3 +339,38 @@ def test_config_setup_alias_still_works(tmp_path: Path, monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert load_im_settings(path, apply_env=False).model == "deepseek-chat"
+
+
+def test_model_setup_rekey_replaces_existing_model_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from unittest.mock import patch
+
+    from tm.config import load_credentials, save_credential
+
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    save_credential("deepseek", "sk-old-key")
+    _create(tmp_path)
+
+    with patch("tm.im.cli.typer.prompt", return_value="sk-new-key"):
+        result = runner.invoke(
+            app,
+            [
+                "config",
+                "model",
+                "setup",
+                "--config",
+                "alice",
+                "-p",
+                "deepseek",
+                "-m",
+                "deepseek-chat",
+                "--rekey",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert load_credentials()["deepseek"] == "sk-new-key"
+    assert "replacing the stored model key" in result.output
+    assert "model key = configured" in result.output

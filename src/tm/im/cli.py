@@ -796,6 +796,9 @@ def model_setup(
     login: bool = typer.Option(
         True, "--login/--no-login", help="Prompt for missing model/tm_im API keys."
     ),
+    rekey: bool = typer.Option(
+        False, "--rekey", help="Prompt for a new model key even if one is configured."
+    ),
 ) -> None:
     """Interactively choose the reply provider/model and store missing keys.
 
@@ -816,7 +819,11 @@ def model_setup(
 
     key_required = bool(preset.api_key_env) or not is_localhost_url(preset.base_url)
     has_model_key = registry.provider_key_present(provider_id)
-    if login and key_required and not has_model_key:
+    if login and key_required and (not has_model_key or rekey):
+        if has_model_key:
+            console.print(
+                f"[dim]replacing the stored model key for {provider_id}[/dim]"
+            )
         sources = "credentials.toml"
         if preset.api_key_env:
             sources += " or " + ", ".join(preset.api_key_env)
@@ -892,9 +899,12 @@ def config_setup_alias(
     login: bool = typer.Option(
         True, "--login/--no-login", help="Prompt for missing model/tm_im API keys."
     ),
+    rekey: bool = typer.Option(
+        False, "--rekey", help="Prompt for a new model key even if one is configured."
+    ),
 ) -> None:
     """Deprecated alias for `tm im config model setup`."""
-    model_setup(config=config, provider=provider, model=model, login=login)
+    model_setup(config=config, provider=provider, model=model, login=login, rekey=rekey)
 
 
 @config_app.command("path")

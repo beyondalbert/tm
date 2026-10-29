@@ -42,7 +42,8 @@ Providers with a stored key are marked `*` in
 `tm --list-models`; store one with `tm --login <provider>`. Built-in default is
 `deepseek` / `deepseek-v4-pro`. To choose and log in interactively for one
 config, run `tm im config model setup --config alice` (it stores the model key in
-the shared credentials file and writes `provider`/`model` into the config).
+the shared credentials file and writes `provider`/`model` into the config;
+add `--rekey` to replace an already stored model key).
 
 ```
 tm im config set --config alice provider=deepseek model=deepseek-chat
