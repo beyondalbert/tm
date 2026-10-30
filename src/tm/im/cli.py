@@ -57,7 +57,13 @@ from tm.permissions import (
     build_permission_hook,
 )
 from tm.safety import Journal
+from tm.terminal import ensure_utf8
 from tm.tools import build_default_tools
+
+# Chat text can contain any Unicode character. Configure stdout/stderr before
+# constructing the Rich console so a GBK console (or the daemon's log file)
+# does not raise UnicodeEncodeError.
+ensure_utf8()
 
 app = typer.Typer(add_completion=False, help="tm_im chat-network integration.")
 console = Console()

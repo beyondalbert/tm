@@ -980,6 +980,10 @@ def run_cli() -> None:
     Routes ``tm im ...`` to the tm_im integration and everything else to the
     default command, so the existing single-command CLI is unchanged.
     """
+    # ``tm im`` runs without the TUI and may print message text containing any
+    # Unicode character, including to a background log file. A GBK console or
+    # locale would otherwise raise UnicodeEncodeError from Rich.
+    ensure_utf8()
     if len(sys.argv) > 1 and sys.argv[1] == "im":
         from tm.im.cli import app as im_app
 
