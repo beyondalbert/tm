@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Literal
 
@@ -53,8 +53,12 @@ class Settings:
     auto_compact: bool = True
     compact_threshold: float = 0.8
     compact_keep_recent: int = 6
-    #: Hard ceiling (tokens) for the compaction trigger; 0 uses the window ratio only.
-    compact_max_tokens: int = 0
+    #: Recent tokens kept verbatim after compaction (0 = use compact_keep_recent).
+    compact_keep_tokens: int = 20_000
+    #: Absolute token budget for the compaction trigger; 0 uses the window ratio only.
+    compact_max_tokens: int = 200_000
+    #: Per-model overrides, keyed by "provider/model". See CompactionLimits.
+    model_overrides: dict[str, dict[str, object]] = field(default_factory=dict)
     #: Rewrite old tool output in the request view (the session keeps it verbatim).
     prune_tool_output: bool = True
     #: Tool results from the last N assistant turns are always kept verbatim.
@@ -96,6 +100,92 @@ def load_settings() -> Settings:
     return settings
 
 
+@dataclass(frozen=True)
+class CompactionLimits:
+    """Effective compaction settings for one model."""
+
+    threshold: float
+    keep_recent: int
+    keep_tokens: int
+    max_tokens: int
+
+
+_OVERRIDE_FIELDS = (
+    "compact_threshold",
+    "compact_keep_recent",
+    "compact_keep_tokens",
+    "compact_max_tokens",
+)
+
+
+def _override_int(value: object, key: str, name: str, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"model_overrides[{key!r}].{name}: expected an integer")
+    if value < minimum:
+        raise ValueError(
+            f"model_overrides[{key!r}].{name}: must be at least {minimum}"
+        )
+    return value
+
+
+def _override_threshold(value: object, key: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"model_overrides[{key!r}].compact_threshold: expected a number")
+    threshold = float(value)
+    if not 0 < threshold <= 1:
+        raise ValueError(
+            f"model_overrides[{key!r}].compact_threshold: must be between 0 and 1"
+        )
+    return threshold
+
+
+def compaction_for(settings: Settings, provider: str, model_id: str) -> CompactionLimits:
+    """Resolve the global compaction settings and the model's overrides.
+
+    Overrides live under ``[model_overrides."provider/model"]`` in settings.toml:
+
+        [model_overrides."local-deepseek/deepseek-v4-flash-0731"]
+        compact_max_tokens = 100000
+        compact_keep_tokens = 15000
+    """
+    limits = CompactionLimits(
+        threshold=settings.compact_threshold,
+        keep_recent=settings.compact_keep_recent,
+        keep_tokens=settings.compact_keep_tokens,
+        max_tokens=settings.compact_max_tokens,
+    )
+    if not isinstance(settings.model_overrides, dict):
+        raise ValueError("model_overrides: expected a table")
+    key = f"{provider}/{model_id}"
+    raw = settings.model_overrides.get(key)
+    if raw is None:
+        return limits
+    if not isinstance(raw, dict):
+        raise ValueError(f"model_overrides[{key!r}]: expected a table")
+    unknown = set(raw) - set(_OVERRIDE_FIELDS)
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise ValueError(f"model_overrides[{key!r}]: unknown field(s): {names}")
+    threshold = limits.threshold
+    keep_recent = limits.keep_recent
+    keep_tokens = limits.keep_tokens
+    max_tokens = limits.max_tokens
+    if "compact_threshold" in raw:
+        threshold = _override_threshold(raw["compact_threshold"], key)
+    if "compact_keep_recent" in raw:
+        keep_recent = _override_int(raw["compact_keep_recent"], key, "compact_keep_recent", 1)
+    if "compact_keep_tokens" in raw:
+        keep_tokens = _override_int(raw["compact_keep_tokens"], key, "compact_keep_tokens", 0)
+    if "compact_max_tokens" in raw:
+        max_tokens = _override_int(raw["compact_max_tokens"], key, "compact_max_tokens", 0)
+    return CompactionLimits(
+        threshold=threshold,
+        keep_recent=keep_recent,
+        keep_tokens=keep_tokens,
+        max_tokens=max_tokens,
+    )
+
+
 SettingKind = Literal["bool", "int", "float", "str", "choice"]
 
 
@@ -117,6 +207,7 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
     SettingField("auto_compact", "bool"),
     SettingField("compact_threshold", "float", minimum=0.01, maximum=1.0),
     SettingField("compact_keep_recent", "int", minimum=1),
+    SettingField("compact_keep_tokens", "int", minimum=0),
     SettingField("compact_max_tokens", "int", minimum=0),
     SettingField("prune_tool_output", "bool"),
     SettingField("prune_tool_output_keep_turns", "int", minimum=1),
@@ -250,7 +341,9 @@ def save_credential(provider: str, key: str) -> Path:
 
 
 __all__ = [
+    "CompactionLimits",
     "Settings",
+    "compaction_for",
     "config_dir",
     "credentials_path",
     "load_credentials",

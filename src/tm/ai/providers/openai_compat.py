@@ -13,6 +13,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from tm.ai.estimate import clamp_max_tokens
 from tm.ai.event_stream import EventStream
 from tm.ai.providers.base import Provider, StreamOptions
 from tm.ai.types import (
@@ -145,7 +146,7 @@ class OpenAICompatProvider(Provider):
         }
         if options.temperature is not None:
             params["temperature"] = options.temperature
-        params["max_tokens"] = options.max_tokens or model.max_tokens
+        params["max_tokens"] = clamp_max_tokens(model, context, options.max_tokens)
         if context.tools:
             params["tools"] = [
                 {
@@ -166,12 +167,21 @@ class OpenAICompatProvider(Provider):
     @staticmethod
     def _parse_usage(raw: Any) -> Usage:
         details = getattr(raw, "prompt_tokens_details", None)
+        # OpenAI-compatible APIs report prompt_tokens as the full prompt (cached
+        # and uncached). Normalize input to the uncached part so input,
+        # cache_read and total do not double count the cached tokens.
+        prompt = getattr(raw, "prompt_tokens", 0) or 0
         cache_read = getattr(details, "cached_tokens", 0) or 0
+        if not cache_read:
+            cache_read = getattr(raw, "cache_read_input_tokens", 0) or 0
+        output = getattr(raw, "completion_tokens", 0) or 0
+        input_tokens = max(prompt - cache_read, 0)
+        total = getattr(raw, "total_tokens", 0) or (input_tokens + cache_read + output)
         return Usage(
-            input=getattr(raw, "prompt_tokens", 0) or 0,
-            output=getattr(raw, "completion_tokens", 0) or 0,
+            input=input_tokens,
+            output=output,
             cache_read=cache_read,
-            total=getattr(raw, "total_tokens", 0) or 0,
+            total=total,
         )
 
     def stream(

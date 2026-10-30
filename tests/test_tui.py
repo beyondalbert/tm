@@ -964,7 +964,7 @@ async def test_settings_screen_edits_number() -> None:
     app = Host()
     async with app.run_test() as pilot:
         await pilot.pause()
-        for _ in range(3):  # auto_compact -> compact_threshold -> keep_recent -> max_tokens
+        for _ in range(4):  # auto_compact -> threshold -> keep_recent -> keep_tokens -> max_tokens
             await pilot.press("down")
         await pilot.press("enter")
         await pilot.pause()

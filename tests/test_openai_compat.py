@@ -114,6 +114,37 @@ async def test_streams_text_deltas_and_usage() -> None:
     assert completions.last_params["stream"] is True
 
 
+async def test_usage_splits_cached_tokens_from_input() -> None:
+    chunks = [
+        FakeChunk([FakeChoice(FakeDelta(content="ok"), finish_reason="stop")], usage=SimpleNamespace(
+            prompt_tokens=100, completion_tokens=7, total_tokens=107,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=80),
+        )),
+    ]
+    provider, _ = _provider(chunks)
+    context = Context(messages=[UserMessage(content="hi")])
+
+    _, final = await _collect(provider.stream(Model(id="m", provider="p"), context))
+
+    assert final.usage is not None
+    assert final.usage.input == 20
+    assert final.usage.cache_read == 80
+    assert final.usage.total == 107
+
+
+async def test_max_tokens_is_fitted_to_the_context_window() -> None:
+    chunks = [
+        FakeChunk([FakeChoice(FakeDelta(content="ok"), finish_reason="stop")]),
+    ]
+    provider, completions = _provider(chunks)
+    model = Model(id="m", provider="p", context_window=10_000, max_tokens=8_000)
+    context = Context(messages=[UserMessage(content="x" * 400)])
+
+    await _collect(provider.stream(model, context))
+
+    assert completions.last_params["max_tokens"] == 5_800
+
+
 async def test_streams_reasoning_content() -> None:
     chunks = [
         FakeChunk([FakeChoice(FakeDelta(reasoning_content="th"))]),

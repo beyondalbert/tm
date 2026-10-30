@@ -14,6 +14,7 @@ from tm.clipboard import copy_to_clipboard
 from tm.config import (
     SETTING_FIELDS,
     Settings,
+    compaction_for,
     format_setting_value,
     load_settings,
     save_settings_values,
@@ -227,6 +228,8 @@ class SlashCommands:
             return
         self.ctx.agent.provider = provider
         self.ctx.agent.model = model
+        if self.ctx.settings is not None:
+            apply_compaction_settings(self.ctx.settings, self.ctx.agent)
 
     def _show_session(self) -> None:
         session = self.ctx.session
@@ -373,6 +376,8 @@ class SlashCommands:
             return
         self.ctx.agent.provider = provider
         self.ctx.agent.model = model
+        if self.ctx.settings is not None:
+            apply_compaction_settings(self.ctx.settings, self.ctx.agent)
         if self.ctx.session is not None:
             self.ctx.session.set_model_selection(provider.id, model.id)
         self._emit(_t("cmd.model_set", provider=model.provider, id=model.id))
@@ -507,15 +512,22 @@ def _settings_summary(settings: Settings) -> str:
     return "\n".join(lines)
 
 
+def apply_compaction_settings(settings: Settings, agent: Agent) -> None:
+    """Apply the global compaction settings plus this model's overrides."""
+    limits = compaction_for(settings, agent.model.provider, agent.model.id)
+    agent.compact_threshold = limits.threshold
+    agent.compact_keep_recent = limits.keep_recent
+    agent.compact_keep_tokens = limits.keep_tokens
+    agent.compact_max_tokens = limits.max_tokens
+
+
 def apply_live_settings(settings: Settings, agent: Agent) -> None:
     """Apply settings that the running agent can adopt without a restart."""
     from tm.core.pruning import policy_from_settings
     from tm.tools.read import ReadTool
 
     agent.auto_compact = settings.auto_compact
-    agent.compact_threshold = settings.compact_threshold
-    agent.compact_keep_recent = settings.compact_keep_recent
-    agent.compact_max_tokens = settings.compact_max_tokens
+    apply_compaction_settings(settings, agent)
     agent.prune = policy_from_settings(settings)
     agent.max_turns = settings.max_turns
     agent.max_retries = settings.max_retries
@@ -532,6 +544,7 @@ __all__ = [
     "SessionPicker",
     "SettingsEditor",
     "SlashCommands",
+    "apply_compaction_settings",
     "apply_live_settings",
     "command_specs",
     "help_text",

@@ -90,8 +90,9 @@ temperature = 0.2
 language = "auto"          # en | zh | auto
 
 auto_compact = true
-compact_max_tokens = 150000   # 上下文预算硬上限；0 = 只用窗口比例
+compact_max_tokens = 200000   # 上下文绝对预算；0 = 只用窗口比例
 compact_keep_recent = 6
+compact_keep_tokens = 20000   # 压缩后原样保留的最近 token 数
 prune_tool_output = true
 prune_tool_output_keep_turns = 8
 prune_tool_output_min_chars = 2000
@@ -106,8 +107,15 @@ cache_retention = "short"
 
 说明：
 
-- `compact_max_tokens` 是控制成本和上下文长度的主要开关。对于 1M 窗口模型，
-  不设上限会一直涨到窗口的 80%；125k–200k 是常用的工作区间。
+- `compact_max_tokens` 是控制成本和上下文长度的主要开关，默认 200k；对于 1M 窗口
+  模型，长期会稳定在 100k–200k。设为 `0` 则回退到 `context_window * compact_threshold`。
+- `compact_keep_tokens` 限制压缩后原样保留的尾部 token 数；设为 `0` 时改用
+  `compact_keep_recent` 条消息。
+- 按模型覆盖预算写在 `[model_overrides."provider/model"]` 下，支持
+  `compact_threshold`、`compact_keep_recent`、`compact_keep_tokens`、
+  `compact_max_tokens`。
+- 每次请求的 `max_tokens` 会按上下文窗口的剩余空间自动收紧（固定留 4k 安全余量，
+  输出至少保留 1k），保证输入加输出不超过窗口。
 - `prune_tool_output*` 只在发给模型的请求里改写旧工具输出，会话文件仍保留原文；
   完整内容在 `<config>/workspace/spill`（可用 `spill_dir` 改）。
 - `read_dedupe` 让重复读取未变化的文件/行范围只回一句提示。

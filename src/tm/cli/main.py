@@ -26,12 +26,19 @@ from tm.ai.types import (
     UserMessage,
 )
 from tm.ai.user_models import UserModelError, load_presets
-from tm.cli.commands import CommandContext, ExitSignal, SlashCommands, _format_time
+from tm.cli.commands import (
+    CommandContext,
+    ExitSignal,
+    SlashCommands,
+    _format_time,
+    apply_compaction_settings,
+)
 from tm.cli.console_ui import ConsoleAgentUI
 from tm.compat import to_thread
 from tm.config import (
     SETTING_FIELDS,
     Settings,
+    compaction_for,
     config_dir,
     format_setting_value,
     load_credentials,
@@ -301,6 +308,7 @@ def _build_agent(
     )
     all_tools = [*tools, *resources.extensions.tools]
     environment = render_environment(detect_host()) if settings.env_probe else None
+    limits = compaction_for(settings, model.provider, model.id)
     agent = Agent(
         model,
         provider=provider,
@@ -313,9 +321,10 @@ def _build_agent(
         cwd=cwd,
         session=session,
         auto_compact=settings.auto_compact and not no_auto_compact,
-        compact_threshold=settings.compact_threshold,
-        compact_keep_recent=settings.compact_keep_recent,
-        compact_max_tokens=settings.compact_max_tokens,
+        compact_threshold=limits.threshold,
+        compact_keep_recent=limits.keep_recent,
+        compact_keep_tokens=limits.keep_tokens,
+        compact_max_tokens=limits.max_tokens,
         prune=policy_from_settings(settings),
         max_turns=max_turns if max_turns is not None else settings.max_turns,
         max_retries=max_retries if max_retries is not None else settings.max_retries,
@@ -369,7 +378,10 @@ def _command_context(
 
 
 def _restore_session_model(
-    agent: Agent, session: Session | None, registry: Registry
+    agent: Agent,
+    session: Session | None,
+    registry: Registry,
+    settings: Settings,
 ) -> None:
     """Restore the model a resumed session remembers, overriding the default."""
     if session is None:
@@ -384,6 +396,7 @@ def _restore_session_model(
         return
     agent.provider = provider
     agent.model = model
+    apply_compaction_settings(settings, agent)
 
 
 def _session_choices(manager: SessionManager, all_sessions: bool) -> list[SessionInfo]:
@@ -565,7 +578,7 @@ def _run_tui(
         console_ui=False,
     )
     registry = _make_registry()
-    _restore_session_model(agent, session, registry)
+    _restore_session_model(agent, session, registry, settings)
     prompt_app = TMPromptApp(
         agent, agent.model, banner=_startup_banner(agent.model, resources, no_context_files)
     )
@@ -906,7 +919,7 @@ def main(
                     max_turns=max_turns,
                     max_retries=max_retries,
                 )
-                _restore_session_model(agent, session, registry)
+                _restore_session_model(agent, session, registry, settings)
                 if store is not None and await agent.recover():
                     console.print("[dim]recovered an interrupted operation[/dim]")
                 if text:

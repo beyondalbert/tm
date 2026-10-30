@@ -483,7 +483,9 @@ class SettingsScreen(ModalScreen[Optional[Dict[str, object]]]):
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-box"):
             yield Label(_t("tui.settings_title"), id="settings-title")
-            yield OptionList(id="settings-list")
+            options = OptionList(id="settings-list")
+            options.styles.max_height = 12
+            yield options
             yield Input(id="settings-input")
             yield Static("", id="settings-hint")
             with Horizontal(id="settings-buttons"):
@@ -1153,23 +1155,27 @@ class TMPromptApp(App[None]):
         if branch:
             cwd = f"{cwd} ({branch})"
 
-        total_in = total_out = cache_read = 0
+        total_in = total_out = cache_read = cache_write = 0
         if self._agent.session is not None:
             totals = self._agent.session.usage_totals()
-            total_in, total_out, cache_read = totals.input, totals.output, totals.cache_read
+            total_in = totals.input
+            total_out = totals.output
+            cache_read = totals.cache_read
+            cache_write = totals.cache_write
         else:
             for message in self._agent.messages:
                 if isinstance(message, AssistantMessage) and message.usage:
                     total_in += message.usage.input
                     total_out += message.usage.output
                     cache_read += message.usage.cache_read
+                    cache_write += message.usage.cache_write
         used = estimate_context_tokens(self._agent.messages, self._agent.system_prompt)
         window = model.context_window or 0
 
         stats = f"↑{format_tokens(total_in)} ↓{format_tokens(total_out)}"
         if cache_read:
             stats += f" R{format_tokens(cache_read)}"
-            prompt_tokens = total_in + cache_read
+            prompt_tokens = total_in + cache_read + cache_write
             if prompt_tokens:
                 stats += f" CH{cache_read * 100 // prompt_tokens}%"
         cost = model.cost(
@@ -1177,7 +1183,8 @@ class TMPromptApp(App[None]):
                 input=total_in,
                 output=total_out,
                 cache_read=cache_read,
-                total=total_in + total_out + cache_read,
+                cache_write=cache_write,
+                total=total_in + total_out + cache_read + cache_write,
             )
         )
         if cost:

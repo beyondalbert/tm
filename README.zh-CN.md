@@ -400,12 +400,13 @@ tm im stop  --config alice
 provider = "deepseek"
 model = "deepseek-v4-pro"
 temperature = 0.2
-max_tokens = 8192
+max_tokens = 8192        # 输出上限；会按窗口剩余空间自动收紧
 system_prompt = "Extra instructions appended to the system prompt."
-auto_compact = true      # summarize older context when nearing the limit
-compact_threshold = 0.8  # fraction of the context window that triggers it
-compact_keep_recent = 6  # recent messages kept verbatim
-compact_max_tokens = 0   # 压缩触发的硬上限（token）；0 表示只用窗口比例
+auto_compact = true        # 接近上限时自动压缩较早的上下文
+compact_threshold = 0.8    # 触发压缩的上下文窗口比例
+compact_keep_recent = 6    # 压缩后原样保留的最近消息数（兜底）
+compact_keep_tokens = 20000  # 压缩后原样保留的最近 token 数
+compact_max_tokens = 200000  # 绝对 token 预算；0 表示只用窗口比例
 prune_tool_output = true            # 仅在请求里改写旧工具输出（会话仍保留原文）
 prune_tool_output_keep_turns = 8    # 最近 N 个 assistant 回合的输出不裁剪
 prune_tool_output_min_chars = 4000  # 只裁剪长度达到该值的工具结果
@@ -425,10 +426,28 @@ language = "auto"              # 界面语言：en | zh | auto（也可 --lang�
 ```
 
 当估算上下文超过 `context_window * compact_threshold`（或更小的 `compact_max_tokens`）时，
-会在发送提示词前自动压缩；每次模型请求前也会检查，因此单个很长的自主回合不会远超预算。
-单次运行可用 `--no-auto-compact` 关闭。若某回合被截断或报上下文溢出，TM 会压缩并重试，且每次
-保留更小的尾部（最终只留摘要）直到放得下；总结请求本身也按窗口做了长度上限，若仍失败则直接丢弃
-最旧的消息。摘要为结构化（目标、进度、决定、下一步）并在每次压缩时**增量更新**，同时附带读取/修改
+会在发送提示词前自动压缩；默认绝对预算为 200k token，所以 1M 窗口的模型不会涨到几十万。
+每次模型请求前也会检查，因此单个很长的自主回合不会远超预算。单次运行可用 `--no-auto-compact` 关闭。
+
+可以在 `settings.toml` 里按模型覆盖预算：
+
+```toml
+[model_overrides."local-deepseek/deepseek-v4-flash-0731"]
+compact_max_tokens = 100000
+compact_keep_tokens = 15000
+```
+
+可覆盖的字段为 `compact_threshold`、`compact_keep_recent`、`compact_keep_tokens`、
+`compact_max_tokens`。
+
+每次请求前，TM 还会把 `max_tokens` 收紧到提示词在窗口里剩余空间（固定留 4k 安全
+余量，输出至少保留 1k）。这样即使压缩关闭或提示词增长超出预期，输入加输出也不会超过
+模型的上下文窗口。
+
+若某回合报上下文溢出，TM 会压缩并重试，且每次保留更小的尾部（最终只留摘要）直到放得下。
+`length` 只表示回复被输出上限截断，并不等于提示词溢出；只有当回复明显早于请求的输出上限
+停止时，TM 才会在压缩后重试一次。总结请求本身也按窗口做了长度上限，若仍失败则直接丢弃最旧的
+消息。摘要为结构化（目标、进度、决定、下一步）并在每次压缩时**增量更新**，同时附带读取/修改
 过的文件清单。压缩会作为持久化条目存储，因此摘要后的上下文在重启后仍然保留。
 
 旧工具输出只会在请求里被改写，会话中仍保留原文：早于最近 `prune_tool_output_keep_turns` 个

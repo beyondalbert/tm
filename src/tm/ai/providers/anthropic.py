@@ -10,6 +10,7 @@ import asyncio
 import json
 from typing import Any
 
+from tm.ai.estimate import clamp_max_tokens
 from tm.ai.event_stream import EventStream
 from tm.ai.providers.base import Provider, StreamOptions
 from tm.ai.types import (
@@ -159,7 +160,7 @@ class AnthropicProvider(Provider):
 
         params: dict[str, Any] = {
             "model": model.id,
-            "max_tokens": options.max_tokens or model.max_tokens,
+            "max_tokens": clamp_max_tokens(model, context, options.max_tokens),
             "messages": messages_to_anthropic(context.messages),
             "stream": True,
         }
@@ -242,6 +243,12 @@ class AnthropicProvider(Provider):
                     input_usage = getattr(message, "usage", None)
                     if input_usage is not None:
                         usage.input = getattr(input_usage, "input_tokens", 0) or 0
+                        usage.cache_read = (
+                            getattr(input_usage, "cache_read_input_tokens", 0) or 0
+                        )
+                        usage.cache_write = (
+                            getattr(input_usage, "cache_creation_input_tokens", 0) or 0
+                        )
                 elif event_type == "content_block_start":
                     block = getattr(event, "content_block", None)
                     if getattr(block, "type", None) == "tool_use":
@@ -285,7 +292,9 @@ class AnthropicProvider(Provider):
                 call.arguments = _parse_arguments(tool_args.get(index, ""))
                 stream.push(ToolCallEndEvent(partial=snapshot(), tool_call=call))
 
-            usage.total = usage.input + usage.output
+            usage.total = (
+                usage.input + usage.cache_read + usage.cache_write + usage.output
+            )
             final = snapshot()
             final.stop_reason = stop_reason  # type: ignore[assignment]
             final.usage = usage

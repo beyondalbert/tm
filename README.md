@@ -442,12 +442,13 @@ multiple accounts, model selection, safety, troubleshooting).
 provider = "deepseek"
 model = "deepseek-v4-pro"
 temperature = 0.2
-max_tokens = 8192
+max_tokens = 8192        # upper bound; fitted to the window's remaining room
 system_prompt = "Extra instructions appended to the system prompt."
-auto_compact = true      # summarize older context when nearing the limit
-compact_threshold = 0.8  # fraction of the context window that triggers it
-compact_keep_recent = 6  # recent messages kept verbatim
-compact_max_tokens = 0   # hard trigger ceiling in tokens; 0 = window ratio only
+auto_compact = true        # summarize older context when nearing the limit
+compact_threshold = 0.8    # fraction of the context window that triggers it
+compact_keep_recent = 6    # recent messages kept verbatim (fallback)
+compact_keep_tokens = 20000  # recent tokens kept verbatim after compaction
+compact_max_tokens = 200000  # absolute token budget; 0 = window ratio only
 prune_tool_output = true            # rewrite old tool output in the prompt only
 prune_tool_output_keep_turns = 8    # last N assistant turns are kept verbatim
 prune_tool_output_min_chars = 4000  # only rewrite results at least this long
@@ -468,15 +469,36 @@ language = "auto"              # UI language: en | zh | auto (also --lang, /lang
 
 Automatic compaction runs before a prompt when the estimated context exceeds
 `context_window * compact_threshold` (or `compact_max_tokens`, whichever is
-smaller). It is also checked before every model request, so one long autonomous
-turn cannot grow far past the budget. Disable per run with `--no-auto-compact`.
-If a turn ends truncated or with an overflow error, TM compacts and retries,
-keeping a smaller tail each attempt (down to just the summary) until it fits;
-the summarizer itself gets a size-bounded transcript, and if it still fails TM
-drops the oldest messages. Summaries are structured (goal, progress, decisions,
-next steps) and updated incrementally on each compaction, and list the files that
-were read or modified. Compaction is stored as a durable entry, so the summarized
-context survives a restart.
+smaller). The default absolute budget is 200k tokens, so a 1M-window model does
+not drift to hundreds of thousands of tokens. It is also checked before every
+model request, so one long autonomous turn cannot grow far past the budget.
+Disable per run with `--no-auto-compact`.
+
+Override the budget for one model in `settings.toml`:
+
+```toml
+[model_overrides."local-deepseek/deepseek-v4-flash-0731"]
+compact_max_tokens = 100000
+compact_keep_tokens = 15000
+```
+
+The accepted override fields are `compact_threshold`, `compact_keep_recent`,
+`compact_keep_tokens`, and `compact_max_tokens`.
+
+Before every request, TM also lowers `max_tokens` to the room the prompt leaves
+in the window (4k safety reserve, at least 1k output). This keeps input plus
+output from exceeding the model's context window even when compaction is off or
+the prompt grew faster than expected.
+
+If a turn ends with a provider context-overflow error, TM compacts and retries,
+keeping a smaller tail each attempt (down to just the summary) until it fits. A
+`length` stop means the reply hit the output limit, not that the prompt
+overflowed; TM retries it once after compaction only when the reply stopped well
+before the requested output limit. The summarizer itself gets a size-bounded
+transcript, and if it still fails TM drops the oldest messages. Summaries are
+structured (goal, progress, decisions, next steps) and updated incrementally on
+each compaction, and list the files that were read or modified. Compaction is
+stored as a durable entry, so the summarized context survives a restart.
 
 Old tool output is also rewritten in the prompt without touching the session:
 results older than the last `prune_tool_output_keep_turns` assistant turns and

@@ -21,7 +21,13 @@ from tm.ai.types import (
     ToolResultMessage,
     UserMessage,
 )
-from tm.core.compaction import SUMMARY_PREFIX, estimate_context_tokens
+from tm.core.compaction import (
+    SUMMARY_PREFIX,
+    estimate_context_tokens,
+    is_context_overflow,
+    is_recoverable_length,
+    token_cut_index,
+)
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
@@ -112,6 +118,7 @@ class Agent:
         auto_compact: bool = False,
         compact_threshold: float = 0.8,
         compact_keep_recent: int = 6,
+        compact_keep_tokens: int = 0,
         compact_max_tokens: int = 0,
         prune: PrunePolicy | None = None,
         telemetry: Telemetry | None = None,
@@ -131,6 +138,7 @@ class Agent:
         self.auto_compact = auto_compact
         self.compact_threshold = compact_threshold
         self.compact_keep_recent = compact_keep_recent
+        self.compact_keep_tokens = compact_keep_tokens
         self.compact_max_tokens = compact_max_tokens
         self.prune = prune or PrunePolicy()
         self.temperature = temperature
@@ -193,15 +201,27 @@ class Agent:
     async def compact(
         self,
         instructions: str | None = None,
-        keep_recent: int = 6,
+        keep_recent: int | None = None,
         signal: AbortSignal | None = None,
+        keep_tokens: int | None = None,
     ) -> bool:
-        """Summarize older messages. Persists a compaction entry when possible."""
+        """Summarize older messages. Persists a compaction entry when possible.
+
+        By default the retained tail is bounded by ``compact_keep_tokens``; an
+        explicit ``keep_recent`` switches to a message count, which overflow
+        recovery uses to shrink the tail step by step.
+        """
         from tm.core.compaction import summarize_messages
 
-        if len(self._messages) <= keep_recent:
+        message_tail = self.compact_keep_recent if keep_recent is None else keep_recent
+        if keep_tokens is None:
+            keep_tokens = 0 if keep_recent is not None else self.compact_keep_tokens
+        if len(self._messages) <= message_tail and keep_tokens <= 0:
             return False
-        index = max(0, len(self._messages) - keep_recent)
+        if keep_tokens > 0:
+            index = token_cut_index(self._messages, keep_tokens)
+        else:
+            index = max(0, len(self._messages) - message_tail)
         # Never start the retained tail with a tool result: include the assistant
         # that requested it, so the provider sees a valid tool call sequence.
         while 0 < index < len(self._messages) and isinstance(
@@ -262,20 +282,24 @@ class Agent:
             self._messages = [UserMessage(content=note), *tail]
         return True
 
-    def _context_overflowed(self) -> bool:
+    def _latest_assistant(self) -> AssistantMessage | None:
         for message in reversed(self._messages):
-            if not isinstance(message, AssistantMessage):
-                continue
-            if message.stop_reason == "length":
-                return True
-            if message.stop_reason == "error" and message.error_message:
-                text = message.error_message.lower()
-                return any(
-                    token in text
-                    for token in ("context", "too long", "maximum", "token", "length")
-                )
+            if isinstance(message, AssistantMessage):
+                return message
+        return None
+
+    def _context_overflowed(self) -> bool:
+        message = self._latest_assistant()
+        if message is None:
             return False
-        return False
+        return is_context_overflow(message, self.model.context_window)
+
+    def _recoverable_length(self) -> bool:
+        message = self._latest_assistant()
+        if message is None:
+            return False
+        desired = self.max_tokens or self.model.max_tokens
+        return is_recoverable_length(message, desired)
 
     async def _maybe_auto_compact(self) -> bool:
         view = self._request_view(self._messages)
@@ -283,7 +307,7 @@ class Agent:
             return False
         estimated = estimate_context_tokens(view, self.system_prompt)
         await self._notice(_t("notice.compacting", tokens=estimated), "info")
-        return await self.compact(keep_recent=self.compact_keep_recent, signal=self._signal)
+        return await self.compact(signal=self._signal)
 
     @staticmethod
     def _assistant_count(messages: list[Message]) -> int:
@@ -309,7 +333,7 @@ class Agent:
         return prune_tool_results(messages, self.prune)
 
     def _over_budget(self, view: list[Message]) -> bool:
-        if not self.auto_compact or len(view) <= self.compact_keep_recent:
+        if not self.auto_compact or len(view) <= 1:
             return False
         budget = self._token_budget()
         if budget <= 0:
@@ -333,7 +357,7 @@ class Agent:
         self._flush_messages()
         estimated = estimate_context_tokens(view, self.system_prompt)
         await self._notice(_t("notice.compacting", tokens=estimated), "info")
-        if await self.compact(keep_recent=self.compact_keep_recent, signal=self._signal):
+        if await self.compact(signal=self._signal):
             history = list(self._messages)
             view = self._request_view(history)
         return history, view
@@ -477,6 +501,7 @@ class Agent:
         self.operation = operation
         status = "ok"
         recovery_attempts = 0
+        length_attempts = 0
         max_recoveries = self.compact_keep_recent + 8
         try:
             while True:
@@ -495,14 +520,22 @@ class Agent:
                 )
                 self._messages = result.messages
                 self.last_stop_reason = result.stop_reason
+                overflowed = self._context_overflowed()
+                recoverable = not overflowed and self._recoverable_length()
+                if recoverable and length_attempts > 0:
+                    recoverable = False
                 if (
-                    recovery_attempts < max_recoveries
-                    and self._context_overflowed()
+                    (overflowed or recoverable)
+                    and recovery_attempts < max_recoveries
                     and len(self._messages) > 1
                 ):
-                    # Context overflowed: persist, compact a smaller tail, retry.
+                    # Overflow, or an early length stop: persist, compact a
+                    # smaller tail, retry once for length and repeatedly for
+                    # overflow.
                     self._flush_messages()
                     recovery_attempts += 1
+                    if recoverable:
+                        length_attempts += 1
                     keep = max(0, self.compact_keep_recent - recovery_attempts)
                     await self._notice(
                         _t("notice.overflow", n=recovery_attempts, keep=keep),
@@ -510,8 +543,9 @@ class Agent:
                     )
                     if await self.compact(keep_recent=keep, signal=self._signal):
                         continue
-                    # Summarization failed or was not enough: drop the oldest half.
-                    if self._trim_oldest():
+                    # Summarization failed or was not enough: drop the oldest
+                    # half only for a real overflow, never for a length stop.
+                    if overflowed and self._trim_oldest():
                         continue
                 break
         except BaseException:

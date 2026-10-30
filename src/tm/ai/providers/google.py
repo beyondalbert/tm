@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from tm.ai.estimate import clamp_max_tokens
 from tm.ai.event_stream import EventStream
 from tm.ai.providers.base import Provider, StreamOptions
 from tm.ai.types import (
@@ -126,7 +127,9 @@ class GoogleProvider(Provider):
         return self._client
 
     def _build_config(self, model: Model, context: Context, options: StreamOptions) -> dict:
-        config: dict[str, Any] = {"max_output_tokens": options.max_tokens or model.max_tokens}
+        config: dict[str, Any] = {
+            "max_output_tokens": clamp_max_tokens(model, context, options.max_tokens)
+        }
         if context.system_prompt:
             config["system_instruction"] = context.system_prompt
         if options.temperature is not None:
@@ -197,9 +200,16 @@ class GoogleProvider(Provider):
                     break
                 meta = getattr(chunk, "usage_metadata", None)
                 if meta is not None:
-                    usage.input = getattr(meta, "prompt_token_count", 0) or 0
+                    # prompt_token_count includes cached content; split it out so
+                    # input and cache_read are disjoint like the other providers.
+                    prompt = getattr(meta, "prompt_token_count", 0) or 0
+                    cache_read = getattr(meta, "cached_content_token_count", 0) or 0
+                    usage.input = max(prompt - cache_read, 0)
                     usage.output = getattr(meta, "candidates_token_count", 0) or 0
-                    usage.total = getattr(meta, "total_token_count", 0) or 0
+                    usage.cache_read = cache_read
+                    usage.total = getattr(meta, "total_token_count", 0) or (
+                        usage.input + usage.cache_read + usage.output
+                    )
 
                 candidates = getattr(chunk, "candidates", None) or []
                 if not candidates:

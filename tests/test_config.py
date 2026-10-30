@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tm.config import (
+    Settings,
+    compaction_for,
     credentials_path,
     load_credentials,
     load_settings,
@@ -40,6 +44,54 @@ def test_load_settings_reads_toml(tmp_path: Path, monkeypatch) -> None:
     assert settings.prune_tool_output_keep_chars == 100
     assert settings.spill_dir == "D:/tmp/spill"
     assert settings.read_dedupe is False
+
+
+def test_load_settings_reads_model_overrides(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "settings.toml").write_text(
+        "compact_max_tokens = 150000\n"
+        "[model_overrides.\"local/big\"]\n"
+        "compact_max_tokens = 100000\n"
+        "compact_keep_tokens = 12000\n"
+    )
+    settings = load_settings()
+    assert settings.model_overrides == {
+        "local/big": {"compact_max_tokens": 100000, "compact_keep_tokens": 12000}
+    }
+
+
+def test_compaction_for_merges_model_overrides() -> None:
+    settings = Settings(
+        compact_threshold=0.8,
+        compact_keep_recent=6,
+        compact_keep_tokens=20000,
+        compact_max_tokens=150000,
+        model_overrides={
+            "local/big": {
+                "compact_threshold": 0.5,
+                "compact_keep_recent": 3,
+                "compact_keep_tokens": 12000,
+                "compact_max_tokens": 100000,
+            }
+        },
+    )
+    limits = compaction_for(settings, "local", "big")
+    assert limits.threshold == 0.5
+    assert limits.keep_recent == 3
+    assert limits.keep_tokens == 12000
+    assert limits.max_tokens == 100000
+
+    other = compaction_for(settings, "local", "other")
+    assert other.threshold == 0.8
+    assert other.keep_tokens == 20000
+    assert other.max_tokens == 150000
+
+
+def test_compaction_for_rejects_invalid_overrides() -> None:
+    settings = Settings(model_overrides={"local/big": {"compact_max_tokens": -1}})
+    with pytest.raises(ValueError, match="compact_max_tokens"):
+        compaction_for(settings, "local", "big")
+
 
 
 def test_load_settings_tolerates_bom(tmp_path: Path, monkeypatch) -> None:

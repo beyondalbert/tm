@@ -92,8 +92,9 @@ temperature = 0.2
 language = "auto"          # en | zh | auto
 
 auto_compact = true
-compact_max_tokens = 150000   # hard context budget; 0 = window ratio only
+compact_max_tokens = 200000   # absolute context budget; 0 = window ratio only
 compact_keep_recent = 6
+compact_keep_tokens = 20000   # recent tokens kept verbatim
 prune_tool_output = true
 prune_tool_output_keep_turns = 8
 prune_tool_output_min_chars = 2000
@@ -108,9 +109,16 @@ cache_retention = "short"
 
 Notes:
 
-- `compact_max_tokens` is the main cost/context control. With a 1M-token model,
-  leaving it at `0` lets the context grow to 80% of the window; 125k-200k is a
-  practical working range.
+- `compact_max_tokens` is the main cost/context control. The default is 200k;
+  with a 1M-token model it keeps the context in a practical 100k-200k range.
+  Set it to `0` to fall back to `context_window * compact_threshold`.
+- `compact_keep_tokens` bounds the tail kept verbatim after compaction. When it
+  is `0`, `compact_keep_recent` messages are kept instead.
+- Per-model overrides go under `[model_overrides."provider/model"]` and accept
+  `compact_threshold`, `compact_keep_recent`, `compact_keep_tokens`, and
+  `compact_max_tokens`.
+- Every request's `max_tokens` is fitted to the room left in the context window
+  (4k safety reserve, at least 1k output), so input plus output cannot exceed it.
 - `prune_tool_output*` rewrites old tool output only in the request; the session
   keeps the full text. Spill files live under `<config>/workspace/spill`
   (override with `spill_dir`).

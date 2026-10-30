@@ -99,9 +99,13 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "recent messages kept verbatim after compaction",
         "压缩后原样保留的最近消息数",
     ),
+    "settings.compact_keep_tokens": (
+        "recent tokens kept verbatim after compaction (0 = message count)",
+        "压缩后原样保留的最近 token 数（0 表示按消息数）",
+    ),
     "settings.compact_max_tokens": (
-        "hard token ceiling for compaction (0 = window ratio only)",
-        "压缩触发的硬 token 上限（0 表示只用窗口比例）",
+        "absolute token budget for compaction (0 = window ratio only)",
+        "压缩触发的绝对 token 预算（0 表示只用窗口比例）",
     ),
     "settings.prune_tool_output": (
         "rewrite old tool output in the prompt",

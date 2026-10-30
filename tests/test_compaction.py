@@ -21,6 +21,7 @@ from tm.core.compaction import (
     extract_file_operations,
     format_file_operations,
     format_transcript,
+    token_cut_index,
 )
 from tm.core.events import AgentNoticeEvent
 
@@ -263,7 +264,11 @@ async def test_overflow_recovers_more_than_once() -> None:
         calls["n"] += 1
         index = calls["n"]
         if index in (1, 3):
-            message = AssistantMessage(content=[TextContent(text="partial")], stop_reason="length")
+            message = AssistantMessage(
+                content=[TextContent(text="partial")],
+                stop_reason="error",
+                error_message="prompt is too long",
+            )
         elif index in (2, 4):
             message = AssistantMessage(
                 content=[TextContent(text="summary")], stop_reason="stop"
@@ -281,8 +286,96 @@ async def test_overflow_recovers_more_than_once() -> None:
 
     await agent.prompt("go")
 
-    # length -> compact -> length -> compact -> done
+    # overflow -> compact -> overflow -> compact -> done
     assert calls["n"] == 5
+    last = agent.messages[-1]
+    assert isinstance(last, AssistantMessage)
+    assert last.text() == "done"
+
+
+async def test_length_stop_retries_only_once() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] in (1, 3):
+            message = AssistantMessage(content=[TextContent(text="partial")], stop_reason="length")
+        elif calls["n"] == 2:
+            message = AssistantMessage(content=[TextContent(text="summary")], stop_reason="stop")
+        else:
+            message = AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_tokens=4096)
+    agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
+
+    await agent.prompt("go")
+
+    # length -> compact -> length, then stop: no second summary.
+    assert calls["n"] == 3
+    last = agent.messages[-1]
+    assert isinstance(last, AssistantMessage)
+    assert last.stop_reason == "length"
+
+
+async def test_length_at_the_output_limit_does_not_compact() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        message = AssistantMessage(
+            content=[TextContent(text="long answer")],
+            stop_reason="length",
+            usage=Usage(input=100, output=4096, total=4196),
+        )
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_tokens=4096)
+    agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
+
+    await agent.prompt("go")
+
+    assert calls["n"] == 1
+    assert isinstance(agent.messages[-1], AssistantMessage)
+    assert agent.messages[-1].stop_reason == "length"
+
+
+async def test_length_filling_the_window_is_an_overflow() -> None:
+    calls = {"n": 0}
+    model = Model(id="fake", provider="fake", context_window=1000)
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                content=[TextContent(text="partial")],
+                stop_reason="length",
+                usage=Usage(input=1000, output=0, total=1000),
+            )
+        elif calls["n"] == 2:
+            message = AssistantMessage(content=[TextContent(text="summary")], stop_reason="stop")
+        else:
+            message = AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(model, stream_fn=stream_fn, max_tokens=4096)
+    agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
+
+    await agent.prompt("go")
+
+    assert calls["n"] == 3
     last = agent.messages[-1]
     assert isinstance(last, AssistantMessage)
     assert last.text() == "done"
@@ -311,7 +404,7 @@ async def test_auto_compact_emits_a_notice() -> None:
     assert any("compacting" in text for text in notices)
 
 
-async def test_overflow_compaction_shrinks_the_retained_tail(monkeypatch) -> None:
+async def test_length_recovery_shrinks_the_retained_tail_once(monkeypatch) -> None:
     def always_length(model, context, options) -> EventStream:
         message = AssistantMessage(content=[TextContent(text="partial")], stop_reason="length")
         stream: EventStream = EventStream()
@@ -332,8 +425,7 @@ async def test_overflow_compaction_shrinks_the_retained_tail(monkeypatch) -> Non
 
     await agent.prompt("go")
 
-    assert keeps[0] == 2
-    assert keeps[-1] == 0
+    assert keeps == [2]
 
 
 def test_format_transcript_truncates_to_budget() -> None:
@@ -356,6 +448,31 @@ def test_estimate_context_tokens_prefers_provider_usage() -> None:
     total = estimate_context_tokens(messages)
     assert total >= 1050
     assert total <= 1050 + 200
+
+
+def test_estimate_context_tokens_ignores_usage_before_a_new_prefix() -> None:
+    messages: list[Message] = [
+        UserMessage(content=f"{SUMMARY_PREFIX}summary", timestamp=2000),
+        UserMessage(content="tail", timestamp=1500),
+        AssistantMessage(
+            content=[TextContent(text="hi")],
+            stop_reason="stop",
+            usage=Usage(input=5000, output=10, total=5010),
+            timestamp=1600,
+        ),
+        UserMessage(content="new", timestamp=2100),
+    ]
+    # The summary was inserted after the response, so its usage describes a
+    # prefix that is no longer sent.
+    assert estimate_context_tokens(messages) < 100
+
+
+def test_token_cut_index_keeps_the_requested_budget() -> None:
+    messages: list[Message] = [UserMessage(content="x" * 400) for _ in range(10)]
+    # Each message estimates about 104 tokens (400 chars / 4 + overhead).
+    index = token_cut_index(messages, 250)
+    assert index == 7
+    assert token_cut_index(messages, 0) == len(messages)
 
 
 def test_estimate_context_tokens_ignores_failed_usage() -> None:
@@ -445,7 +562,9 @@ async def test_overflow_falls_back_to_trimming_when_compaction_fails(monkeypatch
         calls["n"] += 1
         if calls["n"] <= 2:
             message = AssistantMessage(
-                content=[TextContent(text="partial")], stop_reason="length"
+                content=[TextContent(text="partial")],
+                stop_reason="error",
+                error_message="prompt is too long",
             )
         else:
             message = AssistantMessage(
