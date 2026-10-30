@@ -5,13 +5,16 @@
 The release script runs the checks, bumps the version, builds, commits, pushes,
 tags, creates the GitHub Release, and waits for the PyPI workflow:
 
-```powershell
-.\scripts\release.ps1                              # patch release
-.\scripts\release.ps1 -Bump minor                   # minor release
-.\scripts\release.ps1 -Version 1.0.0                # explicit version
-.\scripts\release.ps1 -Message "feat(core): add x" -Paths src\tm\x.py tests\test_x.py
-.\scripts\release.ps1 -SkipChecks                   # skip ruff/mypy/pytest
+```bat
+scripts\release.bat                              :: patch release
+scripts\release.bat -Bump minor                   :: minor release
+scripts\release.bat -Version 1.0.0                :: explicit version
+scripts\release.bat -Message "feat(core): add x" -Paths src\tm\x.py tests\test_x.py
+scripts\release.bat -SkipChecks                   :: skip ruff/mypy/pytest
 ```
+
+`release.bat` is a thin launcher for `release.ps1`; it bypasses the PowerShell
+execution policy for that invocation.
 
 New files must be named with `-Paths`; only tracked changes are staged by
 default. The script publishes through the GitHub Actions workflow and falls back
