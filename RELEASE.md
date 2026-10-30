@@ -1,9 +1,32 @@
 # Releasing The Machine (TM)
 
+## One command (Windows)
+
+The release script runs the checks, bumps the version, builds, commits, pushes,
+tags, creates the GitHub Release, and waits for the PyPI workflow:
+
+```powershell
+.\scripts\release.ps1                              # patch release
+.\scripts\release.ps1 -Bump minor                   # minor release
+.\scripts\release.ps1 -Version 1.0.0                # explicit version
+.\scripts\release.ps1 -Message "feat(core): add x" -Paths src\tm\x.py tests\test_x.py
+.\scripts\release.ps1 -SkipChecks                   # skip ruff/mypy/pytest
+```
+
+New files must be named with `-Paths`; only tracked changes are staged by
+default. The script publishes through the GitHub Actions workflow and falls back
+to a manual `workflow_dispatch` if the release-triggered run fails to start.
+
+GitHub authentication comes from `GITHUB_TOKEN`, `GH_TOKEN`, or the credential
+stored for `github.com`. PyPI uses Trusted Publishing; the script never handles a
+PyPI token.
+
+## Manual process
+
 The distribution name is `the-machine` (the CLI command is `tm`). It is published
 on PyPI at <https://pypi.org/project/the-machine/>.
 
-## 1. Bump the version
+### 1. Bump the version
 
 `version` lives in `pyproject.toml`:
 
@@ -15,7 +38,7 @@ uv version 0.2.0          # set explicitly
 
 Commit the version bump.
 
-## 2. Build and check locally
+### 2. Build and check locally
 
 ```bash
 uv build                 # writes dist/*.whl and dist/*.tar.gz
@@ -29,7 +52,7 @@ the wheel into a throwaway venv and runs `tm --version` / `tm --list-models`:
 .\scripts\release-smoke.ps1 -Version X.Y.Z
 ```
 
-## 3. Publish
+### 3. Publish
 
 ### Option A - Trusted Publishing (recommended, no tokens)
 
@@ -83,7 +106,7 @@ $env:UV_PUBLISH_TOKEN = "pypi-xxxxxxxx"
 uv publish
 ```
 
-## 4. Verify
+### 4. Verify
 
 ```bash
 pip install "the-machine[all]"
