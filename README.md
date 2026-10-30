@@ -248,7 +248,8 @@ config dir) are appended to the system prompt. Disable with `--no-context-files`
 
 When stdout is not a terminal (piped or redirected), `TERM` is `dumb`, the
 terminal is too small, or `textual` is not installed, `tm` falls back to the
-console REPL automatically.
+console REPL automatically. The Windows console does not use `TERM`, so the TUI
+starts normally there even when it is unset.
 
 **Terminal compatibility (SSH / Xshell / SecureCRT).** The TUI forces UTF-8
 output, because a server locale such as `zh_CN.GBK` would otherwise crash the

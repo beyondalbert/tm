@@ -43,6 +43,21 @@ def test_tui_problem_rejects_non_tty_and_dumb_term() -> None:
     assert "TERM" in (tui_problem(_info(term="")) or "")
 
 
+def test_tui_problem_allows_windows_without_term() -> None:
+    assert tui_problem(_info(term="", windows=True)) is None
+    assert tui_problem(_info(term="dumb", windows=True)) is None
+
+
+def test_terminal_info_marks_windows_without_term(monkeypatch) -> None:
+    monkeypatch.setattr("tm.terminal.os.name", "nt")
+    monkeypatch.delenv("TERM", raising=False)
+
+    info = terminal_info()
+
+    assert info.windows is True
+    assert any("Windows console" in note for note in info.notes)
+
+
 def test_tui_problem_rejects_small_terminal() -> None:
     problem = tui_problem(_info(columns=MIN_COLUMNS - 1, rows=MIN_ROWS))
     assert problem is not None and "small" in problem

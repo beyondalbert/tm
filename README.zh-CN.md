@@ -238,7 +238,7 @@ context_window = 65536
 系统提示词。用 `--no-context-files` 关闭。
 
 当 stdout 不是终端（被管道/重定向）、`TERM` 为 `dumb`、终端过小或未安装 `textual` 时，
-`tm` 会自动回退为控制台 REPL。
+`tm` 会自动回退为控制台 REPL。Windows 控制台不使用 `TERM`，因此即使未设置也会正常进入 TUI。
 
 **终端兼容性（SSH / Xshell / SecureCRT）。** TUI 会强制以 UTF-8 输出，否则服务器
 locale 为 `zh_CN.GBK` 时，制表符和中文会让渲染线程报错并冻结画面。它还会把 `TERM=xterm`

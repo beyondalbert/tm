@@ -1,7 +1,7 @@
 """Terminal capability checks for the TUI.
 
-The TUI (Textual) needs a real terminal, a sane ``TERM``, and enough rows and
-columns. ``ensure_utf8`` also matters over SSH: a server locale such as
+The TUI (Textual) needs a real terminal and enough rows and columns. On
+POSIX it also needs a sane ``TERM``; the Windows console does not use TERM. ``ensure_utf8`` also matters over SSH: a server locale such as
 ``zh_CN.GBK`` makes Python encode non-ASCII output as GBK, which raises in
 Textual's writer thread on glyphs such as box drawing or the spinner, leaving a
 frozen or half-drawn screen.
@@ -32,6 +32,7 @@ class TerminalInfo:
     ssh: bool
     multiplexer: str | None
     notes: tuple[str, ...]
+    windows: bool = False
 
 
 def ensure_utf8() -> None:
@@ -78,7 +79,11 @@ def terminal_info() -> TerminalInfo:
         multiplexer = "screen"
 
     notes: list[str] = []
-    if term in _DUMB_TERMS:
+    windows = os.name == "nt"
+    if windows:
+        if not term:
+            notes.append("Windows console: TERM is not required")
+    elif term in _DUMB_TERMS:
         notes.append(f"TERM is {term or 'unset'}; a TUI needs a real terminal")
     if not is_tty:
         notes.append("stdout is not a TTY")
@@ -88,7 +93,7 @@ def terminal_info() -> TerminalInfo:
         notes.append(f"terminal size is {columns}x{rows}; the TUI needs at least {MIN_COLUMNS}x{MIN_ROWS}")
     if ssh and multiplexer is None:
         notes.append("SSH session without tmux/screen; if rendering is broken try --tui-inline or tmux")
-    if not colorterm:
+    if not colorterm and not windows:
         notes.append(
             "COLORTERM is unset; color support comes from TERM (xterm is stepped up to 256)"
         )
@@ -103,6 +108,7 @@ def terminal_info() -> TerminalInfo:
         ssh=ssh,
         multiplexer=multiplexer,
         notes=tuple(notes),
+        windows=windows,
     )
 
 
@@ -151,7 +157,7 @@ def tui_problem(info: TerminalInfo | None = None) -> str | None:
     info = info or terminal_info()
     if not info.is_tty:
         return "stdout is not a TTY"
-    if info.term in _DUMB_TERMS:
+    if not info.windows and info.term in _DUMB_TERMS:
         return f"TERM={info.term or '(unset)'}"
     if info.columns < MIN_COLUMNS or info.rows < MIN_ROWS:
         return f"terminal is too small ({info.columns}x{info.rows})"
@@ -164,6 +170,7 @@ def format_terminal_info(info: TerminalInfo | None = None) -> str:
     python = sys.version.split()[0]
     lines = [
         f"python: {python}",
+        f"platform: {'windows' if info.windows else 'posix'}",
         f"term: {info.term or '(unset)'}",
         f"colorterm: {info.colorterm or '(unset)'}",
         f"no_color: {'yes' if info.no_color else 'no'}",
