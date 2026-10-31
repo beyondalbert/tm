@@ -29,6 +29,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "network problem: retrying in {delay}s (attempt {n}/{max})",
         "网络出现问题：{delay} 秒后重试（第 {n}/{max} 次）",
     ),
+    "notice.empty_retry": (
+        "the model returned no reply text; retrying in {delay}s (attempt {n}/{max})",
+        "模型没有返回正文：{delay} 秒后重试（第 {n}/{max} 次）",
+    ),
     # -- console renderer -------------------------------------------------
     "console.thinking": ("thinking", "思考中"),
     "console.error": ("error: {message}", "错误：{message}"),
@@ -40,6 +44,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "console.turn_limit": (
         "stopped at the turn limit (--max-turns); send another message to continue",
         "已达到回合上限（--max-turns）；再发一条消息即可继续",
+    ),
+    "console.empty_reply": (
+        "the model returned no reply text; send another message to continue",
+        "模型没有返回正文；再发一条消息即可继续",
     ),
     "prompt.language": (
         "Reply in the user's language.",
@@ -65,6 +73,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "tui.max_turns": (
         "Stopped after {n} turns (raise it with --max-turns). Send another message to continue.",
         "已达到 {n} 回合上限（可用 --max-turns 提高）。再发一条消息即可继续。",
+    ),
+    "tui.empty_reply": (
+        "The model returned no reply text. Send another message to continue.",
+        "模型没有返回正文。再发一条消息即可继续。",
     ),
     "tui.perm_title": ("Permission required", "需要授权"),
     "tui.perm_allow": ("Allow", "允许"),

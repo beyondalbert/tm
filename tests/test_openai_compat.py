@@ -32,9 +32,18 @@ class FakeToolCallDelta:
 
 
 class FakeDelta:
-    def __init__(self, content=None, reasoning_content=None, tool_calls=None) -> None:
+    def __init__(
+        self,
+        content=None,
+        reasoning_content=None,
+        tool_calls=None,
+        reasoning=None,
+        reasoning_text=None,
+    ) -> None:
         self.content = content
         self.reasoning_content = reasoning_content
+        self.reasoning = reasoning
+        self.reasoning_text = reasoning_text
         self.tool_calls = tool_calls
 
 
@@ -159,6 +168,23 @@ async def test_streams_reasoning_content() -> None:
     reasoning = "".join(e.delta for e in events if e.type == "thinking_delta")
     assert reasoning == "think"
     assert final.thinking() == "think"
+    assert final.text() == "answer"
+
+
+async def test_streams_alternative_reasoning_fields() -> None:
+    chunks = [
+        FakeChunk([FakeChoice(FakeDelta(reasoning="rea"))]),
+        FakeChunk([FakeChoice(FakeDelta(reasoning_text="son"))]),
+        FakeChunk([FakeChoice(FakeDelta(content="answer"), finish_reason="stop")]),
+    ]
+    provider, _ = _provider(chunks)
+    context = Context(messages=[UserMessage(content="q")])
+
+    events, final = await _collect(provider.stream(Model(id="deepseek-flash", provider="deepseek"), context))
+
+    reasoning = "".join(e.delta for e in events if e.type == "thinking_delta")
+    assert reasoning == "reason"
+    assert final.thinking() == "reason"
     assert final.text() == "answer"
 
 

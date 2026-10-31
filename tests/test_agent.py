@@ -11,8 +11,10 @@ from tm.ai.types import (
     StartEvent,
     TextContent,
     TextDeltaEvent,
+    ThinkingContent,
     ToolCall,
     ToolResultMessage,
+    Usage,
 )
 from tm.core.agent import Agent
 from tm.core.events import (
@@ -266,6 +268,71 @@ async def test_auth_error_is_not_retried() -> None:
 
     assert calls["n"] == 1
     assert agent.last_stop_reason == "error"
+
+
+async def test_reasoning_only_reply_is_retried(monkeypatch) -> None:
+    import tm.core.loop as loop
+
+    monkeypatch.setattr(loop, "_retry_delay", lambda attempt: 0.0)
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                model="fake",
+                content=[ThinkingContent(thinking="still working")],
+                stop_reason="stop",
+                usage=Usage(output=44),
+            )
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
+        return make_stream(message)
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_retries=2)
+    notices: list[AgentNoticeEvent] = []
+
+    async def listener(event: AgentEvent) -> None:
+        if isinstance(event, AgentNoticeEvent):
+            notices.append(event)
+
+    agent.subscribe(listener)
+    await agent.prompt("go")
+
+    assert calls["n"] == 2
+    assert agent.last_stop_reason == "stop"
+    assert notices and "retrying" in notices[0].text
+
+
+async def test_empty_reply_retries_are_bounded(monkeypatch) -> None:
+    import tm.core.loop as loop
+
+    monkeypatch.setattr(loop, "_retry_delay", lambda attempt: 0.0)
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        return make_stream(
+            AssistantMessage(
+                model="fake",
+                content=[],
+                stop_reason="stop",
+                usage=Usage(output=44),
+            )
+        )
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_retries=2)
+    events: list[AgentEvent] = []
+    agent.subscribe(lambda event: _record(events, event))
+
+    await agent.prompt("go")
+
+    assert calls["n"] == 3
+    assert agent.last_stop_reason == "empty"
+    ends = [e for e in events if isinstance(e, AgentEndEvent)]
+    assert ends and ends[-1].stop_reason == "empty"
 
 
 async def test_a_broken_listener_does_not_abort_the_run() -> None:

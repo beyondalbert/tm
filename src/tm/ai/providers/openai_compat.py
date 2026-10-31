@@ -246,7 +246,15 @@ class OpenAICompatProvider(Provider):
                 choice = choices[0]
                 delta = getattr(choice, "delta", None)
                 if delta is not None:
-                    reasoning = getattr(delta, "reasoning_content", None)
+                    # OpenAI-compatible servers disagree on the reasoning field:
+                    # DeepSeek uses reasoning_content, others use reasoning or
+                    # reasoning_text. Read all of them so thinking is not lost.
+                    reasoning = None
+                    for field in ("reasoning_content", "reasoning", "reasoning_text"):
+                        value = getattr(delta, field, None)
+                        if isinstance(value, str) and value:
+                            reasoning = value
+                            break
                     if reasoning:
                         thinking_buf += reasoning
                         stream.push(ThinkingDeltaEvent(partial=snapshot(), delta=reasoning))

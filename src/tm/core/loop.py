@@ -117,6 +117,18 @@ def _retry_delay(attempt: int) -> float:
     return min(2.0**attempt, 30.0)
 
 
+def _is_empty_reply(message: AssistantMessage) -> bool:
+    """A finished turn with no text and no tool calls (reasoning may exist)."""
+    if message.stop_reason != "stop" or message.tool_calls:
+        return False
+    if message.text().strip():
+        return False
+    if message.thinking().strip():
+        return True
+    usage = message.usage
+    return usage is not None and usage.output > 0
+
+
 async def agent_loop(
     *,
     messages: list[Message],
@@ -150,6 +162,7 @@ async def agent_loop(
         if hooks.prepare is not None:
             history, request_messages = await hooks.prepare(history)
 
+        empty_reply = False
         attempt = 0
         while True:
             loop_context = Context(
@@ -198,11 +211,36 @@ async def agent_loop(
                     )
                     break
                 continue
+            if _is_empty_reply(assistant):
+                if attempt < max_retries:
+                    attempt += 1
+                    delay = _retry_delay(attempt)
+                    await hooks.notice(
+                        _t(
+                            "notice.empty_retry",
+                            delay=f"{delay:g}",
+                            n=attempt,
+                            max=max_retries,
+                        ),
+                        "warning",
+                    )
+                    await asyncio.sleep(delay)
+                    if options.signal is not None and options.signal.aborted:
+                        assistant = AssistantMessage(
+                            model=model.id, content=[], stop_reason="aborted"
+                        )
+                        break
+                    continue
+                empty_reply = True
             break
 
         history.append(assistant)
         await hooks.emit(MessageEndEvent(message=assistant))
 
+        if empty_reply:
+            end_reason = "empty"
+            telemetry.end(turn_span, context, status="error")
+            break
         if assistant.stop_reason in ("error", "aborted"):
             turn_status = "error"
             end_reason = assistant.stop_reason

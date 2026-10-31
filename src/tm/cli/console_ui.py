@@ -87,6 +87,12 @@ class ConsoleAgentUI:
                 style="yellow",
                 markup=False,
             )
+        elif isinstance(event, AgentEndEvent) and event.stop_reason == "empty":
+            self.console.print(
+                _t("console.empty_reply"),
+                style="yellow",
+                markup=False,
+            )
 
     def _render_assistant(self, message: AssistantMessage) -> None:
         thinking = message.thinking()
