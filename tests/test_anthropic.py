@@ -130,6 +130,18 @@ async def test_streams_tool_use() -> None:
     assert messages.last_params["tools"][0]["name"] == "read"
 
 
+async def test_tool_choice_maps_to_any() -> None:
+    prov, messages = provider(text_events())
+    context = Context(
+        messages=[UserMessage(content="hi")],
+        tools=[ToolSpec(name="read", description="read", parameters={"type": "object"})],
+    )
+
+    await collect(prov.stream(MODEL, context, StreamOptions(tool_choice="required")))
+
+    assert messages.last_params["tool_choice"] == {"type": "any"}
+
+
 async def test_streams_thinking() -> None:
     events_source = [
         ns(type="message_start", message=ns(usage=ns(input_tokens=1))),

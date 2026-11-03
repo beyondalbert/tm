@@ -121,6 +121,20 @@ async def test_streams_function_call() -> None:
     assert declarations[0]["name"] == "read"
 
 
+async def test_tool_choice_maps_to_any() -> None:
+    prov, models = provider([chunk([ns(text="ok")], finish="STOP")])
+    context = Context(
+        messages=[UserMessage(content="hi")],
+        tools=[ToolSpec(name="read", description="read", parameters={"type": "object"})],
+    )
+
+    await collect(prov.stream(MODEL, context, StreamOptions(tool_choice="required")))
+
+    assert models.last_params["config"]["tool_config"] == {
+        "function_calling_config": {"mode": "ANY"}
+    }
+
+
 async def test_system_instruction_and_temperature() -> None:
     prov, models = provider([chunk([ns(text="ok")], finish="STOP")])
     context = Context(system_prompt="be nice", messages=[UserMessage(content="hi")])

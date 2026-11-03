@@ -113,6 +113,8 @@ class Agent:
         max_tokens: int | None = None,
         max_turns: int = 300,
         max_retries: int = 3,
+        max_length_continues: int = 3,
+        max_length_stalls: int = 2,
         cwd: Path | None = None,
         session: Session | None = None,
         auto_compact: bool = False,
@@ -133,6 +135,8 @@ class Agent:
         self.system_prompt = system_prompt
         self.max_turns = max_turns
         self.max_retries = max_retries
+        self.max_length_continues = max_length_continues
+        self.max_length_stalls = max_length_stalls
         self.cwd = cwd or Path.cwd()
         self.session = session
         self.auto_compact = auto_compact
@@ -340,6 +344,22 @@ class Agent:
             return False
         return estimate_context_tokens(view, self.system_prompt) >= budget
 
+    async def _recover_overflow(self, attempt: int, *, allow_trim: bool = True) -> bool:
+        """Persist, compact a smaller tail, and report whether the run continues."""
+        if len(self._messages) <= 1:
+            return False
+        self._flush_messages()
+        keep = max(0, self.compact_keep_recent - attempt)
+        await self._notice(
+            _t("notice.overflow", n=attempt, keep=keep),
+            "warning",
+        )
+        if await self.compact(keep_recent=keep, signal=self._signal):
+            return True
+        # Summarization failed or was not enough: drop the oldest half only for
+        # a real overflow, never for a length stop.
+        return allow_trim and self._trim_oldest()
+
     async def _prepare_request(
         self, history: list[Message]
     ) -> tuple[list[Message], list[Message]]:
@@ -472,6 +492,9 @@ class Agent:
             pause=self._wait_if_paused,
             notice=self._notice,
             prepare=self._prepare_request,
+            is_context_overflow=lambda message: is_context_overflow(
+                message, self.model.context_window
+            ),
         )
         context = TelemetryContext(trace_id=uuid.uuid4().hex)
         span_id = self.telemetry.start(
@@ -501,7 +524,7 @@ class Agent:
         self.operation = operation
         status = "ok"
         recovery_attempts = 0
-        length_attempts = 0
+        length_compactions = 0
         max_recoveries = self.compact_keep_recent + 8
         try:
             while True:
@@ -515,6 +538,8 @@ class Agent:
                     hooks=hooks,
                     max_turns=self.max_turns,
                     max_retries=self.max_retries,
+                    max_length_continues=self.max_length_continues,
+                    max_length_stalls=self.max_length_stalls,
                     telemetry=self.telemetry,
                     context=child_context,
                 )
@@ -522,31 +547,29 @@ class Agent:
                 self.last_stop_reason = result.stop_reason
                 overflowed = self._context_overflowed()
                 recoverable = not overflowed and self._recoverable_length()
-                if recoverable and length_attempts > 0:
+                if recoverable and length_compactions > 0:
                     recoverable = False
+                if overflowed:
+                    if (
+                        recovery_attempts < max_recoveries
+                        and await self._recover_overflow(recovery_attempts + 1)
+                    ):
+                        recovery_attempts += 1
+                        continue
+                    break
                 if (
-                    (overflowed or recoverable)
+                    result.stop_reason == "length"
+                    and recoverable
                     and recovery_attempts < max_recoveries
-                    and len(self._messages) > 1
-                ):
-                    # Overflow, or an early length stop: persist, compact a
-                    # smaller tail, retry once for length and repeatedly for
-                    # overflow.
-                    self._flush_messages()
-                    recovery_attempts += 1
-                    if recoverable:
-                        length_attempts += 1
-                    keep = max(0, self.compact_keep_recent - recovery_attempts)
-                    await self._notice(
-                        _t("notice.overflow", n=recovery_attempts, keep=keep),
-                        "warning",
+                    and await self._recover_overflow(
+                        recovery_attempts + 1, allow_trim=False
                     )
-                    if await self.compact(keep_recent=keep, signal=self._signal):
-                        continue
-                    # Summarization failed or was not enough: drop the oldest
-                    # half only for a real overflow, never for a length stop.
-                    if overflowed and self._trim_oldest():
-                        continue
+                ):
+                    # Last resort for a length stop that compaction can fix
+                    # (for example when the prompt was clamped to fit).
+                    recovery_attempts += 1
+                    length_compactions += 1
+                    continue
                 break
         except BaseException:
             status = "error"

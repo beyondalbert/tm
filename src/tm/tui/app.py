@@ -1219,6 +1219,8 @@ class TMPromptApp(App[None]):
                 await self._mount(SystemNote(_t("tui.stopped"), _WARNING))
             elif event.stop_reason == "empty":
                 await self._mount(SystemNote(_t("tui.empty_reply"), _WARNING))
+            elif event.stop_reason == "length":
+                await self._mount(SystemNote(_t("tui.length_limit"), _WARNING))
         elif isinstance(event, AgentNoticeEvent):
             style = _WARNING if event.level in ("warning", "error") else _DIM
             await self._mount(SystemNote(event.text, style))

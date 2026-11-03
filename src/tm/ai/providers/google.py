@@ -44,6 +44,12 @@ _STOP_REASONS = {
     "OTHER": "stop",
 }
 
+_TOOL_CHOICE_MODES = {
+    "auto": "AUTO",
+    "required": "ANY",
+    "none": "NONE",
+}
+
 
 def _parts_for_content(content: str | list[Content]) -> list[dict]:
     if isinstance(content, str):
@@ -147,6 +153,11 @@ class GoogleProvider(Provider):
                     ]
                 }
             ]
+            mode = _TOOL_CHOICE_MODES.get(options.tool_choice or "")
+            if mode is not None:
+                config["tool_config"] = {
+                    "function_calling_config": {"mode": mode}
+                }
         return config
 
     def stream(

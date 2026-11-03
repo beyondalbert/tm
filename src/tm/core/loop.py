@@ -9,7 +9,7 @@ would otherwise stop.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Awaitable, Callable
 
 from tm.ai.event_stream import EventStream
@@ -21,12 +21,14 @@ from tm.ai.types import (
     Message,
     Model,
     StartEvent,
+    TextContent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
     ToolCall,
     ToolCallDeltaEvent,
     ToolResultMessage,
     ToolSpec,
+    UserMessage,
 )
 from tm.core.events import (
     AgentEndEvent,
@@ -68,6 +70,9 @@ class LoopHooks:
     take_follow_up: Callable[[], list[Message]]
     pause: Callable[[], Awaitable[None]]
     notice: Callable[[str, str], Awaitable[None]]
+    #: Whether a length stop means the prompt overflowed the context window.
+    #: Such stops are left to the caller to compact instead of continuing.
+    is_context_overflow: Callable[[AssistantMessage], bool] | None = None
     #: Before every request: returns (canonical history, request messages).
     #: The canonical history may change (compaction); the request view may be
     #: trimmed (old tool output rewritten) without touching the session.
@@ -117,6 +122,52 @@ def _retry_delay(attempt: int) -> float:
     return min(2.0**attempt, 30.0)
 
 
+def _is_tool_choice_error(message: str | None) -> bool:
+    if not message:
+        return False
+    text = message.lower()
+    return "tool_choice" in text or "tool choice" in text
+
+
+#: Fed back to the model when an output-limit stop truncated a tool call.
+_TRUNCATED_TOOL_RESULT = (
+    "The tool call was cut off by the output token limit, so it was not executed. "
+    "Reissue the call with complete arguments, or split it into smaller calls."
+)
+
+#: Injected after a reply is cut off by the model's output token limit.
+_CONTINUATION_PROMPT = (
+    "Your previous reply hit the output token limit and was cut off. "
+    "Continue from exactly where it stopped; do not repeat work that is already done."
+)
+#: How much of the cut-off reasoning/reply to carry into the continuation.
+_CONTINUATION_TAIL_CHARS = 3000
+
+
+def _tail(text: str) -> str:
+    if len(text) <= _CONTINUATION_TAIL_CHARS:
+        return text
+    return "..." + text[-_CONTINUATION_TAIL_CHARS:]
+
+
+def _continuation_message(assistant: AssistantMessage) -> UserMessage:
+    """Give the model its own cut-off plan back so it can resume, not restart.
+
+    Reasoning content is not sent back to OpenAI-compatible APIs, so without
+    this the model re-derives the whole plan on every continuation and often
+    hits the same output limit again.
+    """
+    sections = [_CONTINUATION_PROMPT]
+    thinking = assistant.thinking().strip()
+    text = assistant.text().strip()
+    if thinking:
+        sections.append("Where your reasoning stopped:\n" + _tail(thinking))
+    if text:
+        sections.append("Where your reply stopped:\n" + _tail(text))
+    sections.append("Take the next concrete step; do not restart the analysis.")
+    return UserMessage(content="\n\n".join(sections))
+
+
 def _is_empty_reply(message: AssistantMessage) -> bool:
     """A finished turn with no text and no tool calls (reasoning may exist)."""
     if message.stop_reason != "stop" or message.tool_calls:
@@ -140,6 +191,8 @@ async def agent_loop(
     hooks: LoopHooks,
     max_turns: int = 300,
     max_retries: int = 3,
+    max_length_continues: int = 3,
+    max_length_stalls: int = 2,
     telemetry: Telemetry | None = None,
     context: TelemetryContext | None = None,
 ) -> LoopResult:
@@ -148,6 +201,9 @@ async def agent_loop(
     history = list(messages)
     await hooks.emit(AgentStartEvent())
     turn = 0
+    length_continues = 0
+    length_stalls = 0
+    force_tool_choice = False
     end_reason = "stop"
     while turn < max_turns:
         await hooks.pause()
@@ -165,10 +221,18 @@ async def agent_loop(
         empty_reply = False
         attempt = 0
         while True:
+            forced = force_tool_choice and bool(tools)
+            if forced:
+                # One-shot: the next request must produce a tool call instead
+                # of restarting a long planning pass.
+                force_tool_choice = False
+            request_options = (
+                replace(options, tool_choice="required") if forced else options
+            )
             loop_context = Context(
                 system_prompt=system_prompt, messages=request_messages, tools=tools
             )
-            stream = stream_fn(model, loop_context, options)
+            stream = stream_fn(model, loop_context, request_options)
             watcher: asyncio.Task[None] | None = None
             if options.signal is not None:
                 abort_signal = options.signal
@@ -193,6 +257,14 @@ async def agent_loop(
             finally:
                 if watcher is not None:
                     watcher.cancel()
+            if (
+                forced
+                and assistant.stop_reason == "error"
+                and _is_tool_choice_error(assistant.error_message)
+            ):
+                # Some OpenAI-compatible servers reject tool_choice="required".
+                # Retry the same turn with the normal default.
+                continue
             if (
                 assistant.stop_reason == "error"
                 and attempt < max_retries
@@ -248,8 +320,21 @@ async def agent_loop(
             break
 
         if assistant.tool_calls:
-            await hooks.pause()
-            results = await hooks.execute_tools(assistant.tool_calls)
+            if assistant.stop_reason == "length":
+                # The JSON arguments may be truncated; executing them would run
+                # the tool with missing data. Report the truncation instead.
+                results = [
+                    ToolResultMessage(
+                        tool_call_id=call.id,
+                        tool_name=call.name,
+                        content=[TextContent(text=_TRUNCATED_TOOL_RESULT)],
+                        is_error=True,
+                    )
+                    for call in assistant.tool_calls
+                ]
+            else:
+                await hooks.pause()
+                results = await hooks.execute_tools(assistant.tool_calls)
             for result in results:
                 history.append(result)
                 await hooks.emit(MessageStartEvent(message=result))
@@ -257,6 +342,42 @@ async def agent_loop(
 
         telemetry.end(turn_span, context, status=turn_status)
         await hooks.emit(TurnEndEvent(turn=turn))
+
+        if assistant.stop_reason == "length":
+            # The output budget was exhausted, not the work. Continue from the
+            # truncated turn unless the prompt itself overflowed the window.
+            progress = bool(assistant.tool_calls) or bool(assistant.text().strip())
+            length_stalls = 0 if progress else length_stalls + 1
+            stalled = max_length_stalls > 0 and length_stalls >= max_length_stalls
+            overflow = (
+                hooks.is_context_overflow is not None
+                and hooks.is_context_overflow(assistant)
+            )
+            if (
+                not overflow
+                and not stalled
+                and length_continues < max_length_continues
+            ):
+                length_continues += 1
+                await hooks.notice(
+                    _t(
+                        "notice.length_continue",
+                        n=length_continues,
+                        max=max_length_continues,
+                    ),
+                    "warning",
+                )
+                continuation = _continuation_message(assistant)
+                history.append(continuation)
+                await hooks.emit(MessageStartEvent(message=continuation))
+                await hooks.emit(MessageEndEvent(message=continuation))
+                if length_continues == 1 and tools and not assistant.text().strip():
+                    force_tool_choice = True
+                continue
+            end_reason = "length"
+            break
+        length_continues = 0
+        length_stalls = 0
 
         steering = hooks.take_steering()
         if steering:

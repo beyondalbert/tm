@@ -15,6 +15,7 @@ from tm.ai.types import (
     ToolCall,
     ToolResultMessage,
     Usage,
+    UserMessage,
 )
 from tm.core.agent import Agent
 from tm.core.events import (
@@ -333,6 +334,194 @@ async def test_empty_reply_retries_are_bounded(monkeypatch) -> None:
     assert agent.last_stop_reason == "empty"
     ends = [e for e in events if isinstance(e, AgentEndEvent)]
     assert ends and ends[-1].stop_reason == "empty"
+
+
+async def test_output_limit_continues_instead_of_stopping() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                model="fake",
+                content=[ThinkingContent(thinking="still working")],
+                stop_reason="length",
+                usage=Usage(output=8192),
+            )
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
+        return make_stream(message)
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_tokens=8192)
+    notices: list[AgentNoticeEvent] = []
+
+    async def listener(event: AgentEvent) -> None:
+        if isinstance(event, AgentNoticeEvent):
+            notices.append(event)
+
+    agent.subscribe(listener)
+    await agent.prompt("go")
+
+    assert calls["n"] == 2
+    assert agent.last_stop_reason == "stop"
+    assert notices and "output token limit" in notices[0].text
+    continuation = next(
+        m
+        for m in agent.messages
+        if isinstance(m, UserMessage)
+        and isinstance(m.content, str)
+        and "cut off" in m.content
+    )
+    assert continuation.content
+    assert isinstance(continuation.content, str)
+    assert "still working" in continuation.content
+
+
+async def test_output_limit_continuation_is_bounded() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        return make_stream(
+            AssistantMessage(
+                content=[ThinkingContent(thinking="still working")],
+                stop_reason="length",
+                usage=Usage(output=8192),
+            )
+        )
+
+    agent = Agent(
+        MODEL,
+        stream_fn=stream_fn,
+        max_tokens=8192,
+        max_length_continues=2,
+        max_length_stalls=0,
+    )
+    await agent.prompt("go")
+
+    assert calls["n"] == 3
+    assert agent.last_stop_reason == "length"
+
+
+async def test_stalled_continuations_stop_early() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        return make_stream(
+            AssistantMessage(
+                content=[ThinkingContent(thinking="still working")],
+                stop_reason="length",
+                usage=Usage(output=8192),
+            )
+        )
+
+    agent = Agent(
+        MODEL,
+        stream_fn=stream_fn,
+        max_tokens=8192,
+        max_length_continues=5,
+        max_length_stalls=2,
+    )
+    await agent.prompt("go")
+
+    # The first truncated turn is followed by one continuation. With no
+    # tool call or text after that, the second stalled turn stops the run.
+    assert calls["n"] == 2
+    assert agent.last_stop_reason == "length"
+
+
+async def test_first_continuation_forces_a_tool_call() -> None:
+    calls = {"n": 0}
+    choices: list[str | None] = []
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        choices.append(options.tool_choice)
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                content=[ThinkingContent(thinking="still working")],
+                stop_reason="length",
+                usage=Usage(output=8192),
+            )
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
+        return make_stream(message)
+
+    agent = Agent(MODEL, stream_fn=stream_fn, tools=[EchoTool()], max_tokens=8192)
+    await agent.prompt("go")
+
+    assert choices == [None, "required"]
+    assert agent.last_stop_reason == "stop"
+
+
+async def test_unsupported_tool_choice_falls_back() -> None:
+    calls = {"n": 0}
+    choices: list[str | None] = []
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        choices.append(options.tool_choice)
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                content=[ThinkingContent(thinking="still working")],
+                stop_reason="length",
+                usage=Usage(output=8192),
+            )
+        elif calls["n"] == 2:
+            message = AssistantMessage(
+                stop_reason="error",
+                error_message="Invalid tool_choice: required",
+            )
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
+        return make_stream(message)
+
+    agent = Agent(MODEL, stream_fn=stream_fn, tools=[EchoTool()], max_tokens=8192)
+    await agent.prompt("go")
+
+    assert calls["n"] == 3
+    assert choices == [None, "required", None]
+    assert agent.last_stop_reason == "stop"
+
+
+async def test_truncated_tool_call_is_not_executed() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                tool_calls=[ToolCall(id="t1", name="echo", arguments={"text": "hi"})],
+                stop_reason="length",
+                usage=Usage(output=8192),
+            )
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
+        return make_stream(message)
+
+    agent = Agent(MODEL, stream_fn=stream_fn, tools=[EchoTool()], max_tokens=8192)
+    events: list[AgentEvent] = []
+    agent.subscribe(lambda event: _record(events, event))
+
+    await agent.prompt("go")
+
+    assert calls["n"] == 2
+    assert not any(isinstance(e, ToolExecutionStartEvent) for e in events)
+    results = [m for m in agent.messages if isinstance(m, ToolResultMessage)]
+    assert len(results) == 1
+    assert results[0].is_error is True
+    assert "cut off" in results[0].text()
+    assert isinstance(agent.messages[-1], AssistantMessage)
+    assert agent.messages[-1].text() == "done"
 
 
 async def test_a_broken_listener_does_not_abort_the_run() -> None:

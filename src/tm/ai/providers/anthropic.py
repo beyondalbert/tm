@@ -45,6 +45,12 @@ _STOP_REASONS = {
     "tool_use": "tool_use",
 }
 
+_TOOL_CHOICE = {
+    "auto": {"type": "auto"},
+    "required": {"type": "any"},
+    "none": {"type": "none"},
+}
+
 
 def _parse_arguments(raw: str) -> dict:
     raw = raw.strip()
@@ -189,6 +195,10 @@ class AnthropicProvider(Provider):
             if cache_control is not None:
                 tools[-1] = {**tools[-1], "cache_control": cache_control}
             params["tools"] = tools
+            if options.tool_choice is not None:
+                params["tool_choice"] = _TOOL_CHOICE.get(
+                    options.tool_choice, {"type": options.tool_choice}
+                )
         return params
 
     def stream(

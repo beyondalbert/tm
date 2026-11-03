@@ -192,7 +192,7 @@ async def test_overflow_recovery_compacts_and_retries() -> None:
         stream.end(message)
         return stream
 
-    agent = Agent(MODEL, stream_fn=stream_fn)
+    agent = Agent(MODEL, stream_fn=stream_fn, max_tokens=4096, max_length_continues=0)
     agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
 
     await agent.prompt("go")
@@ -310,7 +310,7 @@ async def test_length_stop_retries_only_once() -> None:
         stream.end(message)
         return stream
 
-    agent = Agent(MODEL, stream_fn=stream_fn, max_tokens=4096)
+    agent = Agent(MODEL, stream_fn=stream_fn, max_tokens=4096, max_length_continues=0)
     agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
 
     await agent.prompt("go")
@@ -322,16 +322,21 @@ async def test_length_stop_retries_only_once() -> None:
     assert last.stop_reason == "length"
 
 
-async def test_length_at_the_output_limit_does_not_compact() -> None:
+async def test_length_at_the_output_limit_continues() -> None:
     calls = {"n": 0}
 
     def stream_fn(model, context, options) -> EventStream:
         calls["n"] += 1
-        message = AssistantMessage(
-            content=[TextContent(text="long answer")],
-            stop_reason="length",
-            usage=Usage(input=100, output=4096, total=4196),
-        )
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                content=[TextContent(text="long answer")],
+                stop_reason="length",
+                usage=Usage(input=100, output=4096, total=4196),
+            )
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
         stream: EventStream = EventStream()
         stream.push(StartEvent(partial=message))
         stream.push(DoneEvent(partial=message, message=message))
@@ -343,9 +348,11 @@ async def test_length_at_the_output_limit_does_not_compact() -> None:
 
     await agent.prompt("go")
 
-    assert calls["n"] == 1
-    assert isinstance(agent.messages[-1], AssistantMessage)
-    assert agent.messages[-1].stop_reason == "length"
+    assert calls["n"] == 2
+    last = agent.messages[-1]
+    assert isinstance(last, AssistantMessage)
+    assert last.text() == "done"
+    assert agent.last_stop_reason == "stop"
 
 
 async def test_length_filling_the_window_is_an_overflow() -> None:
@@ -413,7 +420,9 @@ async def test_length_recovery_shrinks_the_retained_tail_once(monkeypatch) -> No
         stream.end(message)
         return stream
 
-    agent = Agent(MODEL, stream_fn=always_length, compact_keep_recent=3)
+    agent = Agent(
+        MODEL, stream_fn=always_length, compact_keep_recent=3, max_length_continues=0
+    )
     keeps: list[int] = []
 
     async def spy(*, keep_recent: int = 6, signal=None) -> bool:

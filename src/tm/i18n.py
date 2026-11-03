@@ -33,6 +33,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "the model returned no reply text; retrying in {delay}s (attempt {n}/{max})",
         "模型没有返回正文：{delay} 秒后重试（第 {n}/{max} 次）",
     ),
+    "notice.length_continue": (
+        "the reply hit the output token limit; continuing (attempt {n}/{max})...",
+        "回复达到输出 token 上限；正在继续（第 {n}/{max} 次）…",
+    ),
     # -- console renderer -------------------------------------------------
     "console.thinking": ("thinking", "思考中"),
     "console.error": ("error: {message}", "错误：{message}"),
@@ -48,6 +52,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "console.empty_reply": (
         "the model returned no reply text; send another message to continue",
         "模型没有返回正文；再发一条消息即可继续",
+    ),
+    "console.length_limit": (
+        "the reply hit the output token limit; send another message to continue",
+        "回复达到输出 token 上限；再发一条消息即可继续",
     ),
     "prompt.language": (
         "Reply in the user's language.",
@@ -77,6 +85,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "tui.empty_reply": (
         "The model returned no reply text. Send another message to continue.",
         "模型没有返回正文。再发一条消息即可继续。",
+    ),
+    "tui.length_limit": (
+        "The reply hit the output token limit. Send another message to continue.",
+        "回复达到输出 token 上限。再发一条消息即可继续。",
     ),
     "tui.perm_title": ("Permission required", "需要授权"),
     "tui.perm_allow": ("Allow", "允许"),

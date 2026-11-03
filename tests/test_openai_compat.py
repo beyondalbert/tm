@@ -216,6 +216,27 @@ async def test_accumulates_streamed_tool_call_arguments() -> None:
     assert completions.last_params["tools"][0]["function"]["name"] == "read"
 
 
+async def test_tool_choice_option_overrides_auto() -> None:
+    chunks = [
+        FakeChunk([FakeChoice(FakeDelta(), finish_reason="stop")]),
+    ]
+    provider, completions = _provider(chunks)
+    context = Context(
+        messages=[UserMessage(content="read a.txt")],
+        tools=[ToolSpec(name="read", description="read", parameters={"type": "object"})],
+    )
+
+    await _collect(
+        provider.stream(
+            Model(id="deepseek-v4-pro", provider="deepseek"),
+            context,
+            StreamOptions(tool_choice="required"),
+        )
+    )
+
+    assert completions.last_params["tool_choice"] == "required"
+
+
 async def test_provider_error_becomes_error_event() -> None:
     class BrokenCompletions:
         def create(self, **params):

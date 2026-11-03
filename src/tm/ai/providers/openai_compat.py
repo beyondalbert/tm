@@ -159,7 +159,7 @@ class OpenAICompatProvider(Provider):
                 }
                 for spec in context.tools
             ]
-            params["tool_choice"] = "auto"
+            params["tool_choice"] = options.tool_choice or "auto"
         if self.include_usage:
             params["stream_options"] = {"include_usage": True}
         return params
