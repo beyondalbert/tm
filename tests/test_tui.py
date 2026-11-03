@@ -29,6 +29,7 @@ from tm.permissions import ApprovalOutcome  # noqa: E402
 from tm.tools.base import Tool, ToolContext, ToolResult, text_result  # noqa: E402
 from tm.tui.app import (  # noqa: E402
     PermissionScreen,
+    PromptArea,
     SessionScreen,
     SettingsScreen,
     TMPromptApp,
@@ -140,6 +141,32 @@ async def test_tm_app_runs_a_prompt() -> None:
         isinstance(message, AssistantMessage) and message.text() == "hello from fake"
         for message in agent.messages
     )
+
+
+async def test_submit_while_working_queues_steering() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        app._set_status("working")
+        app.on_prompt_area_submitted(PromptArea.Submitted("queued text"))
+        await pilot.pause()
+
+        assert [m.content for m in agent._steering] == ["queued text"]
+        assert app._status == "working"
+
+
+async def test_command_while_working_is_rejected() -> None:
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        app._set_status("working")
+        app.on_prompt_area_submitted(PromptArea.Submitted("/new"))
+        await pilot.pause()
+
+        assert agent._steering == []
+        assert app._status == "working"
 
 
 async def test_tui_slash_command_forwards_expanded_prompt() -> None:

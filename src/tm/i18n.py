@@ -90,6 +90,14 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "The reply hit the output token limit. Send another message to continue.",
         "回复达到输出 token 上限。再发一条消息即可继续。",
     ),
+    "tui.queued": (
+        "Agent is still working; message queued for the next turn.",
+        "Agent 正在运行；消息已排队，将在下一回合发送。",
+    ),
+    "tui.busy_command": (
+        "Agent is still working; press Esc to stop before running a command.",
+        "Agent 正在运行；请先按 Esc 停止再执行命令。",
+    ),
     "tui.perm_title": ("Permission required", "需要授权"),
     "tui.perm_allow": ("Allow", "允许"),
     "tui.perm_always": ("Always allow", "总是允许"),

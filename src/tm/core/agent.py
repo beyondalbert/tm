@@ -576,6 +576,9 @@ class Agent:
                     length_compactions += 1
                     continue
                 break
+        except asyncio.CancelledError:
+            status = "aborted"
+            raise
         except BaseException:
             status = "error"
             raise

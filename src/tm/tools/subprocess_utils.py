@@ -21,6 +21,14 @@ class CommandResult:
     aborted: bool
 
 
+def _close_transport(proc: asyncio.subprocess.Process) -> None:
+    """Close a subprocess transport that may still be open after wait()."""
+    transport = getattr(proc, "_transport", None)
+    if transport is not None:
+        with contextlib.suppress(Exception):
+            transport.close()
+
+
 async def kill_process_tree(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is not None:
         return
@@ -36,8 +44,11 @@ async def kill_process_tree(proc: asyncio.subprocess.Process) -> None:
         )
         # Await the killer too: dropping it leaks its subprocess transport and
         # produces "unclosed transport" ResourceWarnings at shutdown.
-        with contextlib.suppress(Exception):
-            await killer.wait()
+        try:
+            with contextlib.suppress(Exception):
+                await killer.wait()
+        finally:
+            _close_transport(killer)
     else:
         killpg = getattr(os, "killpg", None)
         getpgid = getattr(os, "getpgid", None)
@@ -71,6 +82,7 @@ async def run_capture(argv: list[str]) -> tuple[bytes, bytes, int | None]:
     finally:
         if proc.returncode is None:
             await kill_process_tree(proc)
+        _close_transport(proc)
     return stdout, stderr, proc.returncode
 
 
@@ -147,10 +159,18 @@ async def stream_command(
         with contextlib.suppress(asyncio.CancelledError):
             await reader
         raise
+    except BaseException:
+        # A failure in the output callback must not leave the child running.
+        await kill_process_tree(proc)
+        reader.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await reader
+        raise
     finally:
         watch.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watch
+        _close_transport(proc)
 
     return CommandResult(
         output="".join(chunks).rstrip(),

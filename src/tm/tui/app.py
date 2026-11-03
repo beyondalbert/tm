@@ -1397,6 +1397,18 @@ class TMPromptApp(App[None]):
         if not text:
             return
         self.close_suggestions()
+        if self.is_working:
+            # Starting another exclusive worker here would cancel the running
+            # agent mid-tool. Queue plain text as steering instead.
+            if text.startswith("/") and "\n" not in text:
+                self.notify(_t("tui.busy_command"))
+                return
+            self._agent.steer(text)
+            self.run_worker(
+                self._mount(UserMessageWidget(text)), exit_on_error=False
+            )
+            self.notify(_t("tui.queued"))
+            return
         # Run in a worker so commands can push screens (e.g. the session picker).
         self.run_worker(self._handle_input(text), exclusive=True, exit_on_error=False)
 
