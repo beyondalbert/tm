@@ -379,6 +379,48 @@ async def test_output_limit_continues_instead_of_stopping() -> None:
     assert "still working" in continuation.content
 
 
+async def test_continuation_request_omits_empty_assistant_message() -> None:
+    calls = {"n": 0}
+    requests: list[list] = []
+
+    def stream_fn(model, context, options) -> EventStream:
+        requests.append(list(context.messages))
+        calls["n"] += 1
+        if calls["n"] == 1:
+            message = AssistantMessage(
+                content=[ThinkingContent(thinking="still working")],
+                stop_reason="length",
+                usage=Usage(output=8192),
+            )
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
+        return make_stream(message)
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_tokens=8192)
+    await agent.prompt("go")
+
+    assert len(requests) == 2
+    assert not any(
+        isinstance(message, AssistantMessage)
+        and not message.tool_calls
+        and not message.text()
+        for message in requests[1]
+    )
+    assert any(
+        isinstance(message, UserMessage)
+        and isinstance(message.content, str)
+        and "cut off" in message.content
+        for message in requests[1]
+    )
+    # The session still keeps the truncated turn for display and recovery.
+    assert any(
+        isinstance(message, AssistantMessage) and message.stop_reason == "length"
+        for message in agent.messages
+    )
+
+
 async def test_output_limit_continuation_is_bounded() -> None:
     calls = {"n": 0}
 

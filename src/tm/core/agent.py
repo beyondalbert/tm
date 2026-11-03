@@ -333,8 +333,13 @@ class Agent:
         return min(limits) if limits else 0
 
     def _request_view(self, messages: list[Message]) -> list[Message]:
-        """Messages sent to the model; old tool output may be rewritten here only."""
-        return prune_tool_results(messages, self.prune)
+        """Messages sent to the model; old tool output may be rewritten here only.
+
+        New turns are repaired too: a reasoning-only turn cut off by the output
+        limit has no text and no tool calls, and providers reject it as an
+        invalid assistant message.
+        """
+        return prune_tool_results(repair_tool_messages(messages), self.prune)
 
     def _over_budget(self, view: list[Message]) -> bool:
         if not self.auto_compact or len(view) <= 1:
