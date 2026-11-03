@@ -936,6 +936,38 @@ async def test_resize_does_not_rerender_markdown_for_scrollbar_jitter(monkeypatc
         assert calls["n"] == rendered + 1
 
 
+async def test_resize_render_is_debounced(monkeypatch) -> None:
+    from textual.containers import VerticalScroll
+
+    import tm.tui.app as tui
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        widget = tui.AssistantMessageWidget()
+        await app.query_one("#messages", VerticalScroll).mount(widget)
+
+        calls = {"n": 0}
+        original = tui.render_markdown
+
+        def counting(markdown: str, width: int):
+            calls["n"] += 1
+            return original(markdown, width)
+
+        monkeypatch.setattr(tui, "render_markdown", counting)
+        widget.set_content("", "hello **world**", final=True)
+        rendered = calls["n"]
+
+        width = widget._body.size.width or widget.size.width or app.size.width - 2
+        widget._render_width = width - 5
+        widget.on_resize()
+        assert calls["n"] == rendered  # deferred, not rendered inside resize
+
+        await pilot.pause(0.2)
+        assert calls["n"] == rendered + 1
+
+
 async def test_settings_screen_toggles_bool_and_saves() -> None:
     results: list[dict[str, object] | None] = []
 

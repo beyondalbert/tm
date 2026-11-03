@@ -6,8 +6,12 @@ import asyncio
 import contextlib
 import io
 import json
+import os
 import re
+import sys
+import threading
 import time
+import traceback
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Dict, Optional
@@ -42,6 +46,7 @@ from tm.config import (
     SETTING_FIELDS,
     SettingField,
     Settings,
+    config_dir,
     format_setting_value,
     parse_setting_value,
 )
@@ -191,12 +196,40 @@ class UserMessageWidget(Static):
         super().__init__(classes="user")
         self._text = _sanitize(text.strip())
         self._render_width = -1
+        self._render_timer: Timer | None = None
 
     def on_mount(self) -> None:
         self._render_markdown(force=True)
 
     def on_resize(self) -> None:
-        self._render_markdown()
+        self._schedule_markdown_render()
+
+    def _schedule_markdown_render(self) -> None:
+        """Defer re-rendering until the resize settles.
+
+        Rendering Markdown changes the widget height, which can toggle the
+        scrollbar and resize the widget again. Feeding that resize straight back
+        into another render can lock the UI in a layout/render loop.
+        """
+        if not self._text:
+            return
+        width = self.size.width or self.app.size.width - 2
+        if width <= 0 or abs(width - self._render_width) <= 2:
+            return
+        if self._render_timer is not None:
+            self._render_timer.stop()
+        self._render_timer = self.set_timer(
+            0.12, lambda: self._flush_markdown_render(width)
+        )
+
+    def _flush_markdown_render(self, width: int) -> None:
+        self._render_timer = None
+        if not self.is_mounted or width <= 0:
+            return
+        if abs(width - self._render_width) <= 2:
+            return
+        self._render_width = width
+        self.update(render_markdown(self._text, width))
 
     def _render_markdown(self, *, force: bool = False) -> None:
         if not self._text:
@@ -226,6 +259,7 @@ class AssistantMessageWidget(Vertical):
         self._final = False
         self._expanded = False
         self._render_width = -1
+        self._render_timer: Timer | None = None
         for widget in (self._thinking, self._body, self._error):
             widget.display = False
 
@@ -278,7 +312,28 @@ class AssistantMessageWidget(Vertical):
         self._thinking.display = True
 
     def on_resize(self) -> None:
-        self._render_body()
+        self._schedule_body_render()
+
+    def _schedule_body_render(self) -> None:
+        """Defer re-rendering until the resize settles (see UserMessageWidget)."""
+        if not self._text:
+            return
+        width = self._body.size.width or self.size.width or self.app.size.width - 2
+        if width <= 0 or abs(width - self._render_width) <= 2:
+            return
+        if self._render_timer is not None:
+            self._render_timer.stop()
+        self._render_timer = self.set_timer(
+            0.12, lambda: self._flush_body_render(width)
+        )
+
+    def _flush_body_render(self, width: int) -> None:
+        self._render_timer = None
+        if not self.is_mounted or width <= 0:
+            return
+        if abs(width - self._render_width) <= 2:
+            return
+        self._render_body_at(width)
 
     def _render_body(self, *, force: bool = False) -> None:
         if not self._text:
@@ -290,6 +345,9 @@ class AssistantMessageWidget(Vertical):
         # feed back into layout and stall a long history (see UserMessageWidget).
         if not force and abs(width - self._render_width) <= 2:
             return
+        self._render_body_at(width)
+
+    def _render_body_at(self, width: int) -> None:
         self._render_width = width
         text = self._text
         if len(text) > _MAX_BODY_CHARS:
@@ -784,6 +842,9 @@ class TMPromptApp(App[None]):
         self._suggestions: list[Completion] = []
         self._suggestion_span: Span | None = None
         self._file_index: FileIndex | None = None
+        self._heartbeat = time.monotonic()
+        self._watchdog_stop = threading.Event()
+        self._watchdog: threading.Thread | None = None
 
     # -- small public API used by commands / tests ------------------------
     def write_line(self, text: str, style: str = _DIM) -> None:
@@ -805,10 +866,59 @@ class TMPromptApp(App[None]):
 
     def on_mount(self) -> None:
         self._agent.subscribe(self._on_agent_event)
+        self.set_interval(0.5, self._beat)
+        if os.environ.get("TM_TUI_WATCHDOG", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            self._start_watchdog()
         self._update_editor_status()
         self._update_footer()
         self.query_one("#prompt", TextArea).focus()
         self.run_worker(self._startup(), exclusive=True, exit_on_error=False)
+
+    def on_unmount(self) -> None:
+        self._watchdog_stop.set()
+
+    def _beat(self) -> None:
+        self._heartbeat = time.monotonic()
+
+    def _start_watchdog(self) -> None:
+        """Dump all thread stacks if the event loop stops responding.
+
+        Textual renders on the app loop, so a wedged loop looks like a frozen
+        TUI. The log identifies the blocking call instead of guessing.
+        """
+
+        def watch() -> None:
+            reported = False
+            while not self._watchdog_stop.wait(2.0):
+                idle = time.monotonic() - self._heartbeat
+                if idle >= 10.0 and not reported:
+                    reported = True
+                    self._dump_stacks(idle)
+                elif idle < 2.0:
+                    reported = False
+
+        self._watchdog = threading.Thread(
+            target=watch, name="tm-tui-watchdog", daemon=True
+        )
+        self._watchdog.start()
+
+    def _dump_stacks(self, idle: float) -> None:
+        with contextlib.suppress(Exception):
+            path = config_dir() / "tui-freeze.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} "
+                    f"stalled {idle:.1f}s ===\n"
+                )
+                for thread_id, frame in sys._current_frames().items():
+                    handle.write(f"\n--- thread {thread_id} ---\n")
+                    handle.write("".join(traceback.format_stack(frame)))
 
     async def _startup(self) -> None:
         if self._banner:
