@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import subprocess
 import sys
+import time
 from typing import cast
 
 import pytest
@@ -60,3 +63,34 @@ async def test_stream_command_times_out_hanging_process(tmp_path) -> None:
     )
     assert result.timed_out is True
     assert result.returncode is not None
+
+
+async def test_stream_command_stops_when_a_daemon_inherits_stdout(tmp_path) -> None:
+    pidfile = tmp_path / "child.pid"
+    code = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(60)'])\n"
+        f"open({str(pidfile)!r}, 'w').write(str(child.pid))\n"
+        "print('parent done')\n"
+    )
+    started = time.monotonic()
+    try:
+        result = await stream_command(
+            [sys.executable, "-c", code], cwd=tmp_path, timeout=10
+        )
+        elapsed = time.monotonic() - started
+        assert result.output.strip() == "parent done"
+        assert elapsed < 8
+    finally:
+        if pidfile.exists():
+            pid = int(pidfile.read_text(encoding="utf-8"))
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F"],
+                    capture_output=True,
+                    check=False,
+                )
+            else:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, 9)

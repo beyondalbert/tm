@@ -12,6 +12,10 @@ from pathlib import Path
 from tm.tools.base import OnUpdate
 from tm.utils.abort import AbortSignal
 
+#: How long to keep draining stdout after the main process exits. A daemon
+#: child (adb, npm, a server) can inherit the pipe and keep it open forever.
+_DRAIN_SECONDS = 2.0
+
 
 @dataclass
 class CommandResult:
@@ -59,8 +63,10 @@ async def kill_process_tree(proc: asyncio.subprocess.Process) -> None:
                 proc.kill()
         else:
             proc.kill()
-    with contextlib.suppress(ProcessLookupError):
-        await proc.wait()
+    with contextlib.suppress(ProcessLookupError, asyncio.TimeoutError):
+        # process.wait() also waits for inherited stdout handles on Windows, so
+        # bound it: a daemon child may keep the pipe open forever.
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
 
 
 async def run_capture(argv: list[str]) -> tuple[bytes, bytes, int | None]:
@@ -151,8 +157,18 @@ async def stream_command(
 
     watch = asyncio.create_task(watchdog())
     try:
-        await proc.wait()
-        await reader
+        # Process.exit is visible in returncode before inherited pipes close,
+        # unlike await proc.wait(), which can block on a daemon holding stdout.
+        while proc.returncode is None:
+            if timed_out or aborted:
+                break
+            await asyncio.sleep(0.05)
+        # Drain whatever is still buffered, but do not wait for inherited pipe
+        # handles to close (for example the adb server).
+        try:
+            await asyncio.wait_for(reader, timeout=_DRAIN_SECONDS)
+        except asyncio.TimeoutError:
+            reader.cancel()
     except asyncio.CancelledError:
         await kill_process_tree(proc)
         reader.cancel()
