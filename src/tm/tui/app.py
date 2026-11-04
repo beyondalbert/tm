@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import traceback
+from collections import deque
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Dict, Optional
@@ -845,6 +846,7 @@ class TMPromptApp(App[None]):
         self._heartbeat = time.monotonic()
         self._watchdog_stop = threading.Event()
         self._watchdog: threading.Thread | None = None
+        self._recent_events: deque[tuple[float, str]] = deque(maxlen=60)
 
     # -- small public API used by commands / tests ------------------------
     def write_line(self, text: str, style: str = _DIM) -> None:
@@ -867,11 +869,13 @@ class TMPromptApp(App[None]):
     def on_mount(self) -> None:
         self._agent.subscribe(self._on_agent_event)
         self.set_interval(0.5, self._beat)
-        if os.environ.get("TM_TUI_WATCHDOG", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
+        # Always-on: a wedged event loop cannot report itself, so a background
+        # thread writes a stack dump the next time this happens.
+        if os.environ.get("TM_TUI_WATCHDOG", "").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
         ):
             self._start_watchdog()
         self._update_editor_status()
@@ -884,6 +888,9 @@ class TMPromptApp(App[None]):
 
     def _beat(self) -> None:
         self._heartbeat = time.monotonic()
+
+    def _note(self, text: str) -> None:
+        self._recent_events.append((time.time(), text))
 
     def _start_watchdog(self) -> None:
         """Dump all thread stacks if the event loop stops responding.
@@ -916,6 +923,25 @@ class TMPromptApp(App[None]):
                     f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} "
                     f"stalled {idle:.1f}s ===\n"
                 )
+                handle.write(f"status={self._status}\n")
+                stream = sys.__stdout__
+                handle.write(
+                    f"stdout encoding={getattr(stream, 'encoding', None)!r} "
+                    f"errors={getattr(stream, 'errors', None)!r}\n"
+                )
+                driver = getattr(self, "_driver", None)
+                writer = getattr(driver, "_writer_thread", None)
+                if writer is not None:
+                    queue = getattr(writer, "_queue", None)
+                    handle.write(
+                        f"writer alive={writer.is_alive()} "
+                        f"queue={queue.qsize() if queue is not None else '?'}\n"
+                    )
+                for timestamp, text in self._recent_events:
+                    handle.write(
+                        f"{time.strftime('%H:%M:%S', time.localtime(timestamp))} {text}\n"
+                    )
+                handle.write("\n--- thread stacks ---\n")
                 for thread_id, frame in sys._current_frames().items():
                     handle.write(f"\n--- thread {thread_id} ---\n")
                     handle.write("".join(traceback.format_stack(frame)))
@@ -1207,10 +1233,21 @@ class TMPromptApp(App[None]):
         self._restore_terminal_modes()
         self.refresh()
         self.screen.refresh(layout=True)
+        self.query_one("#prompt", TextArea).focus()
+
+    def on_key(self, event: events.Key) -> None:
+        """Recover input if a widget lost focus outside a modal screen."""
+        if isinstance(self.screen, ModalScreen):
+            return
+        if self.screen.focused is not None:
+            return
+        if event.is_printable or event.key in ("enter", "space"):
+            self.query_one("#prompt", TextArea).focus()
 
     # -- status / editor line --------------------------------------------
     def _set_status(self, status: str) -> None:
         self._status = status
+        self._note(f"status -> {status}")
         self.sub_title = status
         if status in ("idle", "paused"):
             if self._spinner_timer is not None:
@@ -1315,6 +1352,8 @@ class TMPromptApp(App[None]):
 
     # -- agent events -----------------------------------------------------
     async def _on_agent_event(self, event: AgentEvent) -> None:
+        if not isinstance(event, MessageUpdateEvent):
+            self._note(f"agent event {type(event).__name__}")
         if isinstance(event, AgentStartEvent):
             self._set_status("working")
         elif isinstance(event, AgentEndEvent):
@@ -1363,6 +1402,10 @@ class TMPromptApp(App[None]):
                 error = f"Error: {message.error_message or 'unknown error'}"
             thinking = message.thinking()
             text = message.text()
+            self._note(
+                "assistant end: "
+                f"stop={message.stop_reason} text={len(text)} thinking={len(thinking)}"
+            )
             # A provider may fail before emitting a start event, in which case no
             # widget was created yet (e.g. authentication errors).
             if self._current is None and (thinking.strip() or text.strip() or error):
@@ -1397,6 +1440,7 @@ class TMPromptApp(App[None]):
         if not text:
             return
         self.close_suggestions()
+        self._note(f"submit: {text[:80]!r}")
         if self.is_working:
             # Starting another exclusive worker here would cancel the running
             # agent mid-tool. Queue plain text as steering instead.
