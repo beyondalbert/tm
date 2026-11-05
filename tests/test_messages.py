@@ -8,7 +8,7 @@ from tm.ai.types import (
     ToolResultMessage,
     UserMessage,
 )
-from tm.core.messages import repair_tool_messages
+from tm.core.messages import is_looping_text, repair_tool_messages
 
 
 def test_orphan_tool_result_is_dropped() -> None:
@@ -61,6 +61,31 @@ def test_valid_sequence_is_unchanged() -> None:
         ToolResultMessage(tool_call_id="t1", tool_name="read", content=[TextContent(text="data")]),
     ]
     assert repair_tool_messages(messages) == messages
+
+
+def test_looping_assistant_text_is_stripped_but_tool_calls_kept() -> None:
+    assistant = AssistantMessage(
+        content=[TextContent(text="Let me call it.\n\n<to\n</parameter>\nread.")],
+        tool_calls=[ToolCall(id="t1", name="read", arguments={})],
+    )
+    result = ToolResultMessage(
+        tool_call_id="t1", tool_name="read", content=[TextContent(text="data")]
+    )
+    repaired = repair_tool_messages([assistant, result])
+    kept = repaired[0]
+    assert isinstance(kept, AssistantMessage)
+    assert kept.text() == ""
+    assert [call.id for call in kept.tool_calls] == ["t1"]
+    assert repaired[1] == result
+
+
+def test_looping_assistant_without_tool_calls_is_dropped() -> None:
+    user = UserMessage(content="q")
+    looping = AssistantMessage(
+        content=[TextContent(text="Running.\n" * 20)], stop_reason="stop"
+    )
+    assert is_looping_text(looping.text()) is True
+    assert repair_tool_messages([user, looping]) == [user]
 
 
 def test_partial_results_keep_only_answered_calls() -> None:
