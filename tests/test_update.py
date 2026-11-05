@@ -87,7 +87,7 @@ def test_run_update_background(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(update, "_start_background_upgrade", lambda argv: log)
     messages: list[str] = []
     assert update.run_update(messages.append, background=True) == 0
-    assert "background" in messages[-1]
+    assert any("background" in message for message in messages)
 
 
 def test_run_update_reports_a_failed_upgrade(monkeypatch) -> None:

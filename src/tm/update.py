@@ -141,26 +141,46 @@ def _wait_and_upgrade(pid: int, argv: Sequence[str], log_path: str) -> None:
                 sys.stdout.flush()
 
         emit(f"\n[tm update] {' '.join(argv)}\n")
-        try:
-            proc = subprocess.Popen(
-                list(argv),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                errors="replace",
+        # On Windows the uv entrypoint shim cannot be replaced while any tm
+        # window is still running. The updater process has exited, but another
+        # TUI may still hold the file; retry until it is closed.
+        retry_deadline = time.time() + 600
+        while True:
+            try:
+                proc = subprocess.Popen(
+                    list(argv),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                )
+            except OSError as exc:
+                emit(f"[tm update] could not run the updater: {exc}\n")
+                emit(f"[tm update] run manually: {' '.join(argv)}\n")
+                return
+            assert proc.stdout is not None
+            lines: list[str] = []
+            for line in proc.stdout:
+                lines.append(line)
+                emit(line)
+            code = proc.wait()
+            if code == 0:
+                emit("[tm update] update complete\n")
+                return
+            text = "".join(lines).lower()
+            locked = (
+                os.name == "nt"
+                and ("os error 32" in text or "another program" in text)
+                and time.time() < retry_deadline
             )
-        except OSError as exc:
-            emit(f"[tm update] could not run the updater: {exc}\n")
-            emit(f"[tm update] run manually: {' '.join(argv)}\n")
-            return
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            emit(line)
-        code = proc.wait()
-        if code == 0:
-            emit("[tm update] update complete\n")
-        else:
-            emit(f"[tm update] update failed (exit code {code})\n")
+            if not locked:
+                emit(f"[tm update] update failed (exit code {code})\n")
+                return
+            emit(
+                "[tm update] tm is still running; close all tm windows and this "
+                "update will retry automatically in 3 seconds...\n"
+            )
+            time.sleep(3)
 
 
 def _start_background_upgrade(argv: Sequence[str]) -> Path:
@@ -237,6 +257,8 @@ def run_update(
             return 1
         out(f"updating TM {current} -> {latest} in the background ({command})")
         out(f"progress and errors are printed here and appended to {log_path}")
+        if os.name == "nt":
+            out("close all other tm windows so the update can replace tm.exe")
         return 0
 
     out(f"updating TM {current} -> {latest}: {command}")
