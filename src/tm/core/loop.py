@@ -9,6 +9,9 @@ would otherwise stop.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+from collections import deque
 from dataclasses import dataclass, replace
 from typing import Awaitable, Callable
 
@@ -193,6 +196,8 @@ async def agent_loop(
     max_retries: int = 3,
     max_length_continues: int = 3,
     max_length_stalls: int = 2,
+    max_repeated_tool_calls: int = 3,
+    repeated_call_window: int = 40,
     telemetry: Telemetry | None = None,
     context: TelemetryContext | None = None,
 ) -> LoopResult:
@@ -204,6 +209,7 @@ async def agent_loop(
     length_continues = 0
     length_stalls = 0
     force_tool_choice = False
+    recent_tool_calls: deque[str] = deque(maxlen=max(1, repeated_call_window))
     end_reason = "stop"
     while turn < max_turns:
         await hooks.pause()
@@ -319,6 +325,7 @@ async def agent_loop(
             telemetry.end(turn_span, context, status=turn_status)
             break
 
+        looped_tool: str | None = None
         if assistant.tool_calls:
             if assistant.stop_reason == "length":
                 # The JSON arguments may be truncated; executing them would run
@@ -335,13 +342,37 @@ async def agent_loop(
             else:
                 await hooks.pause()
                 results = await hooks.execute_tools(assistant.tool_calls)
-            for result in results:
+            for call, result in zip(assistant.tool_calls, results):
                 history.append(result)
                 await hooks.emit(MessageStartEvent(message=result))
                 await hooks.emit(MessageEndEvent(message=result))
+                if max_repeated_tool_calls > 0:
+                    signature = call.name + "|" + json.dumps(
+                        call.arguments, sort_keys=True, ensure_ascii=False
+                    )
+                    digest = hashlib.sha1(
+                        result.text().encode("utf-8", errors="replace")
+                    ).hexdigest()
+                    key = signature + "|" + digest
+                    recent_tool_calls.append(key)
+                    if recent_tool_calls.count(key) >= max_repeated_tool_calls:
+                        looped_tool = call.name
+                        break
 
         telemetry.end(turn_span, context, status=turn_status)
         await hooks.emit(TurnEndEvent(turn=turn))
+
+        if looped_tool is not None:
+            await hooks.notice(
+                _t(
+                    "notice.tool_loop",
+                    name=looped_tool,
+                    n=max_repeated_tool_calls,
+                ),
+                "warning",
+            )
+            end_reason = "loop"
+            break
 
         if assistant.stop_reason == "length":
             # The output budget was exhausted, not the work. Continue from the

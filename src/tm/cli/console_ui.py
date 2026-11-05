@@ -99,6 +99,12 @@ class ConsoleAgentUI:
                 style="yellow",
                 markup=False,
             )
+        elif isinstance(event, AgentEndEvent) and event.stop_reason == "loop":
+            self.console.print(
+                _t("console.tool_loop"),
+                style="yellow",
+                markup=False,
+            )
 
     def _render_assistant(self, message: AssistantMessage) -> None:
         thinking = message.thinking()

@@ -37,6 +37,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "the reply hit the output token limit; continuing (attempt {n}/{max})...",
         "回复达到输出 token 上限；正在继续（第 {n}/{max} 次）…",
     ),
+    "notice.tool_loop": (
+        "the model repeated the same {name} call {n} times; stopping to avoid a loop",
+        "模型重复调用了同一工具 {name} {n} 次；为避免死循环已停止",
+    ),
     # -- console renderer -------------------------------------------------
     "console.thinking": ("thinking", "思考中"),
     "console.error": ("error: {message}", "错误：{message}"),
@@ -56,6 +60,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "console.length_limit": (
         "the reply hit the output token limit; send another message to continue",
         "回复达到输出 token 上限；再发一条消息即可继续",
+    ),
+    "console.tool_loop": (
+        "stopped: the model kept repeating the same tool call; send a more specific instruction",
+        "已停止：模型反复调用同一工具；请发送更明确的指令",
     ),
     "prompt.language": (
         "Reply in the user's language.",
@@ -89,6 +97,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "tui.length_limit": (
         "The reply hit the output token limit. Send another message to continue.",
         "回复达到输出 token 上限。再发一条消息即可继续。",
+    ),
+    "tui.tool_loop": (
+        "Stopped: the model kept repeating the same tool call. Send a more specific instruction.",
+        "已停止：模型反复调用同一工具。请发送更明确的指令。",
     ),
     "tui.queued": (
         "Agent is still working; message queued for the next turn.",

@@ -533,6 +533,36 @@ async def test_unsupported_tool_choice_falls_back() -> None:
     assert agent.last_stop_reason == "stop"
 
 
+async def test_repeated_identical_tool_calls_stop_the_run() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        return make_stream(
+            AssistantMessage(
+                tool_calls=[ToolCall(id=f"t{calls['n']}", name="echo", arguments={"text": "same"})],
+                stop_reason="tool_use",
+            )
+        )
+
+    agent = Agent(
+        MODEL,
+        stream_fn=stream_fn,
+        tools=[EchoTool()],
+        max_turns=20,
+        max_repeated_tool_calls=3,
+    )
+    events: list[AgentEvent] = []
+    agent.subscribe(lambda event: _record(events, event))
+
+    await agent.prompt("go")
+
+    assert calls["n"] == 3
+    assert agent.last_stop_reason == "loop"
+    ends = [e for e in events if isinstance(e, AgentEndEvent)]
+    assert ends and ends[-1].stop_reason == "loop"
+
+
 async def test_truncated_tool_call_is_not_executed() -> None:
     calls = {"n": 0}
 
