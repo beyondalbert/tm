@@ -102,6 +102,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "tui.perm_allow": ("Allow", "允许"),
     "tui.perm_always": ("Always allow", "总是允许"),
     "tui.perm_deny": ("Deny", "拒绝"),
+    "tui.perm_hint": (
+        "Enter: selected button  ·  Tab: next  ·  Esc: deny",
+        "Enter：当前按钮  ·  Tab：切换  ·  Esc：拒绝",
+    ),
     "tui.resume_title": ("Resume session", "恢复会话"),
     "tui.copy_selection": ("copied {label}", "已复制{label}"),
     "tui.copy_selection_osc52": ("copied {label} (OSC52)", "已复制{label}（OSC52）"),

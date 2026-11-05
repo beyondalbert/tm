@@ -458,6 +458,12 @@ class PermissionScreen(ModalScreen[ApprovalOutcome]):
                 yield Button(_t("tui.perm_allow"), id="allow", variant="success")
                 yield Button(_t("tui.perm_always"), id="always", variant="primary")
                 yield Button(_t("tui.perm_deny"), id="deny", variant="error")
+            yield Static(_t("tui.perm_hint"), id="perm-hint")
+
+    def on_mount(self) -> None:
+        # Without an initial focus the modal looks frozen: keyboard events go
+        # nowhere and only a mouse click can dismiss it.
+        self.query_one("#allow", Button).focus()
 
     def _answer(self, outcome: ApprovalOutcome) -> None:
         # Guard against a second dismiss (a repeat click or Escape) popping the
@@ -662,9 +668,15 @@ class TextualApprover:
 
     async def request(self, action, reason: str) -> ApprovalOutcome:
         async with self._lock:
-            return await self._app.push_screen_wait(
-                PermissionScreen(action.describe(), reason)
-            )
+            # A shell command run earlier may have reset mouse/paste modes.
+            # Restore them before showing the modal so clicks work too.
+            self._app._restore_terminal_modes()
+            try:
+                return await self._app.push_screen_wait(
+                    PermissionScreen(action.describe(), reason)
+                )
+            finally:
+                self._app._restore_terminal_modes()
 
 
 class DeferredApprover:
@@ -790,6 +802,7 @@ class TMPromptApp(App[None]):
     #perm-title {{ text-style: bold; padding-bottom: 1; }}
     #perm-body {{ padding-bottom: 1; }}
     #perm-buttons {{ height: auto; align-horizontal: right; }}
+    #perm-hint {{ color: {_DIM}; padding-top: 1; }}
     #session-box {{ width: 70%; height: auto; max-height: 70%; padding: 1 2; background: $panel; border: round {_ACCENT}; }}
     #session-title {{ text-style: bold; padding-bottom: 1; }}
     #session-list {{ height: auto; max-height: 20; }}
@@ -809,6 +822,7 @@ class TMPromptApp(App[None]):
         Binding("ctrl+y", "toggle_auto", "Auto-approve"),
         Binding("ctrl+p", "toggle_pause", "Pause"),
         Binding("ctrl+l", "redraw", "Redraw", show=False),
+        Binding("ctrl+shift+d", "dump_tasks", "Dump tasks", show=False),
         Binding("pageup", "scroll_page_up", "Scroll up", show=False),
         Binding("pagedown", "scroll_page_down", "Scroll down", show=False),
         Binding("ctrl+shift+c", "copy_selection", "Copy selection", show=False),
@@ -847,6 +861,10 @@ class TMPromptApp(App[None]):
         self._watchdog_stop = threading.Event()
         self._watchdog: threading.Thread | None = None
         self._recent_events: deque[tuple[float, str]] = deque(maxlen=60)
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._last_progress = time.monotonic()
+        self._last_task_dump = 0.0
+        self._log_lock = threading.Lock()
 
     # -- small public API used by commands / tests ------------------------
     def write_line(self, text: str, style: str = _DIM) -> None:
@@ -867,6 +885,7 @@ class TMPromptApp(App[None]):
         yield Static("", id="footer")
 
     def on_mount(self) -> None:
+        self._loop = asyncio.get_running_loop()
         self._agent.subscribe(self._on_agent_event)
         self.set_interval(0.5, self._beat)
         # Always-on: a wedged event loop cannot report itself, so a background
@@ -890,6 +909,7 @@ class TMPromptApp(App[None]):
         self._heartbeat = time.monotonic()
 
     def _note(self, text: str) -> None:
+        self._last_progress = time.monotonic()
         self._recent_events.append((time.time(), text))
 
     def _start_watchdog(self) -> None:
@@ -908,6 +928,17 @@ class TMPromptApp(App[None]):
                     self._dump_stacks(idle)
                 elif idle < 2.0:
                     reported = False
+                working_idle = time.monotonic() - self._last_progress
+                if (
+                    self._status != "idle"
+                    and working_idle >= 60.0
+                    and time.monotonic() - self._last_task_dump >= 300.0
+                ):
+                    self._last_task_dump = time.monotonic()
+                    loop = self._loop
+                    if loop is not None:
+                        with contextlib.suppress(RuntimeError):
+                            loop.call_soon_threadsafe(self._dump_tasks, working_idle)
 
         self._watchdog = threading.Thread(
             target=watch, name="tm-tui-watchdog", daemon=True
@@ -915,7 +946,7 @@ class TMPromptApp(App[None]):
         self._watchdog.start()
 
     def _dump_stacks(self, idle: float) -> None:
-        with contextlib.suppress(Exception):
+        with self._log_lock, contextlib.suppress(Exception):
             path = config_dir() / "tui-freeze.log"
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
@@ -945,6 +976,31 @@ class TMPromptApp(App[None]):
                 for thread_id, frame in sys._current_frames().items():
                     handle.write(f"\n--- thread {thread_id} ---\n")
                     handle.write("".join(traceback.format_stack(frame)))
+
+    def _dump_tasks(self, stalled: float) -> None:
+        """Write suspended asyncio task stacks (for hangs that are not CPU-bound)."""
+        with self._log_lock, contextlib.suppress(Exception):
+            path = config_dir() / "tui-freeze.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            loop = self._loop
+            if loop is None:
+                return
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} "
+                    f"agent stalled {stalled:.1f}s ===\n"
+                )
+                handle.write(f"status={self._status}\n")
+                for timestamp, text in self._recent_events:
+                    handle.write(
+                        f"{time.strftime('%H:%M:%S', time.localtime(timestamp))} {text}\n"
+                    )
+                handle.write("\n--- asyncio tasks ---\n")
+                for task in asyncio.all_tasks(loop):
+                    if task.done():
+                        continue
+                    handle.write(f"\n--- task {task.get_name()} ---\n")
+                    task.print_stack(file=handle)
 
     async def _startup(self) -> None:
         if self._banner:
@@ -1228,6 +1284,11 @@ class TMPromptApp(App[None]):
             if callable(method):
                 with contextlib.suppress(Exception):
                     method()
+
+    def action_dump_tasks(self) -> None:
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self._dump_tasks, 0.0)
+            self.notify("task dump written to tui-freeze.log")
 
     def action_redraw(self) -> None:
         self._restore_terminal_modes()

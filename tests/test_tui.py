@@ -124,6 +124,23 @@ async def test_permission_screen_always_and_deny() -> None:
     assert results[0] is not None and results[0].allowed is False
 
 
+async def test_permission_screen_enter_presses_the_focused_button() -> None:
+    results: list[ApprovalOutcome | None] = []
+
+    class Host(App):
+        def on_mount(self) -> None:
+            self.push_screen(PermissionScreen("shell: ls", "default policy"), results.append)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert results and results[0] is not None
+    assert results[0].allowed is True
+
+
 async def test_tm_app_runs_a_prompt() -> None:
     agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
     app = TMPromptApp(agent, FAKE_MODEL)

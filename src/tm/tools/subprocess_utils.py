@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,18 @@ class CommandResult:
     returncode: int | None
     timed_out: bool
     aborted: bool
+
+
+async def _wait_for_exit(
+    proc: asyncio.subprocess.Process, timeout: float | None = None
+) -> bool:
+    """Wait for the process itself, not for inherited pipe handles to close."""
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while proc.returncode is None:
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
 
 
 def _close_transport(proc: asyncio.subprocess.Process) -> None:
@@ -161,6 +174,8 @@ async def stream_command(
         # unlike await proc.wait(), which can block on a daemon holding stdout.
         while proc.returncode is None:
             if timed_out or aborted:
+                # Give the transport a moment to record the killed exit code.
+                await _wait_for_exit(proc, timeout=5.0)
                 break
             await asyncio.sleep(0.05)
         # Drain whatever is still buffered, but do not wait for inherited pipe
