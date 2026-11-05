@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -26,6 +27,14 @@ _PACKAGE_PROBE = (
     "missing = [n for n in sys.argv[1:] if importlib.util.find_spec(n) is None]\n"
     "print('\\n'.join(missing))\n"
 )
+
+
+def install_argv(executable: str, packages: list[str]) -> list[str]:
+    """Prefer uv for environments (such as uv tools) that have no pip."""
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "pip", "install", "--python", executable, *packages]
+    return [executable, "-m", "pip", "install", *packages]
 
 
 def _slug(text: str) -> str:
@@ -116,7 +125,7 @@ class PythonTool(Tool[PythonParams]):
             missing = await self._missing_packages(executable, args.packages, cwd, ctx)
             if missing:
                 install = await stream_command(
-                    [executable, "-m", "pip", "install", *missing],
+                    install_argv(executable, missing),
                     cwd=cwd,
                     timeout=max(timeout, 300),
                     signal=ctx.signal,

@@ -45,6 +45,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "the model emitted raw tool-call markup; the server's tool-call parser is misconfigured",
         "模型输出了未解析的原始工具调用标记；服务端 tool-call parser 配置不正确",
     ),
+    "notice.text_loop": (
+        "the model reply is repeating itself; stopping to avoid a loop",
+        "模型回复出现重复循环；为避免死循环已停止",
+    ),
     # -- console renderer -------------------------------------------------
     "console.thinking": ("thinking", "思考中"),
     "console.error": ("error: {message}", "错误：{message}"),
@@ -66,8 +70,8 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "回复达到输出 token 上限；再发一条消息即可继续",
     ),
     "console.tool_loop": (
-        "stopped: the model kept repeating the same tool call; send a more specific instruction",
-        "已停止：模型反复调用同一工具；请发送更明确的指令",
+        "stopped: the model kept repeating itself; send a more specific instruction",
+        "已停止：模型陷入重复循环；请发送更明确的指令",
     ),
     "console.tool_markup": (
         "stopped: raw tool-call markup leaked into the reply; check the server's --tool-call-parser",
@@ -107,8 +111,8 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "回复达到输出 token 上限。再发一条消息即可继续。",
     ),
     "tui.tool_loop": (
-        "Stopped: the model kept repeating the same tool call. Send a more specific instruction.",
-        "已停止：模型反复调用同一工具。请发送更明确的指令。",
+        "Stopped: the model kept repeating itself. Send a more specific instruction.",
+        "已停止：模型陷入重复循环。请发送更明确的指令。",
     ),
     "tui.tool_markup": (
         "Stopped: raw tool-call markup leaked into the reply. Check the server's --tool-call-parser.",

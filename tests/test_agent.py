@@ -533,6 +533,32 @@ async def test_unsupported_tool_choice_falls_back() -> None:
     assert agent.last_stop_reason == "stop"
 
 
+async def test_streaming_repetition_stops_the_run() -> None:
+    text = "Running.\n" * 300
+
+    def stream_fn(model, context, options) -> EventStream:
+        stream: EventStream = EventStream()
+        first = AssistantMessage(content=[TextContent(text=text[:200])])
+        stream.push(StartEvent(partial=first))
+        for end in range(400, len(text) + 1, 400):
+            partial = AssistantMessage(content=[TextContent(text=text[:end])])
+            stream.push(TextDeltaEvent(partial=partial, delta=text[end - 400 : end]))
+        final = AssistantMessage(content=[TextContent(text=text)], stop_reason="stop")
+        stream.push(DoneEvent(partial=final, message=final))
+        stream.end(final)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn)
+    events: list[AgentEvent] = []
+    agent.subscribe(lambda event: _record(events, event))
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "loop"
+    ends = [e for e in events if isinstance(e, AgentEndEvent)]
+    assert ends and ends[-1].stop_reason == "loop"
+
+
 async def test_raw_tool_markup_stops_the_run() -> None:
     leaked = AssistantMessage(
         content=[

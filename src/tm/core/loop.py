@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, replace
 from typing import Awaitable, Callable
 
@@ -190,6 +190,34 @@ def _has_raw_tool_markup(text: str) -> bool:
     return any(marker in lowered for marker in _RAW_TOOL_MARKERS)
 
 
+def _streaming_loop_reason(text: str) -> str | None:
+    """Detect degenerate output before the model finishes the turn."""
+    if _has_raw_tool_markup(text):
+        return "tool_parser"
+    if len(text) < 1500:
+        return None
+    lines = [line.strip() for line in text.splitlines() if len(line.strip()) >= 8]
+    if lines:
+        _line, count = Counter(lines).most_common(1)[0]
+        if count >= 5:
+            return "loop"
+    lowered = text.lower()
+    hits = sum(
+        lowered.count(marker)
+        for marker in (
+            "dispatching",
+            "emitting now",
+            "ok sending",
+            "让我发出",
+            "现在发出",
+            "发出。",
+        )
+    )
+    if hits >= 6:
+        return "loop"
+    return None
+
+
 def _is_empty_reply(message: AssistantMessage) -> bool:
     """A finished turn with no text and no tool calls (reasoning may exist)."""
     if message.stop_reason != "stop" or message.tool_calls:
@@ -244,6 +272,7 @@ async def agent_loop(
             history, request_messages = await hooks.prepare(history)
 
         empty_reply = False
+        stream_stopped: str | None = None
         attempt = 0
         while True:
             forced = force_tool_choice and bool(tools)
@@ -272,16 +301,31 @@ async def agent_loop(
                     )
 
                 watcher = asyncio.create_task(_abort_stream())
+            next_loop_check = 0
             try:
                 async for event in stream:
                     if isinstance(event, StartEvent) and event.partial is not None:
                         await hooks.emit(MessageStartEvent(message=event.partial))
                     elif isinstance(event, _UPDATE_EVENTS) and event.partial is not None:
                         await hooks.emit(MessageUpdateEvent(message=event.partial))
+                        partial_text = event.partial.text()
+                        if (
+                            len(partial_text) >= next_loop_check
+                            or _has_raw_tool_markup(partial_text)
+                        ):
+                            reason = _streaming_loop_reason(partial_text)
+                            if reason is not None:
+                                stream_stopped = reason
+                                stream.cancel()
+                                stream.end(event.partial)
+                                break
+                            next_loop_check = len(partial_text) + 2000
                 assistant = await stream.result()
             finally:
                 if watcher is not None:
                     watcher.cancel()
+            if stream_stopped is not None:
+                break
             if (
                 forced
                 and assistant.stop_reason == "error"
@@ -334,6 +378,14 @@ async def agent_loop(
         history.append(assistant)
         await hooks.emit(MessageEndEvent(message=assistant))
 
+        if stream_stopped is not None:
+            if stream_stopped == "tool_parser":
+                await hooks.notice(_t("notice.tool_markup"), "error")
+            else:
+                await hooks.notice(_t("notice.text_loop"), "warning")
+            telemetry.end(turn_span, context, status="error")
+            end_reason = stream_stopped
+            break
         if empty_reply:
             end_reason = "empty"
             telemetry.end(turn_span, context, status="error")
