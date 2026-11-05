@@ -171,6 +171,25 @@ def _continuation_message(assistant: AssistantMessage) -> UserMessage:
     return UserMessage(content="\n\n".join(sections))
 
 
+#: Raw tool-call markup leaking into assistant text means the server's
+#: tool-call parser did not recognize the model's format.
+_RAW_TOOL_MARKERS = (
+    "</parameter>",
+    "<tool_call>",
+    "</tool_call>",
+    "<|tool_call",
+    "<tool_calls_begin|>",
+    "<|tool_calls_begin|>",
+    "<function_call>",
+    "</invoke>",
+)
+
+
+def _has_raw_tool_markup(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _RAW_TOOL_MARKERS)
+
+
 def _is_empty_reply(message: AssistantMessage) -> bool:
     """A finished turn with no text and no tool calls (reasoning may exist)."""
     if message.stop_reason != "stop" or message.tool_calls:
@@ -325,6 +344,7 @@ async def agent_loop(
             telemetry.end(turn_span, context, status=turn_status)
             break
 
+        raw_tool_markup = _has_raw_tool_markup(assistant.text())
         looped_tool: str | None = None
         if assistant.tool_calls:
             if assistant.stop_reason == "length":
@@ -361,6 +381,11 @@ async def agent_loop(
 
         telemetry.end(turn_span, context, status=turn_status)
         await hooks.emit(TurnEndEvent(turn=turn))
+
+        if raw_tool_markup:
+            await hooks.notice(_t("notice.tool_markup"), "error")
+            end_reason = "tool_parser"
+            break
 
         if looped_tool is not None:
             await hooks.notice(

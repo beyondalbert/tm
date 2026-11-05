@@ -1433,6 +1433,8 @@ class TMPromptApp(App[None]):
                 await self._mount(SystemNote(_t("tui.length_limit"), _WARNING))
             elif event.stop_reason == "loop":
                 await self._mount(SystemNote(_t("tui.tool_loop"), _WARNING))
+            elif event.stop_reason == "tool_parser":
+                await self._mount(SystemNote(_t("tui.tool_markup"), _ERROR))
         elif isinstance(event, AgentNoticeEvent):
             style = _WARNING if event.level in ("warning", "error") else _DIM
             await self._mount(SystemNote(event.text, style))

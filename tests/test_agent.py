@@ -533,6 +533,28 @@ async def test_unsupported_tool_choice_falls_back() -> None:
     assert agent.last_stop_reason == "stop"
 
 
+async def test_raw_tool_markup_stops_the_run() -> None:
+    leaked = AssistantMessage(
+        content=[
+            TextContent(
+                text=(
+                    "Let me call the tool now.\n\n<to\n</parameter>\nread."
+                )
+            )
+        ],
+        stop_reason="stop",
+    )
+    agent = Agent(MODEL, stream_fn=scripted([leaked]))
+    events: list[AgentEvent] = []
+    agent.subscribe(lambda event: _record(events, event))
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "tool_parser"
+    ends = [e for e in events if isinstance(e, AgentEndEvent)]
+    assert ends and ends[-1].stop_reason == "tool_parser"
+
+
 async def test_repeated_identical_tool_calls_stop_the_run() -> None:
     calls = {"n": 0}
 

@@ -41,6 +41,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "the model repeated the same {name} call {n} times; stopping to avoid a loop",
         "模型重复调用了同一工具 {name} {n} 次；为避免死循环已停止",
     ),
+    "notice.tool_markup": (
+        "the model emitted raw tool-call markup; the server's tool-call parser is misconfigured",
+        "模型输出了未解析的原始工具调用标记；服务端 tool-call parser 配置不正确",
+    ),
     # -- console renderer -------------------------------------------------
     "console.thinking": ("thinking", "思考中"),
     "console.error": ("error: {message}", "错误：{message}"),
@@ -64,6 +68,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "console.tool_loop": (
         "stopped: the model kept repeating the same tool call; send a more specific instruction",
         "已停止：模型反复调用同一工具；请发送更明确的指令",
+    ),
+    "console.tool_markup": (
+        "stopped: raw tool-call markup leaked into the reply; check the server's --tool-call-parser",
+        "已停止：回复中出现了未解析的原始工具调用标记；请检查服务端的 --tool-call-parser",
     ),
     "prompt.language": (
         "Reply in the user's language.",
@@ -101,6 +109,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "tui.tool_loop": (
         "Stopped: the model kept repeating the same tool call. Send a more specific instruction.",
         "已停止：模型反复调用同一工具。请发送更明确的指令。",
+    ),
+    "tui.tool_markup": (
+        "Stopped: raw tool-call markup leaked into the reply. Check the server's --tool-call-parser.",
+        "已停止：回复中出现了未解析的原始工具调用标记。请检查服务端的 --tool-call-parser。",
     ),
     "tui.queued": (
         "Agent is still working; message queued for the next turn.",
