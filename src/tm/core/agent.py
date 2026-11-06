@@ -440,6 +440,20 @@ class Agent:
     def _persist_message(self, message: Message) -> None:
         self._pending_messages.append(message)
 
+    def _discard_pending(self, messages: list[Message]) -> None:
+        """Remove messages from the run before they are persisted.
+
+        A loop stop rewrites the turn it produced; anything already flushed to
+        the session (a compaction mid-turn) keeps its raw copy, but the common
+        case, and the next request, use the cleaned history.
+        """
+        if not messages:
+            return
+        dropped = {id(message) for message in messages}
+        self._pending_messages = [
+            message for message in self._pending_messages if id(message) not in dropped
+        ]
+
     def _flush_messages(self) -> None:
         """Commit the accumulated turn messages (and usage) atomically."""
         if self.session is None or not self._pending_messages:
@@ -499,6 +513,7 @@ class Agent:
             pause=self._wait_if_paused,
             notice=self._notice,
             prepare=self._prepare_request,
+            discard=self._discard_pending,
             is_context_overflow=lambda message: is_context_overflow(
                 message, self.model.context_window
             ),

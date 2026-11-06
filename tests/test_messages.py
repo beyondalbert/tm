@@ -8,7 +8,7 @@ from tm.ai.types import (
     ToolResultMessage,
     UserMessage,
 )
-from tm.core.messages import is_looping_text, repair_tool_messages
+from tm.core.messages import is_looping_text, repair_tool_messages, strip_loop_output
 
 
 def test_orphan_tool_result_is_dropped() -> None:
@@ -105,3 +105,55 @@ def test_partial_results_keep_only_answered_calls() -> None:
     kept = repaired[0]
     assert isinstance(kept, AssistantMessage)
     assert [call.id for call in kept.tool_calls] == ["t1"]
+
+
+def test_strip_loop_output_drops_looping_assistant_text() -> None:
+    user = UserMessage(content="q")
+    looping = AssistantMessage(
+        content=[TextContent(text="Running.\n" * 20)], stop_reason="stop"
+    )
+    kept, dropped = strip_loop_output([user, looping])
+    assert kept == [user]
+    assert dropped == [looping]
+
+
+def test_strip_loop_output_keeps_tool_calls_and_results() -> None:
+    assistant = AssistantMessage(
+        content=[TextContent(text="Let me call it.\n\n<to\n</parameter>\nread.")],
+        tool_calls=[ToolCall(id="t1", name="read", arguments={})],
+    )
+    result = ToolResultMessage(
+        tool_call_id="t1", tool_name="read", content=[TextContent(text="data")]
+    )
+    kept, dropped = strip_loop_output([assistant, result])
+    assert dropped == []
+    assert kept == [assistant, result]
+    assert assistant.text() == ""
+    assert [call.id for call in assistant.tool_calls] == ["t1"]
+
+
+def test_strip_loop_output_collapses_identical_tool_groups() -> None:
+    def group(index: int) -> list[Message]:
+        return [
+            AssistantMessage(
+                tool_calls=[
+                    ToolCall(id=f"t{index}", name="echo", arguments={"text": "same"})
+                ],
+            ),
+            ToolResultMessage(
+                tool_call_id=f"t{index}",
+                tool_name="echo",
+                content=[TextContent(text="same")],
+            ),
+        ]
+
+    messages: list[Message] = [UserMessage(content="go"), *group(1), *group(2), *group(3)]
+    kept, dropped = strip_loop_output(messages)
+    kept_calls = [
+        call.id
+        for message in kept
+        if isinstance(message, AssistantMessage)
+        for call in message.tool_calls
+    ]
+    assert kept_calls == ["t1"]
+    assert len(dropped) == 4

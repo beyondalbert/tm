@@ -685,3 +685,98 @@ async def test_a_broken_permission_hook_does_not_hang() -> None:
         isinstance(message, ToolResultMessage) and message.is_error
         for message in agent.messages
     )
+
+
+async def test_loop_stop_drops_the_poisoned_turn_from_history() -> None:
+    text = "Let me run.\n" * 200
+
+    def stream_fn(model, context, options) -> EventStream:
+        stream: EventStream = EventStream()
+        message = AssistantMessage(content=[TextContent(text=text)], stop_reason="stop")
+        stream.push(StartEvent(partial=message))
+        stream.push(TextDeltaEvent(partial=message, delta=text))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_turns=5)
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "loop"
+    assert [message.role for message in agent.messages] == ["user"]
+
+
+async def test_loop_stop_does_not_persist_the_poisoned_turn(tmp_path) -> None:
+    from pathlib import Path
+
+    from tm.core.session import SessionManager
+
+    session = SessionManager(tmp_path).create(cwd=Path(tmp_path))
+    text = "Let me run.\n" * 200
+
+    def stream_fn(model, context, options) -> EventStream:
+        stream: EventStream = EventStream()
+        message = AssistantMessage(content=[TextContent(text=text)], stop_reason="stop")
+        stream.push(StartEvent(partial=message))
+        stream.push(TextDeltaEvent(partial=message, delta=text))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn, session=session, max_turns=5)
+    await agent.prompt("go")
+
+    stored = session.messages()
+    assert agent.last_stop_reason == "loop"
+    assert [message.role for message in stored] == ["user"]
+    assert not any(
+        isinstance(message, AssistantMessage) and "Let me run" in message.text()
+        for message in stored
+    )
+
+
+async def test_tool_loop_stop_keeps_one_call_group_and_continues_clean() -> None:
+    calls = {"n": 0}
+    requests: list[list] = []
+
+    def stream_fn(model, context, options) -> EventStream:
+        requests.append(list(context.messages))
+        calls["n"] += 1
+        return make_stream(
+            AssistantMessage(
+                tool_calls=[
+                    ToolCall(
+                        id=f"t{calls['n']}", name="echo", arguments={"text": "same"}
+                    )
+                ],
+                stop_reason="tool_use",
+            )
+        )
+
+    agent = Agent(
+        MODEL,
+        stream_fn=stream_fn,
+        tools=[EchoTool()],
+        max_turns=20,
+        max_repeated_tool_calls=3,
+    )
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "loop"
+    kept_calls = [
+        call
+        for message in agent.messages
+        if isinstance(message, AssistantMessage)
+        for call in message.tool_calls
+    ]
+    assert [call.arguments for call in kept_calls] == [{"text": "same"}]
+
+    await agent.prompt("继续")
+    assert agent.last_stop_reason == "loop"
+    sent_calls = [
+        call
+        for message in requests[-1]
+        if isinstance(message, AssistantMessage)
+        for call in message.tool_calls
+    ]
+    assert len(sent_calls) == 1

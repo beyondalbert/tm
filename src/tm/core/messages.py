@@ -8,9 +8,11 @@ history is repaired before it is sent.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
 
-from tm.ai.types import AssistantMessage, Message, ToolResultMessage
+from tm.ai.types import AssistantMessage, Message, ToolCall, ToolResultMessage
 
 _LOOP_MARKERS = (
     "</parameter>",
@@ -86,4 +88,75 @@ def repair_tool_messages(messages: list[Message]) -> list[Message]:
     return repaired
 
 
-__all__ = ["is_looping_text", "repair_tool_messages"]
+def _tool_group_key(call: ToolCall, result: ToolResultMessage) -> str:
+    arguments = json.dumps(call.arguments, sort_keys=True, ensure_ascii=False)
+    digest = hashlib.sha1(result.text().encode("utf-8", errors="replace")).hexdigest()
+    return f"{call.name}|{arguments}|{digest}"
+
+
+def strip_loop_output(
+    messages: list[Message],
+) -> tuple[list[Message], list[Message]]:
+    """Remove loop-produced output when a run stops for a loop.
+
+    Assistant text that reads as a degenerate repetition is cleared in place, so
+    the messages already queued for persistence are corrected as well; an
+    assistant message left with neither text nor tool calls is dropped. Identical
+    tool call/result groups collapse to their first occurrence, because repeating
+    a call with the same arguments and the same result cannot make progress.
+
+    Returns ``(kept, dropped)``. ``dropped`` holds the message objects that must
+    also be discarded from the pending persistence queue.
+    """
+    dropped_ids: set[int] = set()
+
+    for message in messages:
+        if isinstance(message, AssistantMessage) and is_looping_text(message.text()):
+            message.content = []
+            if not message.tool_calls:
+                dropped_ids.add(id(message))
+
+    results = {
+        message.tool_call_id: message
+        for message in messages
+        if isinstance(message, ToolResultMessage)
+    }
+    seen: set[str] = set()
+    for message in messages:
+        if not isinstance(message, AssistantMessage) or id(message) in dropped_ids:
+            continue
+        kept_calls: list[ToolCall] = []
+        for call in message.tool_calls:
+            result = results.get(call.id)
+            if result is None:
+                kept_calls.append(call)
+                continue
+            key = _tool_group_key(call, result)
+            if key in seen:
+                dropped_ids.add(id(result))
+                continue
+            seen.add(key)
+            kept_calls.append(call)
+        if len(kept_calls) != len(message.tool_calls):
+            message.tool_calls = kept_calls
+        if not message.tool_calls and not message.content:
+            dropped_ids.add(id(message))
+
+    # Dropping a duplicate call orphans its result; dropping a loop message can
+    # orphan results from calls it no longer carries.
+    requested = {
+        call.id
+        for message in messages
+        if id(message) not in dropped_ids and isinstance(message, AssistantMessage)
+        for call in message.tool_calls
+    }
+    for message in messages:
+        if isinstance(message, ToolResultMessage) and message.tool_call_id not in requested:
+            dropped_ids.add(id(message))
+
+    kept = [message for message in messages if id(message) not in dropped_ids]
+    dropped = [message for message in messages if id(message) in dropped_ids]
+    return kept, dropped
+
+
+__all__ = ["is_looping_text", "repair_tool_messages", "strip_loop_output"]

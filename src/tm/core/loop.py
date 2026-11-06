@@ -43,6 +43,7 @@ from tm.core.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from tm.core.messages import strip_loop_output
 from tm.i18n import t as _t
 from tm.telemetry import (
     SPAN_TURN,
@@ -83,6 +84,8 @@ class LoopHooks:
         Callable[[list[Message]], Awaitable[tuple[list[Message], list[Message]]]]
         | None
     ) = None
+    #: Drop messages from the pending persistence queue (loop-stop cleanup).
+    discard: Callable[[list[Message]], None] | None = None
 
 
 _UPDATE_EVENTS = (TextDeltaEvent, ThinkingDeltaEvent, ToolCallDeltaEvent)
@@ -270,7 +273,6 @@ async def agent_loop(
         request_messages = history
         if hooks.prepare is not None:
             history, request_messages = await hooks.prepare(history)
-
         empty_reply = False
         stream_stopped: str | None = None
         attempt = 0
@@ -502,6 +504,13 @@ async def agent_loop(
     else:
         # The turn limit was reached while more work was pending.
         end_reason = "max_turns"
+
+    if end_reason in ("loop", "tool_parser"):
+        # Clean the poisoned turn before it is persisted or sent again: keep the
+        # tool calls/results, drop the loop text and duplicate call groups.
+        history, dropped = strip_loop_output(history)
+        if dropped and hooks.discard is not None:
+            hooks.discard(dropped)
 
     await hooks.emit(AgentEndEvent(messages=history, stop_reason=end_reason))
     return LoopResult(history, end_reason)
