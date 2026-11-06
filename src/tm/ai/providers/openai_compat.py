@@ -11,7 +11,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, Timeout
 
 from tm.ai.estimate import clamp_max_tokens
 from tm.ai.event_stream import EventStream
@@ -120,15 +120,39 @@ class OpenAICompatProvider(Provider):
         api_key: str | None = None,
         base_url: str | None = None,
         include_usage: bool = True,
+        timeout: float | None = None,
+        connect_timeout: float = 10.0,
         client: AsyncOpenAI | None = None,
     ) -> None:
-        super().__init__(id, name, models, api_key=api_key, base_url=base_url)
+        super().__init__(
+            id,
+            name,
+            models,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+            connect_timeout=connect_timeout,
+        )
         self.include_usage = include_usage
         self._client = client
 
+    def _client_timeout(self) -> Timeout | None:
+        timeout = self.timeout_or_none()
+        if timeout is None:
+            return None
+        connect = min(self.connect_timeout, timeout) or timeout
+        return Timeout(connect=connect, read=timeout, write=timeout, pool=timeout)
+
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self.api_key or "not-needed", base_url=self.base_url)
+            # Retries belong to the agent loop, where they are reported as
+            # notices; SDK-level retries would only hide the delay.
+            self._client = AsyncOpenAI(
+                api_key=self.api_key or "not-needed",
+                base_url=self.base_url,
+                timeout=self._client_timeout(),
+                max_retries=0,
+            )
         return self._client
 
     def _build_params(

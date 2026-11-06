@@ -30,12 +30,17 @@ class Provider:
         *,
         api_key: str | None = None,
         base_url: str | None = None,
+        timeout: float | None = None,
+        connect_timeout: float = 10.0,
     ) -> None:
         self.id = id
         self.name = name
         self._models = models
         self.api_key = api_key
         self.base_url = base_url
+        #: Seconds allowed for one request; ``None`` means no limit.
+        self.request_timeout = timeout
+        self.connect_timeout = connect_timeout
 
     def list_models(self) -> list[Model]:
         return list(self._models)
@@ -47,6 +52,12 @@ class Provider:
         options: StreamOptions | None = None,
     ) -> EventStream[AssistantMessageEvent, AssistantMessage]:
         raise NotImplementedError
+
+    def timeout_or_none(self) -> float | None:
+        """The request timeout in seconds, or None when it is disabled."""
+        if self.request_timeout is None or self.request_timeout <= 0:
+            return None
+        return float(self.request_timeout)
 
     async def aclose(self) -> None:
         return None

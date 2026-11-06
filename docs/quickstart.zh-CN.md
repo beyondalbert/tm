@@ -101,6 +101,8 @@ read_dedupe = true
 
 max_turns = 300
 max_retries = 3
+request_timeout = 600    # 单次模型请求的等待秒数；0 表示不限制
+connect_timeout = 10     # 连接 provider 的超时秒数
 env_probe = true
 cache_retention = "short"
 ```
@@ -119,6 +121,9 @@ cache_retention = "short"
 - `prune_tool_output*` 只在发给模型的请求里改写旧工具输出，会话文件仍保留原文；
   完整内容在 `<config>/workspace/spill`（可用 `spill_dir` 改）。
 - `read_dedupe` 让重复读取未变化的文件/行范围只回一句提示。
+- `request_timeout` 限制单次模型请求可以静默多久。超时后请求失败，错误显示在回复中，
+  并按正常重试策略处理。本地模型较慢时调大；设为 `0` 关闭限制。超时值在启动时读取。
+  TUI 状态栏会实时显示当前请求已等待的秒数，超过 60 秒时给出警告。
 - `env_probe = false` 可去掉系统提示词里的本机环境摘要。
 - `cache_retention = "long"` 适合长会话（Anthropic 1h 缓存）；OpenAI 兼容网关
   是否支持取决于服务端。

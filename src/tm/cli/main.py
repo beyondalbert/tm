@@ -183,13 +183,19 @@ def _make_approver(yolo: bool) -> SessionApprover:
     return SessionApprover(inner, auto=yolo)
 
 
-def _make_registry() -> Registry:
+def _make_registry(settings: Settings | None = None) -> Registry:
     try:
         presets = load_presets(config_dir())
     except UserModelError as exc:
         console.print(f"[red]models.toml: {exc}[/red]")
         presets = None
-    return Registry(presets=presets, api_keys=load_credentials())
+    config = settings if settings is not None else load_settings()
+    return Registry(
+        presets=presets,
+        api_keys=load_credentials(),
+        request_timeout=float(config.request_timeout),
+        connect_timeout=float(config.connect_timeout),
+    )
 
 
 def _make_telemetry(enabled: bool) -> Telemetry:
@@ -577,7 +583,7 @@ def _run_tui(
         max_retries=max_retries,
         console_ui=False,
     )
-    registry = _make_registry()
+    registry = _make_registry(settings)
     _restore_session_model(agent, session, registry, settings)
     prompt_app = TMPromptApp(
         agent, agent.model, banner=_startup_banner(agent.model, resources, no_context_files)
@@ -793,7 +799,7 @@ def main(
             format_terminal_info(), markup=False, highlight=False, soft_wrap=True
         )
         return
-    registry = _make_registry()
+    registry = _make_registry(settings)
 
     if login is not None:
         known = {preset.id for preset in registry.presets()}

@@ -73,6 +73,11 @@ class Settings:
     read_dedupe: bool = True
     max_turns: int = 300
     max_retries: int = 3
+    #: Seconds to wait for a model response before failing the request (0 = no
+    #: timeout). Read once at startup, when provider clients are created.
+    request_timeout: int = 600
+    #: Seconds to wait for the TCP connection to a provider.
+    connect_timeout: int = 10
     language: str = "auto"
     telemetry: bool = False
     durable: bool = False

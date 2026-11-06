@@ -115,3 +115,10 @@ def test_is_localhost_url() -> None:
     assert is_localhost_url("http://[::1]:8080/v1") is True
     assert is_localhost_url("http://tmim.stkg.ltd/v1") is False
     assert is_localhost_url(None) is False
+
+
+def test_registry_passes_request_timeouts_to_providers() -> None:
+    registry = Registry(request_timeout=7, connect_timeout=2)
+    provider = registry.provider("deepseek")
+    assert provider.request_timeout == 7
+    assert provider.connect_timeout == 2

@@ -87,6 +87,14 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "输入你的需求，回车发送；Shift+Enter 换行。",
     ),
     "tui.working": ("Working", "工作中"),
+    "tui.waiting": (
+        "waiting for the model {secs}s",
+        "等待模型响应 {secs} 秒",
+    ),
+    "tui.waiting_slow": (
+        "no response from the model for {secs}s (Esc to cancel)",
+        "模型 {secs} 秒未响应（Esc 取消）",
+    ),
     "tui.thinking": (
         "▸ thinking ({chars} chars) — ctrl+o to expand",
         "▸ 思考（{chars} 字）— ctrl+o 展开",

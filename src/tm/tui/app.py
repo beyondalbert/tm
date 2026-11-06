@@ -63,6 +63,7 @@ from tm.core.events import (
     MessageUpdateEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
+    TurnStartEvent,
 )
 from tm.core.session import SessionInfo
 from tm.i18n import t as _t
@@ -836,6 +837,8 @@ class TMPromptApp(App[None]):
     # as a session grows long.
     MAX_HISTORY_WIDGETS = 200
     MAX_HISTORY_MESSAGES = 150
+    #: Seconds without a model response before the status line warns about it.
+    WAIT_WARN_SECONDS = 60
 
     def __init__(self, agent: Agent, model: Model, *, banner: str | None = None) -> None:
         super().__init__()
@@ -865,6 +868,8 @@ class TMPromptApp(App[None]):
         self._last_progress = time.monotonic()
         self._last_task_dump = 0.0
         self._log_lock = threading.Lock()
+        #: When the in-flight model request was sent (no response yet).
+        self._request_started: float | None = None
 
     # -- small public API used by commands / tests ------------------------
     def write_line(self, text: str, style: str = _DIM) -> None:
@@ -1334,11 +1339,20 @@ class TMPromptApp(App[None]):
             line.append(" " + "─" * max(0, width - len(label) - 3), style=_BORDER_MUTED)
         else:
             label = f"{_SPINNER[self._spin_index]} {_t('tui.working')}"
+            label_style = _TEXT
+            if self._request_started is not None:
+                waited = int(time.monotonic() - self._request_started)
+                if waited >= self.WAIT_WARN_SECONDS:
+                    # A silent provider must not look like a dead TUI.
+                    label = f"{_SPINNER[self._spin_index]} {_t('tui.waiting_slow', secs=waited)}"
+                    label_style = _WARNING
+                else:
+                    label = f"{label} · {_t('tui.waiting', secs=waited)}"
             hint = _t("tui.stop_hint")
             head = f"── {label} "
             tail = "─" * max(0, width - len(head) - len(hint))
             line.append(head, style=_BORDER_MUTED)
-            line.append(label, style=_TEXT)
+            line.append(label, style=label_style)
             line.append(tail, style=_BORDER_MUTED)
             line.append(hint, style=_DIM)
         self.query_one("#editor-status", Static).update(line)
@@ -1417,7 +1431,13 @@ class TMPromptApp(App[None]):
             self._note(f"agent event {type(event).__name__}")
         if isinstance(event, AgentStartEvent):
             self._set_status("working")
+            self._request_started = time.monotonic()
+        elif isinstance(event, TurnStartEvent):
+            # The provider request is sent right after the turn starts; until the
+            # first delta arrives the UI shows how long it has been waiting.
+            self._request_started = time.monotonic()
         elif isinstance(event, AgentEndEvent):
+            self._request_started = None
             self._set_status("idle")
             self._restore_terminal_modes()
             self._update_footer()
@@ -1441,6 +1461,7 @@ class TMPromptApp(App[None]):
         elif isinstance(event, MessageStartEvent) and isinstance(
             event.message, AssistantMessage
         ):
+            self._request_started = None
             self._current = AssistantMessageWidget()
             self._current.set_expanded(self._expanded)
             self._current_mounted = False
@@ -1463,6 +1484,7 @@ class TMPromptApp(App[None]):
         ):
             message = event.message
             error = None
+            self._request_started = None
             if message.stop_reason == "error":
                 error = f"Error: {message.error_message or 'unknown error'}"
             thinking = message.thinking()
@@ -1487,6 +1509,7 @@ class TMPromptApp(App[None]):
                 self._current_mounted = False
             self._update_footer()
         elif isinstance(event, ToolExecutionStartEvent):
+            self._request_started = None
             self._set_status("working")
             widget = ToolWidget(event.tool_name, event.arguments, expanded=self._expanded)
             self._tools[event.tool_call_id] = widget

@@ -302,3 +302,35 @@ async def test_aborted_signal_stops_stream() -> None:
         )
     )
     assert final.stop_reason == "aborted"
+
+
+def test_client_uses_configured_timeouts_without_sdk_retries() -> None:
+    provider = OpenAICompatProvider(
+        "local",
+        "Local",
+        [Model(id="m", provider="local")],
+        api_key="k",
+        base_url="http://127.0.0.1:8080/v1",
+        timeout=45,
+        connect_timeout=5,
+    )
+    client = provider._get_client()
+    assert client.max_retries == 0
+    timeout = client.timeout
+    assert timeout is not None
+    assert not isinstance(timeout, float)
+    assert timeout.read == 45
+    assert timeout.connect == 5
+
+
+def test_zero_timeout_disables_the_client_timeout() -> None:
+    provider = OpenAICompatProvider(
+        "local",
+        "Local",
+        [Model(id="m", provider="local")],
+        api_key="k",
+        base_url="http://127.0.0.1:8080/v1",
+        timeout=0,
+    )
+    assert provider.timeout_or_none() is None
+    assert provider._get_client().timeout is None

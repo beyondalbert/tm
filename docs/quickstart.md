@@ -103,6 +103,8 @@ read_dedupe = true
 
 max_turns = 300
 max_retries = 3
+request_timeout = 600    # seconds to wait for one model response; 0 = no timeout
+connect_timeout = 10     # seconds to wait for the provider connection
 env_probe = true
 cache_retention = "short"
 ```
@@ -124,6 +126,12 @@ Notes:
   (override with `spill_dir`).
 - `read_dedupe` answers a repeated read of an unchanged file/range with a short
   note instead of the same content again.
+- `request_timeout` bounds how long one model request may stay silent. When the
+  provider does not answer in time the request fails, the error is shown in the
+  reply, and the normal retry policy applies. Raise it for slow local models;
+  set it to `0` to disable the limit. Timeouts are read at startup. The TUI
+  status line always shows how many seconds the current request has been
+  waiting, and warns once it exceeds 60s.
 - `env_probe = false` removes the machine summary from the system prompt.
 - `cache_retention = "long"` suits long sessions (Anthropic 1h cache); support
   for OpenAI-compatible gateways depends on the server.

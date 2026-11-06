@@ -24,10 +24,15 @@ class Registry:
         self,
         presets: dict[str, ProviderPreset] | None = None,
         api_keys: dict[str, str] | None = None,
+        *,
+        request_timeout: float | None = 600.0,
+        connect_timeout: float = 10.0,
     ) -> None:
         self._presets = dict(presets or PRESETS)
         self._api_keys = dict(api_keys or {})
         self._providers: dict[str, Provider] = {}
+        self._request_timeout = request_timeout
+        self._connect_timeout = connect_timeout
 
     def presets(self) -> list[ProviderPreset]:
         return list(self._presets.values())
@@ -63,6 +68,8 @@ class Registry:
                     api_key=self._api_key(preset),
                     base_url=preset.base_url,
                     include_usage=preset.include_usage,
+                    timeout=self._request_timeout,
+                    connect_timeout=self._connect_timeout,
                 )
             elif preset.api == "anthropic-messages":
                 self._providers[provider_id] = AnthropicProvider(
@@ -71,6 +78,8 @@ class Registry:
                     list(preset.models),
                     api_key=self._api_key(preset),
                     base_url=preset.base_url,
+                    timeout=self._request_timeout,
+                    connect_timeout=self._connect_timeout,
                 )
             elif preset.api == "google-generative-ai":
                 self._providers[provider_id] = GoogleProvider(

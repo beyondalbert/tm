@@ -135,10 +135,29 @@ class AnthropicProvider(Provider):
         *,
         api_key: str | None = None,
         base_url: str | None = None,
+        timeout: float | None = None,
+        connect_timeout: float = 10.0,
         client: Any = None,
     ) -> None:
-        super().__init__(id, name, models, api_key=api_key, base_url=base_url)
+        super().__init__(
+            id,
+            name,
+            models,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+            connect_timeout=connect_timeout,
+        )
         self._client = client
+
+    def _client_timeout(self) -> Any:
+        from anthropic import Timeout
+
+        timeout = self.timeout_or_none()
+        if timeout is None:
+            return None
+        connect = min(self.connect_timeout, timeout) or timeout
+        return Timeout(connect=connect, read=timeout, write=timeout, pool=timeout)
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -149,7 +168,12 @@ class AnthropicProvider(Provider):
                     "The anthropic package is required: pip install the-machine[anthropic]"
                 ) from exc
 
-            kwargs: dict[str, Any] = {"api_key": self.api_key}
+            kwargs: dict[str, Any] = {
+                "api_key": self.api_key,
+                "timeout": self._client_timeout(),
+                # Retries live in the agent loop so they surface as notices.
+                "max_retries": 0,
+            }
             if self.base_url:
                 kwargs["base_url"] = self.base_url
             self._client = AsyncAnthropic(**kwargs)

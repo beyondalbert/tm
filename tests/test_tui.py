@@ -1067,3 +1067,66 @@ async def test_settings_screen_escape_cancels() -> None:
         await pilot.pause()
 
     assert results == [None]
+
+
+def _status_text(app: TMPromptApp) -> str:
+    from textual.widgets import Static
+
+    return str(app.query_one("#editor-status", Static).render())
+
+
+async def test_status_line_shows_elapsed_wait_for_the_model() -> None:
+    import time
+
+    from tm.core.events import TurnStartEvent
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        app._set_status("working")
+        await app._on_agent_event(TurnStartEvent(turn=1))
+        assert app._request_started is not None
+        app._request_started = time.monotonic() - 12.0
+        app._update_editor_status()
+        await pilot.pause()
+
+        text = _status_text(app)
+        assert "12" in text
+        assert "Working" in text
+
+
+async def test_status_line_warns_after_a_long_silence() -> None:
+    import time
+
+    from tm.core.events import TurnStartEvent
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        app._set_status("working")
+        await app._on_agent_event(TurnStartEvent(turn=1))
+        app._request_started = time.monotonic() - (app.WAIT_WARN_SECONDS + 5)
+        app._update_editor_status()
+        await pilot.pause()
+
+        text = _status_text(app)
+        assert str(app.WAIT_WARN_SECONDS + 5) in text
+        assert "no response" in text
+
+
+async def test_first_chunk_clears_the_wait_clock() -> None:
+    from tm.core.events import MessageStartEvent, TurnStartEvent
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        await app._on_agent_event(TurnStartEvent(turn=1))
+        await app._on_agent_event(
+            MessageStartEvent(message=AssistantMessage(model="fake", content=[]))
+        )
+        await pilot.pause()
+
+        assert app._request_started is None
