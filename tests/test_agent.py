@@ -780,3 +780,24 @@ async def test_tool_loop_stop_keeps_one_call_group_and_continues_clean() -> None
         for call in message.tool_calls
     ]
     assert len(sent_calls) == 1
+
+
+async def test_rephrased_planning_loop_stops_and_is_cleaned() -> None:
+    text = "\n".join(
+        f"Let me run step {index} of the plan carefully." for index in range(12)
+    )
+
+    def stream_fn(model, context, options) -> EventStream:
+        stream: EventStream = EventStream()
+        message = AssistantMessage(content=[TextContent(text=text)], stop_reason="stop")
+        stream.push(StartEvent(partial=message))
+        stream.push(TextDeltaEvent(partial=message, delta=text))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn, max_turns=5)
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "loop"
+    assert [message.role for message in agent.messages] == ["user"]

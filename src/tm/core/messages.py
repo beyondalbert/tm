@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter
 
 from tm.ai.types import AssistantMessage, Message, ToolCall, ToolResultMessage
@@ -30,13 +31,25 @@ _LOOP_PHRASES = (
     "现在发出",
     "发出。",
 )
+#: Openers of a planning sentence. A looping model re-announces the same next
+#: step with slight rewording ("Let me run.", "Let me do it."), so the lines are
+#: not identical but the intent repeats.
+_PLAN_PREFIXES = ("let me", "let's", "i'll", "让我", "我来", "我准备")
+_PLANNING_LINES = 8
+_NORMALIZED_LINE_REPEATS = 3
+
+
+def _normalized_line(line: str) -> str:
+    return re.sub(r"[\s!.,;:…]+", " ", line.strip().lower()).strip()
 
 
 def is_looping_text(text: str) -> bool:
-    """Whether assistant text is a degenerate tool-call/repetition loop.
+    """Whether assistant text is a degenerate repetition loop.
 
-    Such text is persisted when a run is stopped, but sending it back makes the
-    model continue the same loop on the next turn. Strip it from the request.
+    Detects raw tool-call markup, the same line repeated several times, and a
+    run of planning sentences that only rephrase the next step. Such text is
+    persisted when a run is stopped, but sending it back makes the model
+    continue the same loop on the next turn. Strip it from the request.
     """
     if not text:
         return False
@@ -44,7 +57,18 @@ def is_looping_text(text: str) -> bool:
     if any(marker in lowered for marker in _LOOP_MARKERS):
         return True
     lines = [line.strip() for line in text.splitlines() if len(line.strip()) >= 8]
-    if lines and Counter(lines).most_common(1)[0][1] >= 5:
+    if lines:
+        if Counter(lines).most_common(1)[0][1] >= 5:
+            return True
+        normalized = Counter(_normalized_line(line) for line in lines)
+        if normalized.most_common(1)[0][1] >= _NORMALIZED_LINE_REPEATS:
+            return True
+    planning = sum(
+        1
+        for line in text.splitlines()
+        if line.strip().lower().lstrip("-*0123456789. ").startswith(_PLAN_PREFIXES)
+    )
+    if planning >= _PLANNING_LINES:
         return True
     return sum(lowered.count(marker) for marker in _LOOP_PHRASES) >= 6
 
@@ -85,7 +109,7 @@ def repair_tool_messages(messages: list[Message]) -> list[Message]:
                 # it empty. Drop it.
                 continue
         repaired.append(message)
-    return repaired
+    return _collapse_repeated_tool_groups(repaired)
 
 
 def _tool_group_key(call: ToolCall, result: ToolResultMessage) -> str:
@@ -94,8 +118,53 @@ def _tool_group_key(call: ToolCall, result: ToolResultMessage) -> str:
     return f"{call.name}|{arguments}|{digest}"
 
 
+def _collapse_repeated_tool_groups(messages: list[Message]) -> list[Message]:
+    """Collapse identical tool call/result groups that repeat at least 3 times.
+
+    Two identical calls may be legitimate (a poll, a re-read); three or more
+    with the same result cannot make progress. Keep the first group only.
+    """
+    results = {
+        message.tool_call_id: message
+        for message in messages
+        if isinstance(message, ToolResultMessage)
+    }
+    counts = Counter(
+        _tool_group_key(call, results[call.id])
+        for message in messages
+        if isinstance(message, AssistantMessage)
+        for call in message.tool_calls
+        if call.id in results
+    )
+    seen: set[str] = set()
+    dropped: set[int] = set()
+    collapsed: list[Message] = []
+    for message in messages:
+        if isinstance(message, ToolResultMessage):
+            if id(message) not in dropped:
+                collapsed.append(message)
+            continue
+        if isinstance(message, AssistantMessage) and message.tool_calls:
+            kept: list[ToolCall] = []
+            for call in message.tool_calls:
+                result = results.get(call.id)
+                if result is not None:
+                    key = _tool_group_key(call, result)
+                    if key in seen and counts[key] >= 3:
+                        dropped.add(id(result))
+                        continue
+                    seen.add(key)
+                kept.append(call)
+            if len(kept) != len(message.tool_calls):
+                message = message.model_copy(update={"tool_calls": kept})
+            if not kept and not message.text():
+                continue
+        collapsed.append(message)
+    return collapsed
+
+
 def strip_loop_output(
-    messages: list[Message],
+    messages: list[Message], *, collapse_tool_groups: bool = True
 ) -> tuple[list[Message], list[Message]]:
     """Remove loop-produced output when a run stops for a loop.
 
@@ -123,7 +192,11 @@ def strip_loop_output(
     }
     seen: set[str] = set()
     for message in messages:
-        if not isinstance(message, AssistantMessage) or id(message) in dropped_ids:
+        if (
+            not collapse_tool_groups
+            or not isinstance(message, AssistantMessage)
+            or id(message) in dropped_ids
+        ):
             continue
         kept_calls: list[ToolCall] = []
         for call in message.tool_calls:

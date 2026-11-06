@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections import Counter, deque
+from collections import deque
 from dataclasses import dataclass, replace
 from typing import Awaitable, Callable
 
@@ -43,7 +43,7 @@ from tm.core.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from tm.core.messages import strip_loop_output
+from tm.core.messages import is_looping_text, strip_loop_output
 from tm.i18n import t as _t
 from tm.telemetry import (
     SPAN_TURN,
@@ -197,28 +197,9 @@ def _streaming_loop_reason(text: str) -> str | None:
     """Detect degenerate output before the model finishes the turn."""
     if _has_raw_tool_markup(text):
         return "tool_parser"
-    if len(text) < 1500:
+    if len(text) < 400:
         return None
-    lines = [line.strip() for line in text.splitlines() if len(line.strip()) >= 8]
-    if lines:
-        _line, count = Counter(lines).most_common(1)[0]
-        if count >= 5:
-            return "loop"
-    lowered = text.lower()
-    hits = sum(
-        lowered.count(marker)
-        for marker in (
-            "dispatching",
-            "emitting now",
-            "ok sending",
-            "让我发出",
-            "现在发出",
-            "发出。",
-        )
-    )
-    if hits >= 6:
-        return "loop"
-    return None
+    return "loop" if is_looping_text(text) else None
 
 
 def _is_empty_reply(message: AssistantMessage) -> bool:
@@ -505,10 +486,13 @@ async def agent_loop(
         # The turn limit was reached while more work was pending.
         end_reason = "max_turns"
 
-    if end_reason in ("loop", "tool_parser"):
+    if end_reason in ("loop", "tool_parser", "aborted"):
         # Clean the poisoned turn before it is persisted or sent again: keep the
-        # tool calls/results, drop the loop text and duplicate call groups.
-        history, dropped = strip_loop_output(history)
+        # tool calls/results, drop the loop text and duplicate call groups. The
+        # user often stops a loop by hand, so an abort gets the same cleanup.
+        history, dropped = strip_loop_output(
+            history, collapse_tool_groups=end_reason != "aborted"
+        )
         if dropped and hooks.discard is not None:
             hooks.discard(dropped)
 

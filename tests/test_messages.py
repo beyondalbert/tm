@@ -157,3 +157,65 @@ def test_strip_loop_output_collapses_identical_tool_groups() -> None:
     ]
     assert kept_calls == ["t1"]
     assert len(dropped) == 4
+
+
+def test_rephrased_planning_repetition_is_a_loop() -> None:
+    text = "\n".join(
+        f"Let me run step {index} of the plan carefully." for index in range(12)
+    )
+    assert is_looping_text(text) is True
+
+
+def test_normal_long_prose_is_not_a_loop() -> None:
+    text = "\n".join(
+        f"The module {name} handles a different part of the pipeline."
+        for name in ("auth", "store", "router", "tui", "cli", "tools")
+    )
+    assert is_looping_text(text) is False
+
+
+def test_repair_collapses_groups_that_repeat_three_times() -> None:
+    messages: list[Message] = [UserMessage(content="go")]
+    for index in range(1, 4):
+        messages.append(
+            AssistantMessage(
+                tool_calls=[
+                    ToolCall(id=f"t{index}", name="read", arguments={"path": "a"})
+                ]
+            )
+        )
+        messages.append(
+            ToolResultMessage(
+                tool_call_id=f"t{index}",
+                tool_name="read",
+                content=[TextContent(text="same")],
+            )
+        )
+    repaired = repair_tool_messages(messages)
+    kept_calls = [
+        call
+        for message in repaired
+        if isinstance(message, AssistantMessage)
+        for call in message.tool_calls
+    ]
+    assert [call.id for call in kept_calls] == ["t1"]
+
+
+def test_repair_keeps_two_identical_groups() -> None:
+    messages: list[Message] = [UserMessage(content="go")]
+    for index in range(1, 3):
+        messages.append(
+            AssistantMessage(
+                tool_calls=[
+                    ToolCall(id=f"t{index}", name="read", arguments={"path": "a"})
+                ]
+            )
+        )
+        messages.append(
+            ToolResultMessage(
+                tool_call_id=f"t{index}",
+                tool_name="read",
+                content=[TextContent(text="same")],
+            )
+        )
+    assert repair_tool_messages(messages) == messages
