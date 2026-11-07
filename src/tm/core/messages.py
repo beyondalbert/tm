@@ -14,15 +14,8 @@ import re
 from collections import Counter
 
 from tm.ai.types import AssistantMessage, Message, ToolCall, ToolResultMessage
+from tm.core.tool_markup import has_raw_tool_markup
 
-_LOOP_MARKERS = (
-    "</parameter>",
-    "<tool_call>",
-    "</tool_call>",
-    "<|tool_call",
-    "<function_call>",
-    "</invoke>",
-)
 _LOOP_PHRASES = (
     "dispatching",
     "emitting now",
@@ -53,9 +46,9 @@ def is_looping_text(text: str) -> bool:
     """
     if not text:
         return False
-    lowered = text.lower()
-    if any(marker in lowered for marker in _LOOP_MARKERS):
+    if has_raw_tool_markup(text):
         return True
+    lowered = text.lower()
     lines = [line.strip() for line in text.splitlines() if len(line.strip()) >= 8]
     if lines:
         if Counter(lines).most_common(1)[0][1] >= 5:

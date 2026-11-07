@@ -581,6 +581,124 @@ async def test_raw_tool_markup_stops_the_run() -> None:
     assert ends and ends[-1].stop_reason == "tool_parser"
 
 
+FULLWIDTH = "\uff5c"
+
+
+def dsml(tag: str) -> str:
+    return f"<{FULLWIDTH}DSML{FULLWIDTH}{tag}>"
+
+
+def dsml_close(tag: str) -> str:
+    return f"</{FULLWIDTH}DSML{FULLWIDTH}{tag}>"
+
+
+DSML_CALL = (
+    dsml("tool_calls")
+    + dsml('invoke name="echo"')
+    + dsml('parameter name="text" string="true"')
+    + "hi"
+    + dsml_close("parameter")
+    + dsml_close("invoke")
+    + dsml_close("tool_calls")
+)
+
+
+async def test_fullwidth_tool_markup_is_recovered() -> None:
+    leaked = AssistantMessage(
+        content=[TextContent(text="Echoing now.\n\n" + DSML_CALL)],
+        stop_reason="stop",
+    )
+    final = AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+    agent = Agent(MODEL, stream_fn=scripted([leaked, final]), tools=[EchoTool()])
+    events: list[AgentEvent] = []
+    agent.subscribe(lambda event: _record(events, event))
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "stop"
+    assert any(isinstance(e, ToolExecutionStartEvent) for e in events)
+    result = next(m for m in agent.messages if isinstance(m, ToolResultMessage))
+    assert result.text() == "hi"
+    assistant = agent.messages[1]
+    assert isinstance(assistant, AssistantMessage)
+    assert assistant.text() == "Echoing now."
+    assert assistant.stop_reason == "tool_use"
+    notice = next(e for e in events if isinstance(e, AgentNoticeEvent))
+    assert "recovered 1 tool call" in notice.text
+
+
+async def test_recovered_markup_still_validates_tool_names() -> None:
+    leaked = AssistantMessage(
+        content=[TextContent(text=DSML_CALL)],
+        stop_reason="stop",
+    )
+    agent = Agent(MODEL, stream_fn=scripted([leaked]))
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "tool_parser"
+    assert not any(isinstance(m, ToolResultMessage) for m in agent.messages)
+
+
+async def test_streamed_markup_is_not_cancelled_early() -> None:
+    second = (
+        dsml('invoke name="echo"')
+        + dsml('parameter name="text" string="true"')
+        + "again"
+        + dsml_close("parameter")
+        + dsml_close("invoke")
+    )
+    full = "Working.\n\n" + DSML_CALL + second
+    cut = len("Working.\n\n" + DSML_CALL)
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] > 1:
+            return make_stream(
+                AssistantMessage(content=[TextContent(text="done")], stop_reason="stop")
+            )
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=AssistantMessage(content=[TextContent(text="")])))
+        partial = AssistantMessage(content=[TextContent(text=full[:cut])])
+        stream.push(TextDeltaEvent(partial=partial, delta=full[:cut]))
+        final = AssistantMessage(content=[TextContent(text=full)], stop_reason="stop")
+        stream.push(DoneEvent(partial=final, message=final))
+        stream.end(final)
+        return stream
+
+    agent = Agent(MODEL, stream_fn=stream_fn, tools=[EchoTool()])
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "stop"
+    results = [m for m in agent.messages if isinstance(m, ToolResultMessage)]
+    assert [r.text() for r in results] == ["hi", "again"]
+
+
+async def test_truncated_fullwidth_markup_stops_the_run() -> None:
+    leaked = AssistantMessage(
+        content=[
+            TextContent(
+                text=(
+                    "Let me get the types.\n\n"
+                    + dsml_close("parameter")
+                    + "\n"
+                    + dsml_close("invoke")
+                    + "\n"
+                    + dsml_close("tool_calls")
+                )
+            )
+        ],
+        stop_reason="stop",
+    )
+    agent = Agent(MODEL, stream_fn=scripted([leaked]), tools=[EchoTool()])
+
+    await agent.prompt("go")
+
+    assert agent.last_stop_reason == "tool_parser"
+
+
 async def test_repeated_identical_tool_calls_stop_the_run() -> None:
     calls = {"n": 0}
 

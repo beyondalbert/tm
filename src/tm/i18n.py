@@ -45,6 +45,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "the model emitted raw tool-call markup; the server's tool-call parser is misconfigured",
         "模型输出了未解析的原始工具调用标记；服务端 tool-call parser 配置不正确",
     ),
+    "notice.tool_markup_recovered": (
+        "the model emitted raw tool-call markup; recovered {n} tool call(s) from it",
+        "模型输出了未解析的原始工具调用标记；已从中恢复 {n} 个工具调用",
+    ),
     "notice.text_loop": (
         "the model reply is repeating itself; stopping to avoid a loop",
         "模型回复出现重复循环；为避免死循环已停止",

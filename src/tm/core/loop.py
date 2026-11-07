@@ -20,6 +20,7 @@ from tm.ai.providers.base import StreamOptions
 from tm.ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
+    Content,
     Context,
     Message,
     Model,
@@ -44,6 +45,11 @@ from tm.core.events import (
     TurnStartEvent,
 )
 from tm.core.messages import is_looping_text, strip_loop_output
+from tm.core.tool_markup import (
+    has_raw_tool_markup,
+    parse_raw_tool_calls,
+    strip_tool_markup,
+)
 from tm.i18n import t as _t
 from tm.telemetry import (
     SPAN_TURN,
@@ -175,29 +181,52 @@ def _continuation_message(assistant: AssistantMessage) -> UserMessage:
 
 
 #: Raw tool-call markup leaking into assistant text means the server's
-#: tool-call parser did not recognize the model's format.
-_RAW_TOOL_MARKERS = (
-    "</parameter>",
-    "<tool_call>",
-    "</tool_call>",
-    "<|tool_call",
-    "<tool_calls_begin|>",
-    "<|tool_calls_begin|>",
-    "<function_call>",
-    "</invoke>",
-)
+#: tool-call parser did not recognize the model's format. When the markup is
+#: complete the calls are recovered and executed instead of ending the run.
+_STOP_REASONS_WITH_RECOVERY = (None, "stop", "tool_use")
 
 
-def _has_raw_tool_markup(text: str) -> bool:
-    lowered = text.lower()
-    return any(marker in lowered for marker in _RAW_TOOL_MARKERS)
+def _absorb_raw_tool_calls(message: AssistantMessage, tools: list[ToolSpec]) -> int:
+    """Turn leaked tool-call markup back into executable calls, in place.
+
+    Returns how many calls were recovered; 0 means the markup was incomplete,
+    named unknown tools, or there was none, so the caller keeps the run stopped.
+    A truncated reply is left alone: its arguments may be cut off.
+    """
+    if message.tool_calls or message.stop_reason not in _STOP_REASONS_WITH_RECOVERY:
+        return 0
+    text = message.text()
+    if not has_raw_tool_markup(text):
+        return 0
+    calls = parse_raw_tool_calls(text, {tool.name for tool in tools})
+    if not calls:
+        return 0
+    cleaned = strip_tool_markup(text)
+    content: list[Content] = []
+    replaced = False
+    for part in message.content:
+        if isinstance(part, TextContent):
+            if not replaced and cleaned:
+                content.append(TextContent(text=cleaned))
+            replaced = True
+            continue
+        content.append(part)
+    if cleaned and not replaced:
+        content.append(TextContent(text=cleaned))
+    message.content = content
+    message.tool_calls = calls
+    message.stop_reason = "tool_use"
+    return len(calls)
 
 
 def _streaming_loop_reason(text: str) -> str | None:
-    """Detect degenerate output before the model finishes the turn."""
-    if _has_raw_tool_markup(text):
-        return "tool_parser"
-    if len(text) < 400:
+    """Detect a repetition loop before the model finishes the turn.
+
+    Leaked tool-call markup is not cancelled early: the complete call is
+    recovered after the turn, and cancelling at the first closing tag would
+    drop the calls the model is still writing.
+    """
+    if len(text) < 400 or has_raw_tool_markup(text):
         return None
     return "loop" if is_looping_text(text) else None
 
@@ -292,10 +321,7 @@ async def agent_loop(
                     elif isinstance(event, _UPDATE_EVENTS) and event.partial is not None:
                         await hooks.emit(MessageUpdateEvent(message=event.partial))
                         partial_text = event.partial.text()
-                        if (
-                            len(partial_text) >= next_loop_check
-                            or _has_raw_tool_markup(partial_text)
-                        ):
+                        if len(partial_text) >= next_loop_check:
                             reason = _streaming_loop_reason(partial_text)
                             if reason is not None:
                                 stream_stopped = reason
@@ -358,14 +384,21 @@ async def agent_loop(
                 empty_reply = True
             break
 
+        # A reply that carried its tool call as text is still actionable: parse
+        # the call out and keep going, so the run no longer ends silently with
+        # unfinished work. Unparseable markup keeps the parser-failure stop.
+        recovered = _absorb_raw_tool_calls(assistant, tools)
+        if recovered:
+            stream_stopped = None
+            await hooks.notice(
+                _t("notice.tool_markup_recovered", n=recovered), "warning"
+            )
+
         history.append(assistant)
         await hooks.emit(MessageEndEvent(message=assistant))
 
         if stream_stopped is not None:
-            if stream_stopped == "tool_parser":
-                await hooks.notice(_t("notice.tool_markup"), "error")
-            else:
-                await hooks.notice(_t("notice.text_loop"), "warning")
+            await hooks.notice(_t("notice.text_loop"), "warning")
             telemetry.end(turn_span, context, status="error")
             end_reason = stream_stopped
             break
@@ -379,7 +412,7 @@ async def agent_loop(
             telemetry.end(turn_span, context, status=turn_status)
             break
 
-        raw_tool_markup = _has_raw_tool_markup(assistant.text())
+        raw_tool_markup = has_raw_tool_markup(assistant.text())
         looped_tool: str | None = None
         if assistant.tool_calls:
             if assistant.stop_reason == "length":
