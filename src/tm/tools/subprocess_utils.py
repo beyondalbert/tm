@@ -105,6 +105,15 @@ async def run_capture(argv: list[str]) -> tuple[bytes, bytes, int | None]:
     return stdout, stderr, proc.returncode
 
 
+#: Windows: create the child without a console window.
+#:
+#: A tool process that inherited TM's console can write progress bars, colours
+#: and other escape sequences straight to the terminal; that output interleaves
+#: with the TUI's own rendering and corrupts the screen. The child's stdout and
+#: stderr are pipes either way, so only direct console writes are affected.
+_CREATE_NO_WINDOW = 0x08000000
+
+
 async def stream_command(
     argv: list[str],
     *,
@@ -118,16 +127,19 @@ async def stream_command(
     """Run ``argv`` to completion, streaming combined output.
 
     Set ``new_session=False`` for commands that need the controlling terminal
-    (for example ``sudo``, which reads the password from ``/dev/tty``).
+    (for example ``sudo``, which reads the password from ``/dev/tty``). Those
+    keep the console on Windows; every other command runs detached from it.
 
     Raises :class:`OSError` when the process cannot be started.
     """
+    creationflags = _CREATE_NO_WINDOW if os.name == "nt" and new_session else 0
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         start_new_session=new_session and os.name != "nt",
+        creationflags=creationflags,
         env=env,
     )
 

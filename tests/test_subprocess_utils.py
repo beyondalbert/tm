@@ -94,3 +94,27 @@ async def test_stream_command_stops_when_a_daemon_inherits_stdout(tmp_path) -> N
             else:
                 with contextlib.suppress(ProcessLookupError):
                     os.kill(pid, 9)
+
+
+async def test_stream_command_detaches_tool_processes_from_the_console(
+    monkeypatch, tmp_path
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows console isolation")
+    seen: list[dict[str, object]] = []
+
+    async def fake_exec(*args: str, **kwargs: object) -> _FakeProcess:
+        seen.append(kwargs)
+        # stream_command only reaches the console-flag decision first; stop here.
+        raise OSError("stop")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    with pytest.raises(OSError):
+        await stream_command(["cmd", "/c", "echo"], cwd=tmp_path)
+    assert seen[0]["creationflags"] == 0x08000000
+
+    seen.clear()
+    with pytest.raises(OSError):
+        await stream_command(["cmd", "/c", "echo"], cwd=tmp_path, new_session=False)
+    # Commands that need the controlling terminal keep it.
+    assert seen[0]["creationflags"] == 0
