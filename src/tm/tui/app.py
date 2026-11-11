@@ -7,7 +7,6 @@ import contextlib
 import io
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -68,6 +67,7 @@ from tm.core.events import (
 from tm.core.session import SessionInfo
 from tm.i18n import t as _t
 from tm.permissions import ApprovalOutcome, SessionApprover
+from tm.utils.sanitize import sanitize
 
 # pi dark theme palette
 _TEXT = "#d4d4d4"
@@ -88,26 +88,11 @@ _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 #: Cap a single rendered block so one huge message cannot stall layout.
 _MAX_BODY_CHARS = 20000
 
-#: Terminal escape sequences and control characters.
-#:
-#: Textual only strips Bell/Backspace/VT/FF/CR, not ESC, so tool output or a
-#: model reply containing ANSI sequences is written straight to the terminal and
-#: corrupts the screen. Strip them before anything is rendered.
-_ANSI_RE = re.compile(
-    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI (SGR, cursor movement, ...)
-    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
-    r"|\x1b[P^_].*?\x1b\\"  # DCS / PM / APC
-    r"|\x1b[@-Z\\-_]",  # two-character Fe escapes
-    re.DOTALL,
-)
-_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
-
-
-def _sanitize(text: str) -> str:
-    """Remove terminal escape sequences and control characters from display text."""
-    if not text:
-        return text
-    return _CONTROL_RE.sub("", _ANSI_RE.sub("", text))
+#: Terminal escapes in tool output or a model reply would otherwise be written
+#: straight to the terminal (Textual strips Bell/Backspace/VT/FF/CR, not ESC) and
+#: corrupt the screen. Shared with the console renderer, which needs the same
+#: protection.
+_sanitize = sanitize
 
 
 def format_tokens(count: int) -> str:
@@ -447,8 +432,9 @@ class PermissionScreen(ModalScreen[ApprovalOutcome]):
 
     def __init__(self, description: str, reason: str) -> None:
         super().__init__()
-        self._description = description
-        self._reason = reason
+        # A command may carry ANSI sequences; render them as plain text.
+        self._description = _sanitize(description)
+        self._reason = _sanitize(reason)
         self._answered = False
 
     def compose(self) -> ComposeResult:

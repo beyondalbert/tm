@@ -19,6 +19,7 @@ from tm.core.events import (
     ToolExecutionStartEvent,
 )
 from tm.i18n import t as _t
+from tm.utils.sanitize import sanitize
 
 _MAX_TOOL_OUTPUT = 4000
 
@@ -46,7 +47,10 @@ class ConsoleAgentUI:
                     self.console.print()
                 if message.stop_reason == "error":
                     self.console.print(
-                        _t("console.error", message=message.error_message or "unknown error"),
+                        _t(
+                            "console.error",
+                            message=sanitize(message.error_message or "unknown error"),
+                        ),
                         style="red",
                         markup=False,
                         highlight=False,
@@ -64,7 +68,7 @@ class ConsoleAgentUI:
                         markup=False,
                     )
         elif isinstance(event, ToolExecutionStartEvent):
-            arguments = json.dumps(event.arguments, ensure_ascii=False)
+            arguments = sanitize(json.dumps(event.arguments, ensure_ascii=False))
             if len(arguments) > 200:
                 arguments = arguments[:200] + "..."
             line = Text()
@@ -72,7 +76,9 @@ class ConsoleAgentUI:
             line.append(" " + arguments, style="dim")
             self.console.print(line)
         elif isinstance(event, ToolExecutionEndEvent):
-            output = event.output
+            # Sanitize before truncating: cutting a raw string can leave half a
+            # terminal escape sequence in the output.
+            output = sanitize(event.output)
             if len(output) > _MAX_TOOL_OUTPUT:
                 output = output[:_MAX_TOOL_OUTPUT] + "\n... (trimmed)"
             self.console.print(
@@ -80,7 +86,9 @@ class ConsoleAgentUI:
             )
         elif isinstance(event, AgentNoticeEvent):
             style = "yellow" if event.level in ("warning", "error") else "dim"
-            self.console.print(event.text, style=style, markup=False, highlight=False)
+            self.console.print(
+                sanitize(event.text), style=style, markup=False, highlight=False
+            )
         elif isinstance(event, AgentEndEvent) and event.stop_reason == "max_turns":
             self.console.print(
                 _t("console.turn_limit"),
@@ -113,7 +121,10 @@ class ConsoleAgentUI:
             )
 
     def _render_assistant(self, message: AssistantMessage) -> None:
-        thinking = message.thinking()
+        # Count and print sanitized text, not raw text: a sequence may span two
+        # deltas, and removing only the ESC would leave its parameters visible.
+        thinking = sanitize(message.thinking())
+        self._thinking_printed = min(self._thinking_printed, len(thinking))
         if len(thinking) > self._thinking_printed:
             if self._thinking_printed == 0 and not self._text_started:
                 self.console.print(_t("console.thinking"), style="dim", markup=False)
@@ -126,7 +137,8 @@ class ConsoleAgentUI:
             )
             self._thinking_printed = len(thinking)
 
-        text = message.text()
+        text = sanitize(message.text())
+        self._text_printed = min(self._text_printed, len(text))
         if len(text) > self._text_printed:
             if self._thinking_printed and not self._text_started:
                 self.console.print()

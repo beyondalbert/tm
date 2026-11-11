@@ -79,6 +79,7 @@ from tm.terminal import ensure_utf8, format_terminal_info, prepare_tui_env, tui_
 from tm.tools import build_default_tools
 from tm.trust import TrustManager, project_resources
 from tm.update import run_update
+from tm.utils.sanitize import sanitize
 
 app = typer.Typer(
     add_completion=False,
@@ -106,19 +107,46 @@ async def _display(
     stream = provider.stream(model, context, options)
     text_started = False
     thinking_started = False
+    # Accumulate and print the increment of *sanitized* text: terminal escape
+    # sequences can span deltas, and printing a raw delta would leak them.
+    thinking_buf = ""
+    text_buf = ""
+    thinking_printed = 0
+    text_printed = 0
     async for event in stream:
         if isinstance(event, ThinkingDeltaEvent):
-            if not thinking_started:
-                console.print("[dim]thinking[/dim]")
-                thinking_started = True
-            console.print(event.delta, end="", style="dim", markup=False, highlight=False)
+            thinking_buf += event.delta
+            visible = sanitize(thinking_buf)
+            thinking_printed = min(thinking_printed, len(visible))
+            if len(visible) > thinking_printed:
+                if not thinking_started:
+                    console.print("[dim]thinking[/dim]")
+                    thinking_started = True
+                console.print(
+                    visible[thinking_printed:],
+                    end="",
+                    style="dim",
+                    markup=False,
+                    highlight=False,
+                )
+                thinking_printed = len(visible)
         elif isinstance(event, TextDeltaEvent):
-            if thinking_started and not text_started:
-                console.print()
-            console.print(event.delta, end="", markup=False, highlight=False)
-            text_started = True
+            text_buf += event.delta
+            visible = sanitize(text_buf)
+            text_printed = min(text_printed, len(visible))
+            if len(visible) > text_printed:
+                if thinking_started and not text_started:
+                    console.print()
+                console.print(visible[text_printed:], markup=False, highlight=False)
+                text_printed = len(visible)
+                text_started = True
         elif isinstance(event, ErrorEvent):
-            console.print(f"\n[red]error: {event.error}[/red]")
+            console.print(
+                "\nerror: " + sanitize(event.error),
+                style="red",
+                markup=False,
+                highlight=False,
+            )
 
     final = await stream.result()
     if text_started or thinking_started:
