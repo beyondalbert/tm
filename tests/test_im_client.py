@@ -17,6 +17,19 @@ def test_sync_request_accepts_utf8_bom(monkeypatch) -> None:
     assert client._sync_request("GET", "/me", None, None) == {"handle": "bot"}
 
 
+def test_sync_request_rejects_non_json_response(monkeypatch) -> None:
+    client = ImClient("http://x/v1", "k")
+
+    def fake_urlopen(request, timeout):
+        return io.BytesIO(b"\xef\xbb\xbf")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    with pytest.raises(ImApiError) as info:
+        client._sync_request("GET", "/me", None, None)
+    assert info.value.retryable is True
+    assert "invalid JSON" in info.value.message
+
+
 async def test_send_text_builds_request(monkeypatch) -> None:
     client = ImClient("http://x/v1", "k")
     captured: dict = {}

@@ -83,7 +83,23 @@ class ImClient:
 
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8-sig"))
+                raw = response.read()
+            try:
+                payload = json.loads(raw.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                preview = raw[:200]
+                raise ImApiError(
+                    -1,
+                    f"invalid JSON from {method} {path}: {error}; body={preview!r}",
+                    retryable=True,
+                ) from error
+            if not isinstance(payload, dict):
+                raise ImApiError(
+                    -1,
+                    f"invalid JSON from {method} {path}: expected an object, "
+                    f"got {type(payload).__name__}",
+                    retryable=True,
+                )
             code = int(payload.get("code", -1))
             if code != 0:
                 raise classify(code, str(payload.get("message", "")))

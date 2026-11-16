@@ -311,15 +311,26 @@ def run(
     )
 
     async def main() -> None:
+        backoff = 1.0
         try:
-            await bot.discover()
+            while True:
+                try:
+                    await bot.discover()
+                    break
+                except ImApiError as error:
+                    if not error.retryable:
+                        _log(str(error), "red")
+                        raise typer.Exit(code=1) from error
+                    _log(
+                        f"startup failed: {error}; retrying in {backoff:.0f}s",
+                        "yellow",
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(60.0, backoff * 2)
             _log(f"connected as @{bot.handle} (actor_id={bot.actor_id})")
             await bot.handle_friend_requests()
             bot.start_workers()
             await realtime.run()
-        except ImApiError as error:
-            _log(str(error), "red")
-            raise typer.Exit(code=1) from error
         finally:
             await realtime.stop()
             await bot.stop_workers()
