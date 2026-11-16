@@ -83,7 +83,7 @@ class ImClient:
 
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                payload = json.loads(response.read().decode("utf-8-sig"))
             code = int(payload.get("code", -1))
             if code != 0:
                 raise classify(code, str(payload.get("message", "")))
@@ -92,7 +92,7 @@ class ImClient:
             retry_after = error.headers.get("Retry-After") if error.headers else None
             parsed: dict = {}
             try:
-                parsed = json.loads(error.read().decode("utf-8", "ignore"))
+                parsed = json.loads(error.read().decode("utf-8-sig", "ignore"))
             except (ValueError, OSError):
                 parsed = {}
             code = int(parsed.get("code", -(error.code)))

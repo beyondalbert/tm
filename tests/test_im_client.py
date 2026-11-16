@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import io
+
 import pytest
 
 from tm.im.client import ImApiError, ImClient, classify
+
+
+def test_sync_request_accepts_utf8_bom(monkeypatch) -> None:
+    client = ImClient("http://x/v1", "k")
+
+    def fake_urlopen(request, timeout):
+        return io.BytesIO('\ufeff{"code": 0, "data": {"handle": "bot"}}'.encode("utf-8"))
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert client._sync_request("GET", "/me", None, None) == {"handle": "bot"}
 
 
 async def test_send_text_builds_request(monkeypatch) -> None:
