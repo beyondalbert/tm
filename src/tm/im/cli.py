@@ -600,7 +600,7 @@ def _validate_bare_name(name: str) -> None:
 @config_app.command("new")
 def config_new(
     name: str = typer.Argument(..., help="Config name (stored at <config>/configs/<name>.toml)."),
-    base_url: str = typer.Option("http://tmim.stkg.ltd/v1", "--base-url", help="REST base URL."),
+    base_url: str = typer.Option("https://tmim.stkg.ltd/v1", "--base-url", help="REST base URL."),
     api_key: Optional[str] = typer.Option(
         None, "--api-key", help="Agent api_key (prompted if omitted)."
     ),

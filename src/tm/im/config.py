@@ -24,6 +24,11 @@ ALLOW_TOOLS = ("none", "read_only", "full")
 RESPOND_IN_GROUPS = ("mention", "always", "never")
 ACCEPT_FRIENDS = ("none", "allowlist", "all")
 
+_PUBLIC_BASE_URL = "https://tmim.stkg.ltd/v1"
+_PUBLIC_WS_URL = "wss://tmim.stkg.ltd/ws"
+_LEGACY_PUBLIC_BASE_URL = "http://tmim.stkg.ltd/v1"
+_LEGACY_PUBLIC_WS_URLS = {"ws://tmim.stkg.ltd/ws", "http://tmim.stkg.ltd/ws"}
+
 
 def im_path() -> Path:
     return config_dir() / "im.toml"
@@ -82,7 +87,7 @@ def _normalize_choice(value: str, allowed: tuple[str, ...], default: str) -> str
 
 @dataclass
 class ImSettings:
-    base_url: str = "http://tmim.stkg.ltd/v1"
+    base_url: str = _PUBLIC_BASE_URL
     api_key: str = ""
     tcp_addr: str | None = None
     ws_url: str | None = None
@@ -159,6 +164,15 @@ class ImSettings:
         return f"{scheme}://{netloc}{path}"
 
 
+def _upgrade_public_endpoint(settings: ImSettings) -> None:
+    """Upgrade configs written before the public server enabled HTTPS."""
+    if settings.base_url.rstrip("/") == _LEGACY_PUBLIC_BASE_URL:
+        settings.base_url = _PUBLIC_BASE_URL
+    ws_url = (settings.ws_url or "").strip().rstrip("/")
+    if ws_url in _LEGACY_PUBLIC_WS_URLS:
+        settings.ws_url = _PUBLIC_WS_URL
+
+
 def _from_mapping(settings: ImSettings, data: dict) -> ImSettings:
     fields = {
         key: value
@@ -179,6 +193,8 @@ def load_im_settings(path: Path | None = None, *, apply_env: bool = True) -> ImS
     if target.exists():
         with contextlib.suppress(OSError, TOMLDecodeError):
             _from_mapping(settings, read_toml(target))
+
+    _upgrade_public_endpoint(settings)
 
     if apply_env:
         if env := os.environ.get("TM_IM_BASE_URL"):

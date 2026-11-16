@@ -64,11 +64,11 @@ def test_websocket_url_normalization() -> None:
 
 
 def test_websocket_url_defaults_to_host_ws() -> None:
-    assert ImSettings().websocket_url() == "ws://tmim.stkg.ltd/ws"
+    assert ImSettings().websocket_url() == "wss://tmim.stkg.ltd/ws"
     https = ImSettings(base_url="https://example.com/v1")
     assert https.websocket_url() == "wss://example.com/ws"
     # An explicit tcp_addr opts into native TCP when ws_url is unset.
     assert ImSettings(tcp_addr="example.com:9000").websocket_url() is None
     # An explicit ws_url still wins over tcp_addr.
     both = ImSettings(tcp_addr="example.com:9000", ws_url="example.com/ws")
-    assert both.websocket_url() == "ws://example.com/ws"
+    assert both.websocket_url() == "wss://example.com/ws"

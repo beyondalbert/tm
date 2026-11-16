@@ -30,7 +30,7 @@ tm im config new alice          # 命名配置（configs/alice.toml），提示�
 ```
 
 需要同时运行多个账号时用命名配置。公共服务的长连接默认为
-`ws://tmim.stkg.ltd/ws`，无需额外配置。如果服务器不是默认地址：
+`wss://tmim.stkg.ltd/ws`，无需额外配置。如果服务器不是默认地址：
 
 ```
 tm im config set --config alice base_url=https://tmim.example.com/v1 ws_url=tmim.example.com/ws
@@ -95,7 +95,7 @@ respond_in_groups = "mention"
 ## 1. 前提
 
 - 可访问的 tm_im 服务器。默认指向公共服务：REST 为
-  `http://tmim.stkg.ltd/v1`，实时 WebSocket 为 `ws://tmim.stkg.ltd/ws`
+  `https://tmim.stkg.ltd/v1`，实时 WebSocket 为 `wss://tmim.stkg.ltd/ws`
   （由 REST host 的 `/ws` 推导）。自建部署时覆盖 `base_url` 以及 `ws_url`
   （或设置 `tcp_addr`）。
 - 一个 tm_im 凭证。作为 bot，建议在 tm_im 客户端里创建一个**专用 Agent** 账号，
@@ -117,7 +117,7 @@ respond_in_groups = "mention"
 
 | 字段 | 默认 | 含义 |
 |---|---|---|
-| `base_url` | `http://tmim.stkg.ltd/v1` | REST 基址 |
+| `base_url` | `https://tmim.stkg.ltd/v1` | REST 基址 |
 | `api_key` | – | Agent 凭证（`sk_live_...`） |
 | `tcp_addr` | – | 实时 host:port（原生 TCP）；仅在显式设置时使用 |
 | `ws_url` | `ws(s)://<base_url 的 host>/ws` | 实时 WebSocket 地址；优先于 `tcp_addr` |
@@ -136,7 +136,8 @@ respond_in_groups = "mention"
 
 环境变量可覆盖文件：`TM_IM_BASE_URL`、`TM_IM_API_KEY`、`TM_IM_TCP_ADDR`、
 `TM_IM_ALLOW_TOOLS`、`TM_IM_RESPOND_IN_GROUPS`、`TM_IM_ACK_REPLY`、
-`TM_IM_BUSY_REPLY`。
+`TM_IM_BUSY_REPLY`。仍指向公共服务 HTTP 地址的旧配置在加载时会自动升级为
+HTTPS/WSS。
 
 ### `tm im login`：默认配置与命名配置
 
@@ -246,7 +247,7 @@ tm im logs -f
 - 否则 → **WebSocket** `ws(s)://<base_url 的 host>/ws`，协议按 `base_url`
   推断（`http` → `ws`，`https` → `wss`）。
 
-公共服务因此解析为 `ws://tmim.stkg.ltd/ws`，无需额外设置。其它部署需同时设置
+公共服务因此解析为 `wss://tmim.stkg.ltd/ws`，无需额外设置。其它部署需同时设置
 REST 与实时端点：
 
 ```

@@ -45,7 +45,19 @@ def test_unknown_choice_falls_back(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_default_base_url() -> None:
-    assert ImSettings().base_url == "http://tmim.stkg.ltd/v1"
+    assert ImSettings().base_url == "https://tmim.stkg.ltd/v1"
+
+
+def test_legacy_public_endpoint_upgrades_to_https(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "im.toml").write_text(
+        'base_url = "http://tmim.stkg.ltd/v1"\n'
+        'ws_url = "ws://tmim.stkg.ltd/ws"\n',
+        encoding="utf-8",
+    )
+    settings = load_im_settings()
+    assert settings.base_url == "https://tmim.stkg.ltd/v1"
+    assert settings.ws_url == "wss://tmim.stkg.ltd/ws"
 
 
 def test_realtime_address_defaults() -> None:

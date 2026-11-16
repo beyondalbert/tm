@@ -30,7 +30,7 @@ tm im config new alice          # named config (configs/alice.toml), prompts for
 ```
 
 Use a named config when you run more than one account. The public server's
-long connection defaults to `ws://tmim.stkg.ltd/ws`, so nothing else is needed.
+long connection defaults to `wss://tmim.stkg.ltd/ws`, so nothing else is needed.
 To use a different server:
 
 ```
@@ -99,8 +99,8 @@ The sections below are the full reference for every field and subcommand.
 ## 1. Requirements
 
 - A reachable tm_im server. The defaults target the public server: REST on
-  `http://tmim.stkg.ltd/v1` and the realtime WebSocket on
-  `ws://tmim.stkg.ltd/ws` (derived from the REST host at `/ws`). Override
+  `https://tmim.stkg.ltd/v1` and the realtime WebSocket on
+  `wss://tmim.stkg.ltd/ws` (derived from the REST host at `/ws`). Override
   `base_url` plus `ws_url` (or set `tcp_addr`) for your own deployment.
 - A tm_im credential. For a bot, create a **dedicated Agent** account in the
   tm_im client and copy its `api_key` (`sk_live_...`). Do not reuse a human
@@ -122,7 +122,7 @@ with `tm im config new`. See [section 4](#4-multiple-accounts-on-one-machine).
 
 | Field | Default | Meaning |
 |---|---|---|
-| `base_url` | `http://tmim.stkg.ltd/v1` | REST base URL |
+| `base_url` | `https://tmim.stkg.ltd/v1` | REST base URL |
 | `api_key` | – | Agent credential (`sk_live_...`) |
 | `tcp_addr` | – | Realtime host:port (native TCP); used only when set |
 | `ws_url` | `ws(s)://<host from base_url>/ws` | Realtime WebSocket URL; takes precedence over `tcp_addr` |
@@ -141,7 +141,8 @@ with `tm im config new`. See [section 4](#4-multiple-accounts-on-one-machine).
 
 Environment variables override the file: `TM_IM_BASE_URL`, `TM_IM_API_KEY`,
 `TM_IM_TCP_ADDR`, `TM_IM_ALLOW_TOOLS`, `TM_IM_RESPOND_IN_GROUPS`,
-`TM_IM_ACK_REPLY`, `TM_IM_BUSY_REPLY`.
+`TM_IM_ACK_REPLY`, `TM_IM_BUSY_REPLY`. Legacy configs that still point at the
+public HTTP endpoint are upgraded to HTTPS/WSS automatically when loaded.
 
 ### `tm im login`: default config vs named config
 
@@ -259,7 +260,7 @@ The long connection is chosen explicitly:
 - else → **WebSocket** `ws(s)://<host from base_url>/ws`; the scheme follows
   `base_url` (`http` → `ws`, `https` → `wss`).
 
-For the public server this resolves to `ws://tmim.stkg.ltd/ws`; no setting is
+For the public server this resolves to `wss://tmim.stkg.ltd/ws`; no setting is
 needed. For another deployment set both the REST and realtime endpoints:
 
 ```
