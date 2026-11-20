@@ -176,7 +176,8 @@ tm --model my-model
 ```
 
 `tm models list` / `tm models edit myprovider` / `tm models delete myprovider`
-可管理 `models.toml`。
+可管理 `models.toml`。服务端模型列表变化后，用 `tm models sync myprovider`
+重新拉取；加 `--append` 可保留服务端未返回的条目。内置 provider 也可直接同步。
 
 ### 通过 SSH / Xshell 使用 TUI
 

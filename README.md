@@ -185,7 +185,13 @@ tm models add                 # add a custom OpenAI-compatible model (local or h
 tm models edit local          # change an existing provider (values pre-filled)
 tm models delete local        # remove a provider (and clear it as the default if set)
 tm models list                # show providers defined in models.toml
+tm models sync deepseek       # fetch the provider's /models list and replace stale entries
+tm models sync deepseek --append  # add new models but keep entries the server omitted
 ```
+
+`sync` mirrors the server list by writing `models_mode = "replace"`, so models
+removed upstream disappear from `tm --list-models`. Existing context-window,
+token-limit, cost, and custom fields are kept for model ids that still exist.
 
 ```toml
 [providers.myprovider]
@@ -208,6 +214,10 @@ cache_read_cost = 0.05
 id = "deepseek-v4-lite"
 context_window = 65536
 ```
+
+To ignore the built-in model list and use only the entries above, add
+`models_mode = "replace"` to the provider table (and update `default_model` if
+needed). The same marker is written by `tm models sync`.
 
 Store the key with `tm --login myprovider`, or set the env var named above.
 Switch to a custom model with `/model my-model` or `tm --model my-model`.

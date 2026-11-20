@@ -186,7 +186,9 @@ tm --model my-model
 ```
 
 Manage `models.toml` with `tm models list`, `tm models edit myprovider`, and
-`tm models delete myprovider`.
+`tm models delete myprovider`. Run `tm models sync myprovider` after the
+endpoint changes its model list; use `--append` to keep entries the server does
+not return. Built-in provider lists can be synced the same way.
 
 ### TUI over SSH / Xshell
 

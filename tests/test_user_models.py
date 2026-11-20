@@ -97,6 +97,27 @@ def test_add_model_to_builtin_provider(tmp_path: Path) -> None:
     assert "deepseek-v4-lite" in ids
 
 
+def test_replace_mode_hides_builtin_models(tmp_path: Path) -> None:
+    text = """
+    [providers.deepseek]
+    models_mode = "replace"
+    default_model = "deepseek-current"
+
+    [[providers.deepseek.models]]
+    id = "deepseek-current"
+    """
+    presets = load_presets(_write(tmp_path, text))
+    preset = presets["deepseek"]
+    assert [model.id for model in preset.models] == ["deepseek-current"]
+    assert preset.default_model == "deepseek-current"
+
+
+def test_unknown_models_mode_raises(tmp_path: Path) -> None:
+    text = "[providers.deepseek]\nmodels_mode = \"merge\"\n"
+    with pytest.raises(UserModelError):
+        load_presets(_write(tmp_path, text))
+
+
 def test_override_builtin_model(tmp_path: Path) -> None:
     text = """
     [[providers.deepseek.models]]

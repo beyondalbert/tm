@@ -90,14 +90,22 @@ def _merge_preset(base: ProviderPreset | None, pid: str, spec: dict) -> Provider
     base_url = str(raw_base_url) if raw_base_url is not None else None
     api_key_env = _as_env(spec.get("api_key_env"), base.api_key_env if base else ())
 
-    models: dict[str, Model] = {m.id: m for m in (base.models if base else ())}
+    mode = str(spec.get("models_mode") or "append").lower()
+    if mode not in ("append", "replace"):
+        raise UserModelError(
+            f"models_mode under provider '{pid}' must be 'append' or 'replace'"
+        )
+    models: dict[str, Model] = (
+        {} if mode == "replace" else {m.id: m for m in (base.models if base else ())}
+    )
     for raw in spec.get("models", []):
         if not isinstance(raw, dict):
             raise UserModelError(f"models under provider '{pid}' must be tables")
         model = _merge_model(pid, raw, models.get(str(raw.get("id"))), base_url)
         models[model.id] = model
 
-    default_model = spec.get("default_model") or (base.default_model if base else None)
+    inherited_default = base.default_model if base and mode != "replace" else None
+    default_model = spec.get("default_model") or inherited_default
     if default_model is None and models:
         default_model = next(iter(models))
 

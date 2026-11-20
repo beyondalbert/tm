@@ -2,14 +2,27 @@
 
 from __future__ import annotations
 
+import json
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import tomli_w
 import typer
 from rich.console import Console
 
-from tm.config import config_dir, read_toml, save_credential
+from tm.ai.catalog import ProviderPreset
+from tm.ai.types import Model
+from tm.ai.user_models import (
+    DEFAULT_CONTEXT_WINDOW,
+    DEFAULT_MAX_TOKENS,
+    UserModelError,
+    load_presets,
+)
+from tm.config import config_dir, load_credentials, read_toml, save_credential
 
 app = typer.Typer(
     add_completion=False,
@@ -20,6 +33,13 @@ console = Console()
 _DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _DEFAULT_CONTEXT = 32768
 _DEFAULT_MAX_TOKENS = 4096
+_SYNC_TIMEOUT = 20.0
+_ANTHROPIC_VERSION = "2023-06-01"
+_GOOGLE_DEFAULT_BASE = "https://generativelanguage.googleapis.com"
+
+
+class ModelSyncError(ValueError):
+    """Raised when a provider's model list cannot be fetched or written."""
 
 
 def models_path(directory: Path | None = None) -> Path:
@@ -120,6 +140,212 @@ def set_default(path: Path, provider_id: str, model_id: str) -> Path:
     with path.open("wb") as handle:
         tomli_w.dump(data, handle)
     return path
+
+
+def _join_url(base_url: str, path: str) -> str:
+    return base_url.rstrip("/") + "/" + path.lstrip("/")
+
+
+def _versioned_url(base_url: str, version: str, path: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/" + version):
+        return _join_url(base, path)
+    return _join_url(base, f"{version}/{path}")
+
+
+def _display_url(url: str) -> str:
+    """Drop the query string so API keys never appear in error messages."""
+    parts = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _request_json(url: str, headers: dict[str, str], timeout: float) -> Any:
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read()
+    except urllib.error.HTTPError as exc:
+        raise ModelSyncError(
+            f"GET {_display_url(url)} failed: HTTP {exc.code} {exc.reason}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise ModelSyncError(
+            f"GET {_display_url(url)} failed: {exc.reason}"
+        ) from exc
+    except OSError as exc:
+        raise ModelSyncError(f"GET {_display_url(url)} failed: {exc}") from exc
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ModelSyncError(
+            f"GET {_display_url(url)} returned invalid JSON: {exc}"
+        ) from exc
+
+
+def _extract_model_ids(payload: Any, *, google: bool = False) -> list[str]:
+    """Read model ids from the common list shapes used by these APIs."""
+    if isinstance(payload, list):
+        entries: list[Any] = payload
+    elif isinstance(payload, dict):
+        raw = payload.get("data")
+        if raw is None:
+            raw = payload.get("models")
+        if raw is None and "id" in payload:
+            entries = [payload]
+        else:
+            entries = raw if isinstance(raw, list) else []
+    else:
+        entries = []
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if isinstance(entry, str):
+            model_id = entry
+        elif isinstance(entry, dict):
+            if google:
+                methods = entry.get("supportedGenerationMethods")
+                if isinstance(methods, list) and "generateContent" not in methods:
+                    continue
+            raw_id = entry.get("id") or entry.get("name")
+            model_id = str(raw_id) if raw_id is not None else ""
+        else:
+            continue
+        if model_id.startswith("models/"):
+            model_id = model_id[len("models/") :]
+        if model_id and model_id not in seen:
+            seen.add(model_id)
+            result.append(model_id)
+    return result
+
+
+def fetch_model_ids(
+    preset: ProviderPreset, api_key: str | None, *, timeout: float = _SYNC_TIMEOUT
+) -> list[str]:
+    """Fetch the current model ids for a provider."""
+    headers = {"Accept": "application/json"}
+    if preset.api == "openai-completions":
+        if not preset.base_url:
+            raise ModelSyncError(f"provider '{preset.id}' has no base_url")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        payload = _request_json(_join_url(preset.base_url, "models"), headers, timeout)
+        return _extract_model_ids(payload)
+
+    if preset.api == "anthropic-messages":
+        if api_key:
+            headers["x-api-key"] = api_key
+        headers["anthropic-version"] = _ANTHROPIC_VERSION
+        base = preset.base_url or "https://api.anthropic.com"
+        payload = _request_json(_versioned_url(base, "v1", "models"), headers, timeout)
+        return _extract_model_ids(payload)
+
+    if preset.api == "google-generative-ai":
+        base = preset.base_url or _GOOGLE_DEFAULT_BASE
+        url = _versioned_url(base, "v1beta", "models")
+        query = {"pageSize": "1000"}
+        if api_key:
+            query["key"] = api_key
+        payload = _request_json(f"{url}?{urllib.parse.urlencode(query)}", headers, timeout)
+        return _extract_model_ids(payload, google=True)
+
+    raise ModelSyncError(
+        f"provider '{preset.id}' uses api '{preset.api}', which does not support sync"
+    )
+
+
+def _model_entry(model: Model) -> dict:
+    entry: dict = {
+        "id": model.id,
+        "context_window": model.context_window,
+        "max_tokens": model.max_tokens,
+        "reasoning": model.reasoning,
+    }
+    for field in ("input_cost", "output_cost", "cache_read_cost"):
+        value = getattr(model, field)
+        if value is not None:
+            entry[field] = value
+    return entry
+
+
+def sync_provider(
+    path: Path,
+    provider_id: str,
+    model_ids: list[str],
+    *,
+    preset: ProviderPreset,
+    append: bool = False,
+) -> Path:
+    """Write a provider model list to ``models.toml``.
+
+    The default mode mirrors the server list and sets ``models_mode = "replace"``
+    so stale built-in entries disappear. ``append`` keeps models that the
+    server did not return and removes the replace marker.
+    """
+    data = read_toml(path) if path.exists() else {}
+    providers = data.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
+    existing = providers.get(provider_id)
+    merged = dict(existing) if isinstance(existing, dict) else {}
+
+    old_models = [
+        dict(item) for item in merged.get("models", []) if isinstance(item, dict)
+    ]
+    old_by_id = {str(item.get("id", "")): item for item in old_models}
+    fetched = list(dict.fromkeys(model_ids))
+    if append:
+        fetched.extend(m.id for m in preset.models if m.id not in fetched)
+        fetched.extend(model_id for model_id in old_by_id if model_id not in fetched)
+    if not fetched:
+        raise ModelSyncError(f"provider '{provider_id}' returned no models")
+
+    known = {model.id: model for model in preset.models}
+    new_models: list[dict] = []
+    for model_id in fetched:
+        old = old_by_id.get(model_id)
+        entry = dict(old) if old is not None else {}
+        model = known.get(model_id)
+        if model is not None:
+            entry.update(_model_entry(model))
+        else:
+            entry.setdefault("context_window", DEFAULT_CONTEXT_WINDOW)
+            entry.setdefault("max_tokens", DEFAULT_MAX_TOKENS)
+            entry.setdefault("reasoning", False)
+        entry["id"] = model_id
+        new_models.append(entry)
+
+    merged["models"] = new_models
+    current_default = str(merged.get("default_model") or "")
+    if current_default in fetched:
+        default_model = current_default
+    elif preset.default_model in fetched:
+        default_model = preset.default_model
+    else:
+        default_model = fetched[0]
+    merged["default_model"] = default_model
+    if append:
+        merged.pop("models_mode", None)
+    else:
+        merged["models_mode"] = "replace"
+    providers[provider_id] = merged
+    data["providers"] = providers
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        tomli_w.dump(data, handle)
+    return path
+
+
+def _provider_api_key(preset: ProviderPreset) -> str | None:
+    stored = load_credentials().get(preset.id)
+    if stored:
+        return stored
+    for env in preset.api_key_env:
+        value = os.environ.get(env)
+        if value:
+            return value
+    return None
 
 
 def _store_key(provider: str, key: str) -> None:
@@ -376,6 +602,56 @@ def edit_local(
     )
 
 
+@app.command("sync")
+def sync_models(
+    provider: str = typer.Argument(..., help="Provider id to sync."),
+    append: bool = typer.Option(
+        False,
+        "--append",
+        help="Keep models the server did not return instead of mirroring its list.",
+    ),
+    timeout: float = typer.Option(
+        _SYNC_TIMEOUT, "--timeout", help="Request timeout in seconds."
+    ),
+) -> None:
+    """Fetch a provider's current model list and write it to models.toml.
+
+    By default the server list replaces the built-in catalog for that provider,
+    so removed/renamed models disappear from `tm --list-models`. Use --append to
+    keep the old entries as well.
+    """
+    try:
+        presets = load_presets(config_dir())
+    except UserModelError as exc:
+        console.print(f"[red]models.toml: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    preset = presets.get(provider)
+    if preset is None:
+        console.print(f"[red]Unknown provider: {provider}[/red]")
+        console.print(f"Known providers: {', '.join(sorted(presets))}")
+        raise typer.Exit(code=1)
+    if timeout <= 0:
+        console.print("[red]--timeout must be positive[/red]")
+        raise typer.Exit(code=1)
+
+    try:
+        model_ids = fetch_model_ids(preset, _provider_api_key(preset), timeout=timeout)
+        path = sync_provider(
+            models_path(), provider, model_ids, preset=preset, append=append
+        )
+    except ModelSyncError as exc:
+        console.print(f"[red]{exc}[/red]")
+        if preset.api_key_env:
+            console.print(f"[dim]check the key with: tm --login {provider}[/dim]")
+        raise typer.Exit(code=1) from exc
+
+    mode = "append" if append else "replace"
+    console.print(
+        f"synced {len(model_ids)} model(s) for '{provider}' ({mode}) into [bold]{path}[/bold]"
+    )
+    console.print("verify with: [bold]tm --list-models[/bold]")
+
+
 @app.command("delete")
 def delete_provider(
     provider: str = typer.Argument(..., help="Provider id to remove."),
@@ -419,16 +695,20 @@ def list_local() -> None:
 
 
 __all__ = [
+    "ModelSyncError",
     "add_local",
     "app",
     "build_provider",
     "clear_default_if_matches",
     "delete_provider",
     "edit_local",
+    "fetch_model_ids",
     "list_local",
     "merge_provider",
     "models_path",
     "remove_provider",
     "set_default",
     "settings_path",
+    "sync_models",
+    "sync_provider",
 ]

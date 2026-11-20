@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from tm.ai.catalog import ProviderPreset
+from tm.ai.types import Model
 from tm.cli.models_cmd import (
+    _extract_model_ids,
     build_provider,
     clear_default_if_matches,
+    fetch_model_ids,
     merge_provider,
     remove_provider,
     set_default,
+    sync_provider,
 )
 from tm.config import read_toml
 
@@ -152,6 +159,132 @@ output_cost = 1.5
     assert model["output_cost"] == 1.5
     assert model["reasoning"] is True
 
+
+
+def _sync_preset(*models: Model) -> ProviderPreset:
+    return ProviderPreset(
+        id="deepseek",
+        name="DeepSeek",
+        base_url="https://api.deepseek.com/v1",
+        api_key_env=("DEEPSEEK_API_KEY",),
+        models=models,
+        default_model=models[0].id if models else None,
+    )
+
+
+def test_extract_model_ids_openai_and_google_shapes() -> None:
+    assert _extract_model_ids({"data": [{"id": "a"}, {"id": "b"}, {"id": "a"}]}) == [
+        "a",
+        "b",
+    ]
+    assert _extract_model_ids({"models": ["x", {"name": "models/y"}]}) == ["x", "y"]
+    google = {
+        "models": [
+            {"name": "models/gemini-chat", "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/embedding", "supportedGenerationMethods": ["embedContent"]},
+        ]
+    }
+    assert _extract_model_ids(google, google=True) == ["gemini-chat"]
+
+
+def test_fetch_model_ids_openai_compatible(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict = {}
+
+    def fake_request(url: str, headers: dict[str, str], timeout: float) -> dict:
+        seen.update(url=url, headers=headers, timeout=timeout)
+        return {"data": [{"id": "one"}, {"id": "two"}]}
+
+    monkeypatch.setattr("tm.cli.models_cmd._request_json", fake_request)
+    preset = ProviderPreset(
+        id="p",
+        name="P",
+        base_url="https://api.example.com/v1",
+        models=(Model(id="old", provider="p"),),
+    )
+    assert fetch_model_ids(preset, "sk-test", timeout=5) == ["one", "two"]
+    assert seen["url"] == "https://api.example.com/v1/models"
+    assert seen["headers"]["Authorization"] == "Bearer sk-test"
+    assert seen["timeout"] == 5
+
+
+def test_sync_provider_mirrors_server_and_preserves_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[providers.deepseek]
+api = "openai-completions"
+base_url = "https://api.deepseek.com/v1"
+default_model = "removed"
+
+[[providers.deepseek.models]]
+id = "removed"
+context_window = 1000
+
+[[providers.deepseek.models]]
+id = "kept"
+context_window = 4096
+max_tokens = 512
+input_cost = 0.5
+custom_field = "keep-me"
+""",
+        encoding="utf-8",
+    )
+    preset = _sync_preset(
+        Model(id="kept", provider="deepseek", context_window=4096, max_tokens=512),
+        Model(id="fresh", provider="deepseek", context_window=200000, max_tokens=8192),
+    )
+    sync_provider(path, "deepseek", ["fresh", "kept"], preset=preset)
+
+    provider = read_toml(path)["providers"]["deepseek"]
+    assert provider["models_mode"] == "replace"
+    assert provider["default_model"] == "kept"
+    assert [item["id"] for item in provider["models"]] == ["fresh", "kept"]
+    kept = provider["models"][1]
+    assert kept["context_window"] == 4096
+    assert kept["input_cost"] == 0.5
+    assert kept["custom_field"] == "keep-me"
+    assert provider["models"][0]["context_window"] == 200000
+
+
+def test_sync_provider_append_keeps_old_models(tmp_path: Path) -> None:
+    path = tmp_path / "models.toml"
+    path.write_text(
+        """[providers.deepseek]
+default_model = "old"
+models_mode = "replace"
+
+[[providers.deepseek.models]]
+id = "old"
+""",
+        encoding="utf-8",
+    )
+    sync_provider(
+        path,
+        "deepseek",
+        ["fresh"],
+        preset=_sync_preset(Model(id="fresh", provider="deepseek")),
+        append=True,
+    )
+
+    provider = read_toml(path)["providers"]["deepseek"]
+    assert "models_mode" not in provider
+    assert provider["default_model"] == "old"
+    assert [item["id"] for item in provider["models"]] == ["fresh", "old"]
+
+
+def test_sync_provider_uses_default_when_present(tmp_path: Path) -> None:
+    path = tmp_path / "models.toml"
+    path.write_text(
+        "[providers.deepseek]\ndefault_model = \"b\"\n", encoding="utf-8"
+    )
+    sync_provider(
+        path,
+        "deepseek",
+        ["a", "b"],
+        preset=_sync_preset(
+            Model(id="a", provider="deepseek"), Model(id="b", provider="deepseek")
+        ),
+    )
+    assert read_toml(path)["providers"]["deepseek"]["default_model"] == "b"
 
 
 def test_remove_provider_keeps_others(tmp_path: Path) -> None:

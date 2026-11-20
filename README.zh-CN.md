@@ -176,7 +176,13 @@ tm models add                 # 添加自定义 OpenAI 兼容模型（本地或�
 tm models edit local          # 修改已有 provider（自动预填当前值）
 tm models delete local        # 删除 provider（若为默认则一并清除）
 tm models list                # 查看 models.toml 中的 provider
+tm models sync deepseek       # 拉取该渠道的 /models 列表，替换过期模型
+tm models sync deepseek --append  # 只追加新模型，保留服务端未返回的条目
 ```
+
+`sync` 默认写入 `models_mode = "replace"`，以服务端列表为准，因此上游已下线的
+模型会从 `tm --list-models` 中消失。仍然存在的模型会保留原有的上下文窗口、
+输出上限、价格和自定义字段。
 
 ```toml
 [providers.myprovider]
@@ -199,6 +205,10 @@ cache_read_cost = 0.05
 id = "deepseek-v4-lite"
 context_window = 65536
 ```
+
+若要忽略内置模型列表、只使用上面列出的条目，在 provider 表里加
+`models_mode = "replace"`（必要时同时更新 `default_model`）。`tm models sync`
+会自动写入这个标记。
 
 用 `tm --login myprovider` 保存密钥，或设置上面命名的环境变量。
 用 `/model my-model` 或 `tm --model my-model` 切换到自定义模型。
