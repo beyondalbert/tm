@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections import deque
 from dataclasses import dataclass, replace
 from typing import Awaitable, Callable
 
@@ -147,6 +146,17 @@ _TRUNCATED_TOOL_RESULT = (
     "Reissue the call with complete arguments, or split it into smaller calls."
 )
 
+#: Injected when the model repeats one tool call with identical arguments and
+#: output. The result cannot change, so the run would stall until the turn
+#: limit; a nudge usually gets the model to try something different.
+_REPEATED_CALL_PROMPT = (
+    "You have called the {tool} tool {n} times in a row with the same arguments, "
+    "and every call returned the same output. Repeating it cannot change the "
+    "result.\n\n"
+    "Do not call {tool} with those arguments again. Change the arguments, use a "
+    "different tool, or explain what is blocking you and stop."
+)
+
 #: Injected after a reply is cut off by the model's output token limit.
 _CONTINUATION_PROMPT = (
     "Your previous reply hit the output token limit and was cut off. "
@@ -257,7 +267,7 @@ async def agent_loop(
     max_length_continues: int = 3,
     max_length_stalls: int = 2,
     max_repeated_tool_calls: int = 3,
-    repeated_call_window: int = 40,
+    max_loop_nudges: int = 2,
     telemetry: Telemetry | None = None,
     context: TelemetryContext | None = None,
 ) -> LoopResult:
@@ -269,7 +279,9 @@ async def agent_loop(
     length_continues = 0
     length_stalls = 0
     force_tool_choice = False
-    recent_tool_calls: deque[str] = deque(maxlen=max(1, repeated_call_window))
+    last_tool_key: str | None = None
+    tool_repeat_count = 0
+    loop_nudges = 0
     end_reason = "stop"
     while turn < max_turns:
         await hooks.pause()
@@ -414,6 +426,7 @@ async def agent_loop(
 
         raw_tool_markup = has_raw_tool_markup(assistant.text())
         looped_tool: str | None = None
+        nudge_tool: str | None = None
         if assistant.tool_calls:
             if assistant.stop_reason == "length":
                 # The JSON arguments may be truncated; executing them would run
@@ -442,9 +455,19 @@ async def agent_loop(
                         result.text().encode("utf-8", errors="replace")
                     ).hexdigest()
                     key = signature + "|" + digest
-                    recent_tool_calls.append(key)
-                    if recent_tool_calls.count(key) >= max_repeated_tool_calls:
-                        looped_tool = call.name
+                    # Count only consecutive repeats: a call seen again after
+                    # other work is often a legitimate re-check, not a loop.
+                    if key == last_tool_key:
+                        tool_repeat_count += 1
+                    else:
+                        last_tool_key = key
+                        tool_repeat_count = 1
+                        loop_nudges = 0
+                    if tool_repeat_count >= max_repeated_tool_calls:
+                        if loop_nudges < max_loop_nudges:
+                            nudge_tool = call.name
+                        else:
+                            looped_tool = call.name
                         break
 
         telemetry.end(turn_span, context, status=turn_status)
@@ -454,6 +477,27 @@ async def agent_loop(
             await hooks.notice(_t("notice.tool_markup"), "error")
             end_reason = "tool_parser"
             break
+
+        if nudge_tool is not None:
+            loop_nudges += 1
+            tool_repeat_count = 0
+            await hooks.notice(
+                _t(
+                    "notice.tool_loop_nudge",
+                    name=nudge_tool,
+                    n=max_repeated_tool_calls,
+                ),
+                "warning",
+            )
+            nudge = UserMessage(
+                content=_REPEATED_CALL_PROMPT.format(
+                    tool=nudge_tool, n=max_repeated_tool_calls
+                )
+            )
+            history.append(nudge)
+            await hooks.emit(MessageStartEvent(message=nudge))
+            await hooks.emit(MessageEndEvent(message=nudge))
+            continue
 
         if looped_tool is not None:
             await hooks.notice(

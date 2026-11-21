@@ -117,6 +117,7 @@ class Agent:
         max_length_continues: int = 3,
         max_length_stalls: int = 2,
         max_repeated_tool_calls: int = 3,
+        max_loop_nudges: int = 2,
         cwd: Path | None = None,
         session: Session | None = None,
         auto_compact: bool = False,
@@ -140,6 +141,7 @@ class Agent:
         self.max_length_continues = max_length_continues
         self.max_length_stalls = max_length_stalls
         self.max_repeated_tool_calls = max_repeated_tool_calls
+        self.max_loop_nudges = max_loop_nudges
         self.cwd = cwd or Path.cwd()
         self.session = session
         self.auto_compact = auto_compact
@@ -566,6 +568,7 @@ class Agent:
                     max_length_continues=self.max_length_continues,
                     max_length_stalls=self.max_length_stalls,
                     max_repeated_tool_calls=self.max_repeated_tool_calls,
+                    max_loop_nudges=self.max_loop_nudges,
                     telemetry=self.telemetry,
                     context=child_context,
                 )

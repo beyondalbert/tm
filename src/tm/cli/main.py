@@ -369,6 +369,8 @@ def _build_agent(
         prune=policy_from_settings(settings),
         max_turns=max_turns if max_turns is not None else settings.max_turns,
         max_retries=max_retries if max_retries is not None else settings.max_retries,
+        max_repeated_tool_calls=settings.max_repeated_tool_calls,
+        max_loop_nudges=settings.max_loop_nudges,
         telemetry=telemetry,
         store=store,
         cache_retention=cache_retention,

@@ -38,8 +38,12 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "回复达到输出 token 上限；正在继续（第 {n}/{max} 次）…",
     ),
     "notice.tool_loop": (
-        "the model repeated the same {name} call {n} times; stopping to avoid a loop",
-        "模型重复调用了同一工具 {name} {n} 次；为避免死循环已停止",
+        "the model kept repeating the same {name} call {n} times; stopping to avoid a loop",
+        "模型连续 {n} 次重复调用同一工具 {name}；为避免死循环已停止",
+    ),
+    "notice.tool_loop_nudge": (
+        "the model repeated the same {name} call {n} times; asking it to try another approach",
+        "模型连续 {n} 次重复调用同一工具 {name}；已提示它换一种做法",
     ),
     "notice.tool_markup": (
         "the model emitted raw tool-call markup; the server's tool-call parser is misconfigured",

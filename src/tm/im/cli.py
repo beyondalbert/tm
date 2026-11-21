@@ -255,6 +255,8 @@ def run(
             prune=policy_from_settings(global_settings),
             max_turns=global_settings.max_turns,
             max_retries=global_settings.max_retries,
+            max_repeated_tool_calls=global_settings.max_repeated_tool_calls,
+            max_loop_nudges=global_settings.max_loop_nudges,
             journal=Journal(base / "changes.jsonl"),
         )
         agent.before_tool_call = build_permission_hook(checker, cwd)

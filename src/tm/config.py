@@ -75,6 +75,11 @@ class Settings:
     read_dedupe: bool = True
     max_turns: int = 300
     max_retries: int = 3
+    #: Identical tool calls in a row before the model is told to change course.
+    #: 0 disables repeat detection; after the nudge budget the run stops.
+    max_repeated_tool_calls: int = 3
+    #: Corrective messages sent before a repeat loop stops the run.
+    max_loop_nudges: int = 2
     #: Seconds to wait for a model response before failing the request (0 = no
     #: timeout). Read once at startup, when provider clients are created.
     request_timeout: int = 600
@@ -224,6 +229,8 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
     SettingField("read_dedupe", "bool"),
     SettingField("max_turns", "int", minimum=1),
     SettingField("max_retries", "int", minimum=0),
+    SettingField("max_repeated_tool_calls", "int", minimum=0),
+    SettingField("max_loop_nudges", "int", minimum=0),
     SettingField("temperature", "float", nullable=True),
     SettingField(
         "thinking",

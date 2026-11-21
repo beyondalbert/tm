@@ -717,6 +717,7 @@ async def test_repeated_identical_tool_calls_stop_the_run() -> None:
         tools=[EchoTool()],
         max_turns=20,
         max_repeated_tool_calls=3,
+        max_loop_nudges=0,
     )
     events: list[AgentEvent] = []
     agent.subscribe(lambda event: _record(events, event))
@@ -727,6 +728,95 @@ async def test_repeated_identical_tool_calls_stop_the_run() -> None:
     assert agent.last_stop_reason == "loop"
     ends = [e for e in events if isinstance(e, AgentEndEvent)]
     assert ends and ends[-1].stop_reason == "loop"
+
+
+async def test_repeated_tool_calls_get_a_nudge_before_stopping() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            return make_stream(
+                AssistantMessage(
+                    tool_calls=[
+                        ToolCall(
+                            id=f"t{calls['n']}",
+                            name="echo",
+                            arguments={"text": "same"},
+                        )
+                    ],
+                    stop_reason="tool_use",
+                )
+            )
+        return make_stream(
+            AssistantMessage(
+                content=[TextContent(text="done")], stop_reason="stop"
+            )
+        )
+
+    agent = Agent(
+        MODEL,
+        stream_fn=stream_fn,
+        tools=[EchoTool()],
+        max_turns=20,
+        max_repeated_tool_calls=3,
+    )
+    events: list[AgentEvent] = []
+    agent.subscribe(lambda event: _record(events, event))
+
+    await agent.prompt("go")
+
+    assert calls["n"] == 4
+    assert agent.last_stop_reason == "stop"
+    nudges = [
+        message
+        for message in agent.messages
+        if isinstance(message, UserMessage)
+        and isinstance(message.content, str)
+        and "cannot change the result" in message.content
+    ]
+    assert len(nudges) == 1
+    notices = [
+        event.text for event in events if isinstance(event, AgentNoticeEvent)
+    ]
+    assert any("try another approach" in text for text in notices)
+
+
+async def test_repeated_tool_calls_far_apart_do_not_stop_the_run() -> None:
+    calls = {"n": 0}
+
+    def stream_fn(model, context, options) -> EventStream:
+        calls["n"] += 1
+        if calls["n"] > 8:
+            return make_stream(
+                AssistantMessage(
+                    content=[TextContent(text="done")], stop_reason="stop"
+                )
+            )
+        text = "same" if calls["n"] % 2 else "other"
+        return make_stream(
+            AssistantMessage(
+                tool_calls=[
+                    ToolCall(
+                        id=f"t{calls['n']}", name="echo", arguments={"text": text}
+                    )
+                ],
+                stop_reason="tool_use",
+            )
+        )
+
+    agent = Agent(
+        MODEL,
+        stream_fn=stream_fn,
+        tools=[EchoTool()],
+        max_turns=20,
+        max_repeated_tool_calls=3,
+    )
+
+    await agent.prompt("go")
+
+    assert calls["n"] == 9
+    assert agent.last_stop_reason == "stop"
 
 
 async def test_truncated_tool_call_is_not_executed() -> None:
