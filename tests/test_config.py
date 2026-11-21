@@ -33,6 +33,7 @@ def test_load_settings_reads_toml(tmp_path: Path, monkeypatch) -> None:
         "prune_tool_output_keep_chars = 100\n"
         'spill_dir = "D:/tmp/spill"\n'
         "read_dedupe = false\n"
+        'thinking = "off"\n'
     )
     settings = load_settings()
     assert settings.provider == "qwen"
@@ -44,6 +45,7 @@ def test_load_settings_reads_toml(tmp_path: Path, monkeypatch) -> None:
     assert settings.prune_tool_output_keep_chars == 100
     assert settings.spill_dir == "D:/tmp/spill"
     assert settings.read_dedupe is False
+    assert settings.thinking == "off"
 
 
 def test_load_settings_reads_model_overrides(tmp_path: Path, monkeypatch) -> None:

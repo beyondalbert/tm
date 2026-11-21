@@ -367,6 +367,7 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 | `/undo [n]` | roll back the last n reversible changes |
 | `/copy [n]` | copy the nth-from-last reply to the clipboard |
 | `/lang [en\|zh\|auto]` | set the UI language |
+| `/thinking [level]` | set the thinking level (auto/off/low/medium/high) |
 | `/settings` | edit settings.toml interactively |
 | `/skills` | list available skills |
 | `/skill:<name>` | load a skill into the conversation |
@@ -377,7 +378,7 @@ Inside `tm` (agent REPL or TUI) type `/` for commands:
 `/settings` opens a modal editor in the TUI (a numbered prompt in the plain
 console): pick a field, toggle a boolean with Enter, or type a number/string.
 Saving merges only the changed keys into `settings.toml`; the running agent
-adopts compaction, pruning, read-dedupe, turn/retry, and temperature changes
+adopts compaction, pruning, read-dedupe, turn/retry, temperature, and thinking changes
 immediately (other fields apply on the next start).
 
 **Completion.** In the TUI, press `Tab` to accept a suggestion: type `/` to
@@ -453,6 +454,7 @@ provider = "deepseek"
 model = "deepseek-v4-pro"
 temperature = 0.2
 max_tokens = 8192        # upper bound; fitted to the window's remaining room
+thinking = "auto"       # reasoning models: auto | off | low | medium | high
 system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true        # summarize older context when nearing the limit
 compact_threshold = 0.8    # fraction of the context window that triggers it
@@ -476,6 +478,15 @@ workspace_dir = ""             # where python scripts are saved (default: <confi
 auto_install = true            # install missing pip packages declared by the python tool
 language = "auto"              # UI language: en | zh | auto (also --lang, /lang)
 ```
+
+`thinking` controls reasoning on models marked `reasoning = true` in the model
+catalog or `models.toml`. `auto` keeps the provider default, `off` asks the
+provider to stop reasoning, and `low`/`medium`/`high` select a budget. TM maps
+the level to `reasoning_effort` (OpenAI-compatible), an extended-thinking
+`budget_tokens` block (Anthropic), or `thinking_config.thinking_budget`
+(Google). Not every model supports every level; for example, Gemini 2.5 Pro
+cannot disable thinking. Change it live with `/thinking off` (saved to
+`settings.toml`) or `/settings`.
 
 Automatic compaction runs before a prompt when the estimated context exceeds
 `context_window * compact_threshold` (or `compact_max_tokens`, whichever is

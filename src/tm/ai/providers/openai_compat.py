@@ -41,6 +41,16 @@ from tm.ai.types import (
 )
 from tm.utils.abort import AbortSignal
 
+#: Map a TM thinking level to the OpenAI ``reasoning_effort`` field. "none"
+#: disables reasoning on current OpenAI models; other compatible servers may
+#: ignore it or report an unsupported value.
+_REASONING_EFFORT = {
+    "off": "none",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+}
+
 _FINISH_REASONS = {
     "stop": "stop",
     "length": "length",
@@ -170,6 +180,10 @@ class OpenAICompatProvider(Provider):
         }
         if options.temperature is not None:
             params["temperature"] = options.temperature
+        if model.reasoning:
+            effort = _REASONING_EFFORT.get(options.thinking or "")
+            if effort is not None:
+                params["reasoning_effort"] = effort
         params["max_tokens"] = clamp_max_tokens(model, context, options.max_tokens)
         if context.tools:
             params["tools"] = [

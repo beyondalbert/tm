@@ -87,6 +87,18 @@ async def test_streams_text_and_usage() -> None:
     assert models.last_params["contents"][0]["parts"][0]["text"] == "hi"
 
 
+async def test_thinking_maps_to_thinking_budget() -> None:
+    prov, models = provider([chunk([ns(text="ok")], finish="STOP")])
+    model = Model(id="gemini-2.5-pro", provider="google", reasoning=True)
+    context = Context(messages=[UserMessage(content="hi")])
+
+    await collect(prov.stream(model, context, StreamOptions(thinking="off")))
+    assert models.last_params["config"]["thinking_config"] == {"thinking_budget": 0}
+
+    await collect(prov.stream(model, context, StreamOptions(thinking="medium")))
+    assert models.last_params["config"]["thinking_config"] == {"thinking_budget": 8192}
+
+
 async def test_streams_thinking() -> None:
     chunks = [
         chunk([ns(text="hmm", thought=True)]),

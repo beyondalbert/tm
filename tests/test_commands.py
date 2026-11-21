@@ -425,6 +425,33 @@ async def test_lang_command_switches_language(tmp_path: Path) -> None:
         set_language("en")
 
 
+async def test_thinking_command_saves_and_applies(tmp_path: Path, monkeypatch) -> None:
+    from tm.ai.registry import Registry as _Registry
+
+    monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
+    agent = make_agent()
+    emitted: list[str] = []
+    ctx = CommandContext(
+        agent=agent,
+        registry=_Registry(),
+        cwd=tmp_path,
+        emit=emitted.append,
+        settings=Settings(),
+    )
+    commands = SlashCommands(ctx)
+
+    await commands.handle("thinking")
+    assert "current: auto" in emitted[-1]
+
+    await commands.handle("thinking off")
+    assert agent.thinking == "off"
+    assert ctx.settings is not None and ctx.settings.thinking == "off"
+    assert read_toml(tmp_path / "settings.toml")["thinking"] == "off"
+
+    await commands.handle("thinking nope")
+    assert "current: off" in emitted[-1]
+
+
 async def test_settings_editor_saves_and_applies(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "settings.toml").write_text('provider = "qwen"\n', encoding="utf-8")

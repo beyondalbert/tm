@@ -154,6 +154,35 @@ async def test_max_tokens_is_fitted_to_the_context_window() -> None:
     assert completions.last_params["max_tokens"] == 5_800
 
 
+async def test_thinking_maps_to_reasoning_effort() -> None:
+    provider, completions = _provider(
+        [FakeChunk([FakeChoice(FakeDelta(content="ok"), finish_reason="stop")])]
+    )
+    model = Model(id="o3", provider="openai", reasoning=True)
+    context = Context(messages=[UserMessage(content="hi")])
+
+    await _collect(provider.stream(model, context, StreamOptions(thinking="high")))
+    assert completions.last_params["reasoning_effort"] == "high"
+
+    await _collect(provider.stream(model, context, StreamOptions(thinking="off")))
+    assert completions.last_params["reasoning_effort"] == "none"
+
+    await _collect(provider.stream(model, context, StreamOptions(thinking="auto")))
+    assert "reasoning_effort" not in completions.last_params
+
+
+async def test_thinking_ignored_for_non_reasoning_model() -> None:
+    provider, completions = _provider(
+        [FakeChunk([FakeChoice(FakeDelta(content="ok"), finish_reason="stop")])]
+    )
+    context = Context(messages=[UserMessage(content="hi")])
+    model = Model(id="deepseek-v4-pro", provider="deepseek")
+
+    await _collect(provider.stream(model, context, StreamOptions(thinking="off")))
+
+    assert "reasoning_effort" not in completions.last_params
+
+
 async def test_streams_reasoning_content() -> None:
     chunks = [
         FakeChunk([FakeChoice(FakeDelta(reasoning_content="th"))]),

@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional
 
+from tm.ai.providers.base import THINKING_LEVELS
 from tm.ai.registry import Registry, RegistryError
 from tm.ai.types import AssistantMessage, Message, ToolResultMessage, UserMessage
 from tm.clipboard import copy_to_clipboard
@@ -52,6 +53,7 @@ _SPEC_NAMES = (
     "copy",
     "auto",
     "lang",
+    "thinking",
     "trust",
     "settings",
     "skills",
@@ -175,6 +177,9 @@ class SlashCommands:
             return None
         if command == "lang":
             self._lang(argument)
+            return None
+        if command == "thinking":
+            self._thinking(argument)
             return None
         if command == "trust":
             self._trust(argument)
@@ -454,6 +459,18 @@ class SlashCommands:
         lang = set_language(choice)
         self._emit(_t("cmd.lang_set", lang=lang))
 
+    def _thinking(self, argument: str) -> None:
+        settings = self.ctx.settings or load_settings()
+        level = argument.strip().lower()
+        if level not in THINKING_LEVELS:
+            self._emit(_t("cmd.thinking_usage", level=settings.thinking))
+            return
+        path = save_settings_values({"thinking": level})
+        fresh = load_settings()
+        self.ctx.settings = fresh
+        apply_live_settings(fresh, self.ctx.agent)
+        self._emit(_t("cmd.thinking_set", level=level, path=path))
+
     def _copy(self, argument: str) -> None:
         count = int(argument) if argument.strip().isdigit() else 1
         replies = [
@@ -532,6 +549,7 @@ def apply_live_settings(settings: Settings, agent: Agent) -> None:
     agent.max_turns = settings.max_turns
     agent.max_retries = settings.max_retries
     agent.temperature = settings.temperature
+    agent.thinking = settings.thinking
     for tool in agent.tools:
         if isinstance(tool, ReadTool):
             tool.dedupe = settings.read_dedupe

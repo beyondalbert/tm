@@ -45,6 +45,10 @@ _STOP_REASONS = {
     "tool_use": "tool_use",
 }
 
+#: Token budgets for extended thinking. Anthropic requires at least 1024 and
+#: max_tokens must be strictly larger, so the budget is capped per request.
+_THINKING_BUDGETS = {"low": 1024, "medium": 4096, "high": 16384}
+
 _TOOL_CHOICE = {
     "auto": {"type": "auto"},
     "required": {"type": "any"},
@@ -188,12 +192,18 @@ class AnthropicProvider(Provider):
             if options.cache_retention == "long":
                 cache_control["ttl"] = "1h"
 
+        max_tokens = clamp_max_tokens(model, context, options.max_tokens)
         params: dict[str, Any] = {
             "model": model.id,
-            "max_tokens": clamp_max_tokens(model, context, options.max_tokens),
+            "max_tokens": max_tokens,
             "messages": messages_to_anthropic(context.messages),
             "stream": True,
         }
+        budget = _THINKING_BUDGETS.get(options.thinking or "") if model.reasoning else None
+        if budget is not None:
+            budget = min(budget, max_tokens - 1)
+            if budget >= 1024:
+                params["thinking"] = {"type": "enabled", "budget_tokens": budget}
         if context.system_prompt:
             if cache_control is not None:
                 params["system"] = [
@@ -205,7 +215,8 @@ class AnthropicProvider(Provider):
                 ]
             else:
                 params["system"] = context.system_prompt
-        if options.temperature is not None:
+        # Extended thinking only accepts the provider default temperature.
+        if options.temperature is not None and "thinking" not in params:
             params["temperature"] = options.temperature
         if context.tools:
             tools: list[dict[str, Any]] = [

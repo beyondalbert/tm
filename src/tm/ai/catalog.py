@@ -90,7 +90,13 @@ PRESETS: dict[str, ProviderPreset] = {
         models=(
             _m("anthropic", "claude-3-5-sonnet-latest", context=200_000, max_tokens=8_192),
             _m("anthropic", "claude-3-5-haiku-latest", context=200_000, max_tokens=8_192),
-            _m("anthropic", "claude-3-7-sonnet-latest", context=200_000, max_tokens=8_192),
+            _m(
+                "anthropic",
+                "claude-3-7-sonnet-latest",
+                context=200_000,
+                max_tokens=8_192,
+                reasoning=True,
+            ),
         ),
     ),
     "google": ProviderPreset(

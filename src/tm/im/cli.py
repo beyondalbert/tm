@@ -245,6 +245,7 @@ def run(
             system_prompt=system_prompt,
             temperature=global_settings.temperature,
             max_tokens=global_settings.max_tokens,
+            thinking=global_settings.thinking,
             cwd=cwd,
             session=session,
             auto_compact=global_settings.auto_compact,

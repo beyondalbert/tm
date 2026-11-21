@@ -111,6 +111,7 @@ class Agent:
         stream_fn: StreamFn | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        thinking: str = "auto",
         max_turns: int = 300,
         max_retries: int = 3,
         max_length_continues: int = 3,
@@ -149,6 +150,7 @@ class Agent:
         self.prune = prune or PrunePolicy()
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.thinking = thinking
         self.before_tool_call: BeforeToolCall | None = None
         self.after_tool_call: AfterToolCall | None = None
         self.before_compact: Callable[[list[Message]], object] | None = None
@@ -502,6 +504,7 @@ class Agent:
         options = StreamOptions(
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            thinking=self.thinking,
             signal=self._signal,
             cache_retention=self.cache_retention,
         )

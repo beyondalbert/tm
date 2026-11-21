@@ -142,6 +142,30 @@ async def test_tool_choice_maps_to_any() -> None:
     assert messages.last_params["tool_choice"] == {"type": "any"}
 
 
+async def test_thinking_sets_budget_and_drops_temperature() -> None:
+    prov, messages = provider(text_events())
+    model = Model(id="claude-3-7-sonnet-latest", provider="anthropic", reasoning=True)
+    context = Context(messages=[UserMessage(content="hi")])
+
+    await collect(
+        prov.stream(model, context, StreamOptions(thinking="high", temperature=0.2))
+    )
+
+    params = messages.last_params
+    assert params["thinking"] == {"type": "enabled", "budget_tokens": 8191}
+    assert "temperature" not in params
+
+
+async def test_thinking_off_omits_thinking_block() -> None:
+    prov, messages = provider(text_events())
+    model = Model(id="claude-3-7-sonnet-latest", provider="anthropic", reasoning=True)
+    context = Context(messages=[UserMessage(content="hi")])
+
+    await collect(prov.stream(model, context, StreamOptions(thinking="off")))
+
+    assert "thinking" not in messages.last_params
+
+
 async def test_streams_thinking() -> None:
     events_source = [
         ns(type="message_start", message=ns(usage=ns(input_tokens=1))),

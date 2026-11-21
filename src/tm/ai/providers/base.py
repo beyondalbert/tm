@@ -6,12 +6,17 @@ from tm.ai.event_stream import EventStream
 from tm.ai.types import AssistantMessage, AssistantMessageEvent, Context, Model
 from tm.utils.abort import AbortSignal
 
+#: Thinking levels accepted by ``StreamOptions.thinking``. "auto" leaves the
+#: provider default untouched; "off" asks the provider to stop reasoning.
+THINKING_LEVELS = ("auto", "off", "low", "medium", "high")
+
 
 @dataclass
 class StreamOptions:
     temperature: float | None = None
     max_tokens: int | None = None
-    reasoning: str | None = None
+    #: Thinking level: one of ``THINKING_LEVELS``, or None for the provider default.
+    thinking: str | None = None
     #: OpenAI-style tool choice: "auto", "none", "required", or None for auto.
     tool_choice: str | None = None
     signal: AbortSignal | None = None
@@ -63,4 +68,4 @@ class Provider:
         return None
 
 
-__all__ = ["Provider", "StreamOptions"]
+__all__ = ["THINKING_LEVELS", "Provider", "StreamOptions"]

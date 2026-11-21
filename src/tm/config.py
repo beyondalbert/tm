@@ -49,6 +49,8 @@ class Settings:
     model: str = "deepseek-v4-pro"
     temperature: float | None = None
     max_tokens: int | None = None
+    #: Thinking level for reasoning models: auto | off | low | medium | high.
+    thinking: str = "auto"
     system_prompt: str | None = None
     auto_compact: bool = True
     compact_threshold: float = 0.8
@@ -223,6 +225,11 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
     SettingField("max_turns", "int", minimum=1),
     SettingField("max_retries", "int", minimum=0),
     SettingField("temperature", "float", nullable=True),
+    SettingField(
+        "thinking",
+        "choice",
+        choices=("auto", "off", "low", "medium", "high"),
+    ),
     SettingField("language", "choice", choices=("en", "zh", "auto")),
     SettingField("env_probe", "bool"),
 )

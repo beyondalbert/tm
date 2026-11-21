@@ -338,6 +338,7 @@ allow = ["api.deepseek.com"]
 | `/undo [n]` | 回退最近 n 个可逆变更 |
 | `/copy [n]` | 复制倒数第 n 条回复到剪贴板 |
 | `/lang [en\|zh\|auto]` | 设置界面语言 |
+| `/thinking [级别]` | 设置思考级别（auto/off/low/medium/high） |
 | `/settings` | 交互修改 settings.toml |
 | `/skills` | 列出可用技能 |
 | `/skill:<name>` | 将技能载入对话 |
@@ -350,7 +351,7 @@ allow = ["api.deepseek.com"]
 
 `/settings` 在 TUI 中打开设置面板（纯控制台为编号输入）：选择字段后，布尔值按
 回车切换，数字/字符串直接输入。保存时只把改动的键合并进 `settings.toml`；压缩、
-裁剪、read 去重、回合/重试次数和温度会立即生效（其他字段在下次启动时生效）。
+裁剪、read 去重、回合/重试次数、温度和思考级别会立即生效（其他字段在下次启动时生效）。
 
 **输入。** TUI 输入框支持多行：`Enter` 发送，`Shift+Enter`（或 `Ctrl+J`）插入换行；
 粘贴会保留每一行。运行中按 `Esc` 或 `Ctrl+C` 停止当前回合，按 `Ctrl+P` 暂停/恢复（状态行会显示）。
@@ -411,6 +412,7 @@ provider = "deepseek"
 model = "deepseek-v4-pro"
 temperature = 0.2
 max_tokens = 8192        # 输出上限；会按窗口剩余空间自动收紧
+thinking = "auto"       # 思考模型：auto | off | low | medium | high
 system_prompt = "Extra instructions appended to the system prompt."
 auto_compact = true        # 接近上限时自动压缩较早的上下文
 compact_threshold = 0.8    # 触发压缩的上下文窗口比例
@@ -434,6 +436,13 @@ workspace_dir = ""             # python 脚本保存目录（默认 <config>/wor
 auto_install = true            # 自动安装 python 工具声明的缺失 pip 包
 language = "auto"              # 界面语言：en | zh | auto（也可 --lang、/lang）
 ```
+
+`thinking` 只对模型目录或 `models.toml` 中标记为 `reasoning = true` 的模型生效。
+`auto` 使用 provider 默认；`off` 请求 provider 停止思考；`low`/`medium`/`high`
+选择思考预算。TM 会把它映射为 OpenAI 兼容接口的 `reasoning_effort`、Anthropic 的
+扩展思考 `budget_tokens`，或 Google 的 `thinking_config.thinking_budget`。并非所有
+模型都支持所有级别（例如 Gemini 2.5 Pro 无法关闭思考）。可用 `/thinking off`
+即时切换并写入 `settings.toml`，或在 `/settings` 中修改。
 
 当估算上下文超过 `context_window * compact_threshold`（或更小的 `compact_max_tokens`）时，
 会在发送提示词前自动压缩；默认绝对预算为 200k token，所以 1M 窗口的模型不会涨到几十万。

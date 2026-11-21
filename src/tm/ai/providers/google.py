@@ -44,6 +44,10 @@ _STOP_REASONS = {
     "OTHER": "stop",
 }
 
+#: Thinking budgets passed through ``thinking_config``. 0 disables thinking on
+#: models that support it (Gemini 2.5 Pro cannot disable reasoning).
+_THINKING_BUDGETS = {"off": 0, "low": 1024, "medium": 8192, "high": 24576}
+
 _TOOL_CHOICE_MODES = {
     "auto": "AUTO",
     "required": "ANY",
@@ -140,6 +144,10 @@ class GoogleProvider(Provider):
             config["system_instruction"] = context.system_prompt
         if options.temperature is not None:
             config["temperature"] = options.temperature
+        if model.reasoning:
+            budget = _THINKING_BUDGETS.get(options.thinking or "")
+            if budget is not None:
+                config["thinking_config"] = {"thinking_budget": budget}
         if context.tools:
             config["tools"] = [
                 {

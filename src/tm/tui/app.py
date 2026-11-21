@@ -1402,7 +1402,8 @@ class TMPromptApp(App[None]):
 
         right = f"({model.provider}) {model.id}"
         if model.reasoning:
-            right += " • thinking"
+            level = getattr(self._agent, "thinking", "auto")
+            right += " • thinking" if level == "auto" else f" • thinking:{level}"
         if self.session_approver is not None and self.session_approver.auto:
             right += " • AUTO"
         width = max(self.size.width - 2, 20)

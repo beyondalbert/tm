@@ -158,7 +158,11 @@ async def _chat_once(
     provider: Provider, model: Model, text: str, system_prompt: str | None, settings: Settings
 ) -> None:
     context = Context(system_prompt=system_prompt, messages=[UserMessage(content=text)])
-    options = StreamOptions(temperature=settings.temperature, max_tokens=settings.max_tokens)
+    options = StreamOptions(
+        temperature=settings.temperature,
+        max_tokens=settings.max_tokens,
+        thinking=settings.thinking,
+    )
     await _display(provider, model, context, options)
 
 
@@ -181,7 +185,9 @@ async def _chat_repl(
         messages.append(UserMessage(content=line))
         context = Context(system_prompt=system_prompt, messages=messages)
         options = StreamOptions(
-            temperature=settings.temperature, max_tokens=settings.max_tokens
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            thinking=settings.thinking,
         )
         messages.append(await _display(provider, model, context, options))
 
@@ -352,6 +358,7 @@ def _build_agent(
         ),
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
+        thinking=settings.thinking,
         cwd=cwd,
         session=session,
         auto_compact=settings.auto_compact and not no_auto_compact,

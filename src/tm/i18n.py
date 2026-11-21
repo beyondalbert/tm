@@ -216,6 +216,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "sampling temperature (blank = provider default)",
         "采样温度（空 = 使用 provider 默认）",
     ),
+    "settings.thinking": (
+        "thinking level for reasoning models: auto | off | low | medium | high",
+        "思考模型的思考级别：auto | off | low | medium | high",
+    ),
     "settings.language": ("UI language: en | zh | auto", "界面语言：en | zh | auto"),
     "settings.env_probe": (
         "add a machine summary to the system prompt",
@@ -227,6 +231,14 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "cmd.lang_usage": (
         "usage: /lang en|zh|auto (current: {lang})",
         "用法：/lang en|zh|auto（当前：{lang}）",
+    ),
+    "cmd.thinking_set": (
+        "thinking set to {level} (saved to {path})",
+        "思考级别已设为 {level}（已保存到 {path}）",
+    ),
+    "cmd.thinking_usage": (
+        "usage: /thinking auto|off|low|medium|high (current: {level})",
+        "用法：/thinking auto|off|low|medium|high（当前：{level}）",
     ),
     "cmd.no_session": ("no session (session persistence disabled)", "无会话（已关闭会话持久化）"),
     "cmd.new_session": ("new session {id}", "新会话 {id}"),
@@ -303,6 +315,7 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "spec.copy": ("copy the last reply to the clipboard", "复制最后一条回复到剪贴板"),
     "spec.auto": ("toggle auto-approve for this session", "切换本次会话的自动放行"),
     "spec.lang": ("set the language (en|zh|auto)", "设置语言（en|zh|auto）"),
+    "spec.thinking": ("set the thinking level", "设置思考级别"),
     "spec.trust": ("trust or untrust this project", "信任或取消信任本项目"),
     "spec.settings": ("edit settings interactively", "交互修改设置"),
     "spec.skills": ("list available skills", "列出可用技能"),
@@ -323,6 +336,7 @@ _STRINGS: dict[str, tuple[str, str]] = {
   /copy [n]             copy the nth-from-last reply to the clipboard
   /auto [on|off]        toggle auto-approve for this session
   /lang [en|zh|auto]    set the language
+  /thinking [level]     set the thinking level (auto|off|low|medium|high)
   /trust [off]          trust (or untrust) this project for future sessions
   /settings             edit settings.toml interactively
   /skills               list available skills
@@ -344,6 +358,7 @@ _STRINGS: dict[str, tuple[str, str]] = {
   /copy [n]             复制倒数第 n 条回复到剪贴板
   /auto [on|off]        切换本次会话的自动放行
   /lang [en|zh|auto]    设置语言
+  /thinking [级别]      设置思考级别（auto|off|low|medium|high）
   /trust [off]          信任（或取消信任）本项目，供后续会话使用
   /settings             交互修改 settings.toml
   /skills               列出可用技能
