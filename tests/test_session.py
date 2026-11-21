@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from tm.ai.types import AssistantMessage, TextContent, ToolResultMessage, UserMessage
@@ -46,6 +47,21 @@ def test_continue_recent_filters_by_cwd(tmp_path: Path) -> None:
     assert recent is not None
     assert recent.id == old.id
     assert manager.continue_recent(tmp_path / "missing") is None
+
+
+def test_continue_recent_prefers_last_used_over_last_created(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "sessions")
+    used = manager.create(cwd=tmp_path)
+    used.append(UserMessage(content="start"))
+    time.sleep(0.01)
+    # A newer session, but one that was not used after it was created.
+    manager.create(cwd=tmp_path)
+    time.sleep(0.01)
+    used.append(UserMessage(content="used last"))
+
+    recent = manager.continue_recent(tmp_path)
+    assert recent is not None
+    assert recent.id == used.id
 
 
 def test_list_sessions(tmp_path: Path) -> None:

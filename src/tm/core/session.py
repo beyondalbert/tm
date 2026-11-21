@@ -337,7 +337,9 @@ class SessionManager:
         matching = [info for info in self.list() if info.cwd == str(cwd)]
         if not matching:
             return None
-        latest = max(matching, key=lambda info: info.created)
+        # Pick the session used last, not the one created last: a long-running
+        # session can be older than a short one-shot session in the same cwd.
+        latest = max(matching, key=lambda info: info.updated)
         return self.open(latest.path)
 
 
