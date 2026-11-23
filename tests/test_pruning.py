@@ -165,3 +165,18 @@ async def test_compaction_runs_mid_turn_with_token_budget(tmp_path: Path) -> Non
     assert calls["n"] == 3  # request, mid-turn summary, retried request
     assert isinstance(agent.messages[0], UserMessage)
     assert "earlier summary" in agent.messages[0].content
+
+
+def test_context_tokens_uses_the_pruned_request_view() -> None:
+    from tm.ai.estimate import estimate_context_tokens
+
+    agent = Agent(
+        MODEL,
+        stream_fn=lambda *args: None,  # type: ignore[arg-type]
+        prune=PrunePolicy(
+            enabled=True, keep_turns=1, min_chars=10, keep_chars=1, spill_dir=None
+        ),
+    )
+    agent.set_messages(_history(10))
+
+    assert agent.context_tokens() < estimate_context_tokens(agent.messages)

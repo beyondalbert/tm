@@ -460,7 +460,7 @@ auto_compact = true        # summarize older context when nearing the limit
 compact_threshold = 0.8    # fraction of the context window that triggers it
 compact_keep_recent = 6    # recent messages kept verbatim (fallback)
 compact_keep_tokens = 20000  # recent tokens kept verbatim after compaction
-compact_max_tokens = 200000  # absolute token budget; 0 = window ratio only
+compact_max_tokens = 0      # absolute token budget; 0 = window ratio only
 prune_tool_output = true            # rewrite old tool output in the prompt only
 prune_tool_output_keep_turns = 8    # last N assistant turns are kept verbatim
 prune_tool_output_min_chars = 4000  # only rewrite results at least this long
@@ -490,10 +490,11 @@ cannot disable thinking. Change it live with `/thinking off` (saved to
 
 Automatic compaction runs before a prompt when the estimated context exceeds
 `context_window * compact_threshold` (or `compact_max_tokens`, whichever is
-smaller). The default absolute budget is 200k tokens, so a 1M-window model does
-not drift to hundreds of thousands of tokens. It is also checked before every
-model request, so one long autonomous turn cannot grow far past the budget.
-Disable per run with `--no-auto-compact`.
+smaller). The default absolute budget is `0`, so only the window ratio applies:
+a 1M-window model compacts around 80% of its window. Set `compact_max_tokens`
+to a positive value to cap context growth and cost regardless of the window. It
+is also checked before every model request, so one long autonomous turn cannot
+grow far past the budget. Disable per run with `--no-auto-compact`.
 
 Override the budget for one model in `settings.toml`:
 

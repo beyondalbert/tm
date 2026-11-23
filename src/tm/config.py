@@ -58,7 +58,7 @@ class Settings:
     #: Recent tokens kept verbatim after compaction (0 = use compact_keep_recent).
     compact_keep_tokens: int = 20_000
     #: Absolute token budget for the compaction trigger; 0 uses the window ratio only.
-    compact_max_tokens: int = 200_000
+    compact_max_tokens: int = 0
     #: Per-model overrides, keyed by "provider/model". See CompactionLimits.
     model_overrides: dict[str, dict[str, object]] = field(default_factory=dict)
     #: Rewrite old tool output in the request view (the session keeps it verbatim).

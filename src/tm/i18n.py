@@ -21,6 +21,10 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "context is large (~{tokens} tokens); compacting before responding...",
         "上下文较大（约 {tokens} tokens），正在压缩后再回复…",
     ),
+    "notice.compact_failed": (
+        "could not summarize the context; older messages may be dropped to make room",
+        "上下文压缩失败；必要时将丢弃较早的消息以腾出空间",
+    ),
     "notice.overflow": (
         "context overflowed; compacting and retrying (attempt {n}, keeping {keep} recent)...",
         "上下文溢出；正在压缩并重试（第 {n} 次，保留最近 {keep} 条）…",

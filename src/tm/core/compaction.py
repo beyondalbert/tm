@@ -23,6 +23,11 @@ from tm.utils.abort import AbortSignal
 
 SUMMARY_PREFIX = "Summary of earlier conversation:\n"
 
+#: Output budget for one summarization request. Kept small: a summary is short.
+SUMMARY_MAX_TOKENS = 2048
+#: Larger budget retried when the first request is cut off before any text.
+SUMMARY_RETRY_MAX_TOKENS = 8192
+
 DEFAULT_INSTRUCTIONS = """Create a structured context checkpoint that another model uses to continue the work. Do not continue the conversation. Use this exact format:
 
 ## Goal
@@ -216,10 +221,21 @@ async def summarize_messages(
         system_prompt="You compact conversations into concise, factual summaries.",
         messages=[UserMessage(content=prompt)],
     )
-    options = StreamOptions(signal=signal, max_tokens=2048)
-    stream = stream_fn(model, context, options)
-    final = await stream.result()
-    summary = final.text().strip()
+    async def request(max_tokens: int) -> str:
+        # Reasoning models spend the whole output budget on thinking when the
+        # level is left at the provider default, returning a length stop with no
+        # text. Compaction must always produce text, so thinking is disabled and
+        # a larger budget is retried if the first response is still cut off.
+        options = StreamOptions(
+            signal=signal, max_tokens=max_tokens, thinking="off"
+        )
+        stream = stream_fn(model, context, options)
+        final = await stream.result()
+        return final.text().strip()
+
+    summary = await request(SUMMARY_MAX_TOKENS)
+    if not summary:
+        summary = await request(SUMMARY_RETRY_MAX_TOKENS)
     if not summary:
         return ""
     read_files, modified_files = extract_file_operations(messages)

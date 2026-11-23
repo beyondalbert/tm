@@ -51,7 +51,6 @@ from tm.config import (
     parse_setting_value,
 )
 from tm.core.agent import Agent
-from tm.core.compaction import estimate_context_tokens
 from tm.core.events import (
     AgentEndEvent,
     AgentEvent,
@@ -1377,7 +1376,7 @@ class TMPromptApp(App[None]):
                     total_out += message.usage.output
                     cache_read += message.usage.cache_read
                     cache_write += message.usage.cache_write
-        used = estimate_context_tokens(self._agent.messages, self._agent.system_prompt)
+        used = self._agent.context_tokens()
         window = model.context_window or 0
 
         stats = f"↑{format_tokens(total_in)} ↓{format_tokens(total_out)}"

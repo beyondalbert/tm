@@ -600,3 +600,68 @@ async def test_overflow_falls_back_to_trimming_when_compaction_fails(monkeypatch
     assert last.text() == "done"
     assert len(agent.messages) < 12
 
+
+
+async def test_summarize_disables_thinking_and_retries_when_empty() -> None:
+    from tm.core.compaction import summarize_messages
+
+    seen: list[tuple[int | None, str | None]] = []
+
+    def stream_fn(model, context, options) -> EventStream:
+        seen.append((options.max_tokens, options.thinking))
+        if len(seen) == 1:
+            # A reasoning model that spent the whole budget and produced no text.
+            message = AssistantMessage(content=[], stop_reason="length")
+        else:
+            message = AssistantMessage(
+                content=[TextContent(text="summary")], stop_reason="stop"
+            )
+        stream: EventStream = EventStream()
+        stream.push(StartEvent(partial=message))
+        stream.push(DoneEvent(partial=message, message=message))
+        stream.end(message)
+        return stream
+
+    summary = await summarize_messages(stream_fn, MODEL, [UserMessage(content="hi")])
+
+    assert summary == "summary"
+    assert seen[0][1] == "off"
+    assert seen[1][1] == "off"
+    assert seen[1][0] is not None and seen[0][0] is not None
+    assert seen[1][0] > seen[0][0]
+
+
+async def test_compact_failure_emits_a_warning() -> None:
+    agent = Agent(MODEL, stream_fn=summary_stream(""))
+    notices: list[str] = []
+
+    async def listener(event) -> None:
+        if isinstance(event, AgentNoticeEvent):
+            notices.append(event.text)
+
+    agent.subscribe(listener)
+    agent.set_messages([UserMessage(content=f"m{i}") for i in range(10)])
+
+    assert await agent.compact(keep_recent=4) is False
+    assert any("could not summarize" in text for text in notices)
+
+
+async def test_auto_compact_trims_when_summarization_fails() -> None:
+    small = Model(id="fake", provider="fake", context_window=100)
+    agent = Agent(
+        small,
+        stream_fn=summary_stream(""),
+        auto_compact=True,
+        compact_threshold=0.5,
+        compact_keep_recent=4,
+    )
+    agent.set_messages([UserMessage(content="word " * 20) for _ in range(20)])
+
+    await agent.prompt("new question")
+
+    # Summarization failed, so the older half was dropped instead of retrying.
+    assert len(agent.messages) < 21
+    assert any(
+        isinstance(message, UserMessage) and message.content == "new question"
+        for message in agent.messages
+    )

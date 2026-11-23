@@ -418,7 +418,7 @@ auto_compact = true        # 接近上限时自动压缩较早的上下文
 compact_threshold = 0.8    # 触发压缩的上下文窗口比例
 compact_keep_recent = 6    # 压缩后原样保留的最近消息数（兜底）
 compact_keep_tokens = 20000  # 压缩后原样保留的最近 token 数
-compact_max_tokens = 200000  # 绝对 token 预算；0 表示只用窗口比例
+compact_max_tokens = 0       # 绝对 token 预算；0 表示只用窗口比例
 prune_tool_output = true            # 仅在请求里改写旧工具输出（会话仍保留原文）
 prune_tool_output_keep_turns = 8    # 最近 N 个 assistant 回合的输出不裁剪
 prune_tool_output_min_chars = 4000  # 只裁剪长度达到该值的工具结果
@@ -445,7 +445,8 @@ language = "auto"              # 界面语言：en | zh | auto（也可 --lang�
 即时切换并写入 `settings.toml`，或在 `/settings` 中修改。
 
 当估算上下文超过 `context_window * compact_threshold`（或更小的 `compact_max_tokens`）时，
-会在发送提示词前自动压缩；默认绝对预算为 200k token，所以 1M 窗口的模型不会涨到几十万。
+会在发送提示词前自动压缩。`compact_max_tokens` 默认为 `0`，即只用窗口比例：1M 窗口的
+模型大约在 80% 时压缩。把它设为正数可以无视窗口大小，固定限制上下文增长和成本。
 每次模型请求前也会检查，因此单个很长的自主回合不会远超预算。单次运行可用 `--no-auto-compact` 关闭。
 
 可以在 `settings.toml` 里按模型覆盖预算：

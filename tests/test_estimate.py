@@ -7,7 +7,7 @@ from tm.ai.estimate import (
     estimate_context_tokens,
     estimate_tools_tokens,
 )
-from tm.ai.types import Context, Model, ToolSpec, UserMessage
+from tm.ai.types import Context, Message, Model, ToolSpec, UserMessage
 
 
 def test_clamp_fits_output_to_the_window() -> None:
@@ -53,3 +53,29 @@ def test_context_estimate_includes_the_safety_margin() -> None:
 
     expected = 10_000 - estimate_context_tokens(context.messages) - CONTEXT_SAFETY_TOKENS
     assert clamp_max_tokens(model, context, None) == expected
+
+
+def test_estimate_uses_usage_after_the_last_compaction() -> None:
+    from tm.ai.types import AssistantMessage, TextContent, Usage
+    from tm.core.compaction import SUMMARY_PREFIX
+
+    messages: list[Message] = [
+        UserMessage(content=f"{SUMMARY_PREFIX}summary", timestamp=1000),
+        # Retained from before the compaction: its usage describes a longer prefix.
+        AssistantMessage(
+            content=[TextContent(text="old")],
+            stop_reason="stop",
+            usage=Usage(input=90000, output=10, total=90010),
+            timestamp=900,
+        ),
+        # Produced after the compaction: a valid anchor for the current prefix.
+        AssistantMessage(
+            content=[TextContent(text="new")],
+            stop_reason="stop",
+            usage=Usage(input=2000, output=10, total=2010),
+            timestamp=1100,
+        ),
+    ]
+
+    total = estimate_context_tokens(messages)
+    assert 2010 <= total < 5000

@@ -90,7 +90,7 @@ temperature = 0.2
 language = "auto"          # en | zh | auto
 
 auto_compact = true
-compact_max_tokens = 200000   # 上下文绝对预算；0 = 只用窗口比例
+compact_max_tokens = 0        # 上下文绝对预算；0 = 只用窗口比例
 compact_keep_recent = 6
 compact_keep_tokens = 20000   # 压缩后原样保留的最近 token 数
 prune_tool_output = true
@@ -109,8 +109,9 @@ cache_retention = "short"
 
 说明：
 
-- `compact_max_tokens` 是控制成本和上下文长度的主要开关，默认 200k；对于 1M 窗口
-  模型，长期会稳定在 100k–200k。设为 `0` 则回退到 `context_window * compact_threshold`。
+- `compact_max_tokens` 是控制成本和上下文长度的主要开关，默认 `0`，即使用
+  `context_window * compact_threshold`（1M 窗口约在 80% 时压缩）。设为 `200000`
+  之类的正数可以固定上限，控制成本和上下文增长。
 - `compact_keep_tokens` 限制压缩后原样保留的尾部 token 数；设为 `0` 时改用
   `compact_keep_recent` 条消息。
 - 按模型覆盖预算写在 `[model_overrides."provider/model"]` 下，支持

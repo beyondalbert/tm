@@ -92,7 +92,7 @@ temperature = 0.2
 language = "auto"          # en | zh | auto
 
 auto_compact = true
-compact_max_tokens = 200000   # absolute context budget; 0 = window ratio only
+compact_max_tokens = 0        # absolute context budget; 0 = window ratio only
 compact_keep_recent = 6
 compact_keep_tokens = 20000   # recent tokens kept verbatim
 prune_tool_output = true
@@ -111,9 +111,9 @@ cache_retention = "short"
 
 Notes:
 
-- `compact_max_tokens` is the main cost/context control. The default is 200k;
-  with a 1M-token model it keeps the context in a practical 100k-200k range.
-  Set it to `0` to fall back to `context_window * compact_threshold`.
+- `compact_max_tokens` is the main cost/context control. The default is `0`, so
+  the trigger is `context_window * compact_threshold` (80% of a 1M-token window).
+  Set a positive value such as `200000` to cap context growth and cost.
 - `compact_keep_tokens` bounds the tail kept verbatim after compaction. When it
   is `0`, `compact_keep_recent` messages are kept instead.
 - Per-model overrides go under `[model_overrides."provider/model"]` and accept

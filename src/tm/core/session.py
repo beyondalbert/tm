@@ -135,7 +135,15 @@ class Session:
         for entry in self.active_entries():
             if entry.type == "compaction":
                 summary = str(entry.payload.get("summary", ""))
-                result = [UserMessage(content=f"{SUMMARY_PREFIX}{summary}")]
+                # Use the compaction entry's own time, not the load time: usage
+                # reported by the retained tail predates the summary and must be
+                # ignored, while messages produced after it remain valid anchors.
+                result = [
+                    UserMessage(
+                        content=f"{SUMMARY_PREFIX}{summary}",
+                        timestamp=entry.timestamp,
+                    )
+                ]
             elif entry.type == "message" and entry.message is not None:
                 result.append(entry.message)
         return result

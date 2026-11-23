@@ -20,6 +20,7 @@ from tm.ai.types import (
     ToolCall,
     ToolResultMessage,
     UserMessage,
+    now_ms,
 )
 from tm.core.compaction import (
     SUMMARY_PREFIX,
@@ -257,14 +258,19 @@ class Agent:
             self._stream_fn, self.model, older, instructions, signal, previous_summary
         )
         if not summary:
+            await self._notice(_t("notice.compact_failed"), "warning")
             return False
         if self.session is not None:
             # Durable: the summary and copied-forward tail survive a restart.
             self.session.append_compaction(summary, recent)
             self._messages = self.session.messages()
         else:
+            # The boundary timestamp lets usage estimates tell the stale retained
+            # tail (older) apart from messages produced after this compaction.
             self._messages = [
-                UserMessage(content=f"{SUMMARY_PREFIX}{summary}"),
+                UserMessage(
+                    content=f"{SUMMARY_PREFIX}{summary}", timestamp=now_ms()
+                ),
                 *recent,
             ]
         if self.after_compact is not None:
@@ -317,7 +323,11 @@ class Agent:
             return False
         estimated = estimate_context_tokens(view, self.system_prompt)
         await self._notice(_t("notice.compacting", tokens=estimated), "info")
-        return await self.compact(signal=self._signal)
+        if await self.compact(signal=self._signal):
+            return True
+        # Summarization failed: dropping the older half is better than retrying
+        # the same oversized prompt and re-emitting the notice on every turn.
+        return self._trim_oldest()
 
     @staticmethod
     def _assistant_count(messages: list[Message]) -> int:
@@ -337,6 +347,16 @@ class Agent:
         if self.compact_max_tokens > 0:
             limits.append(self.compact_max_tokens)
         return min(limits) if limits else 0
+
+    def context_tokens(self) -> int:
+        """Estimated prompt tokens for the next request.
+
+        Built from the pruned request view, so the displayed number matches what
+        is actually sent instead of counting tool output that pruning removes.
+        """
+        return estimate_context_tokens(
+            self._request_view(self._messages), self.system_prompt
+        )
 
     def _request_view(self, messages: list[Message]) -> list[Message]:
         """Messages sent to the model; old tool output may be rewritten here only.
@@ -388,9 +408,12 @@ class Agent:
         self._flush_messages()
         estimated = estimate_context_tokens(view, self.system_prompt)
         await self._notice(_t("notice.compacting", tokens=estimated), "info")
-        if await self.compact(signal=self._signal):
-            history = list(self._messages)
-            view = self._request_view(history)
+        if not await self.compact(signal=self._signal):
+            # Summarization failed; shrink the prompt instead of repeating the
+            # same over-budget request turn after turn.
+            self._trim_oldest()
+        history = list(self._messages)
+        view = self._request_view(history)
         return history, view
 
     @property

@@ -211,3 +211,19 @@ def test_points_and_path_to(tmp_path: Path) -> None:
         first.id,
         points[-1].id,
     ]
+
+
+def test_compaction_summary_uses_the_entry_timestamp(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    session.append(UserMessage(content="m1"))
+    session.append(UserMessage(content="m2"))
+    session.append_compaction("summary", [])
+
+    reopened = manager.open(session.path)
+    messages = reopened.messages()
+    compaction = next(
+        entry for entry in reopened.active_entries() if entry.type == "compaction"
+    )
+
+    assert messages[0].timestamp == compaction.timestamp
