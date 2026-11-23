@@ -20,6 +20,7 @@ from tm.ai.types import (  # noqa: E402
     TextContent,
     TextDeltaEvent,
     ToolCall,
+    ToolResultMessage,
     UserMessage,
 )
 from tm.config import Settings  # noqa: E402
@@ -461,6 +462,11 @@ def test_tool_title_formats() -> None:
 
     assert str(tool_title("read", {"path": "src/app.py"})) == "read src/app.py"
     assert str(tool_title("read", {"path": "a.py", "offset": 10, "limit": 5})) == "read a.py:10-14"
+    # Stored sessions can contain string values the model emitted.
+    assert (
+        str(tool_title("read", {"path": "a.py", "offset": "10", "limit": "5"}))
+        == "read a.py:10-14"
+    )
     assert str(tool_title("shell", {"command": "pytest -q"})) == "$ pytest -q"
     assert "grep /TODO/ in src" in str(tool_title("grep", {"pattern": "TODO", "path": "src"}))
     assert str(tool_title("ls", {"path": "src"})) == "ls src"
@@ -1130,3 +1136,39 @@ async def test_first_chunk_clears_the_wait_clock() -> None:
         await pilot.pause()
 
         assert app._request_started is None
+
+
+async def test_resumed_history_renders_string_tool_arguments(tmp_path) -> None:
+    from tm.core.session import SessionManager
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create(cwd=tmp_path)
+    session.append(UserMessage(content="check the file"))
+    session.append(
+        AssistantMessage(
+            content=[TextContent(text="reading")],
+            tool_calls=[
+                ToolCall(
+                    id="t1",
+                    name="read",
+                    arguments={"path": "a.py", "offset": "10", "limit": "5"},
+                )
+            ],
+            stop_reason="tool_use",
+        )
+    )
+    session.append(
+        ToolResultMessage(
+            tool_call_id="t1", tool_name="read", content=[TextContent(text="line")]
+        )
+    )
+
+    agent = Agent(FAKE_MODEL, stream_fn=fake_stream_fn, session=session)
+    app = TMPromptApp(agent, FAKE_MODEL)
+
+    async with app.run_test() as pilot:
+        for _ in range(10):
+            await pilot.pause(0.2)
+            if app.query_one("#messages").children:
+                break
+        assert app.query_one("#messages").children

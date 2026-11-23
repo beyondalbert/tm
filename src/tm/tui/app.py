@@ -115,6 +115,21 @@ def _display_path(value: object, cwd: Path | None = None) -> str:
     return _sanitize(result)
 
 
+def _int_or_none(value: object) -> int | None:
+    """Coerce a stored tool argument to an int.
+
+    A resumed session can contain values the model emitted as strings (for
+    example ``"limit": "26"``) even though the tool schema asks for integers.
+    Rendering history must tolerate that instead of raising.
+    """
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def tool_title(name: str, arguments: dict) -> Text:
     """Render a tool call title the way pi does (name bold, args coloured)."""
     text = Text()
@@ -123,8 +138,9 @@ def tool_title(name: str, arguments: dict) -> Text:
         text.append(" " + _display_path(arguments.get("path")), _ACCENT)
         offset, limit = arguments.get("offset"), arguments.get("limit")
         if offset is not None or limit is not None:
-            start = offset or 1
-            end = start + limit - 1 if limit is not None else None
+            start = _int_or_none(offset) or 1
+            count = _int_or_none(limit)
+            end = start + count - 1 if count is not None else None
             text.append(f":{start}" + (f"-{end}" if end else ""), _WARNING)
     elif name in ("write", "edit"):
         text.append(name, f"bold {_TEXT}")
