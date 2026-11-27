@@ -24,10 +24,10 @@ def make_policy(tmp_path: Path, toml: str) -> Policy:
     return Policy.load(cwd=tmp_path, config_dir=config_dir)
 
 
-def test_default_ask() -> None:
+def test_default_allow() -> None:
     policy = Policy.from_dict({})
     decision, _ = policy.evaluate(Action(ActionKind.SHELL, "ls"))
-    assert decision is Decision.ASK
+    assert decision is Decision.ALLOW
 
 
 def test_deny_wins_over_allow(tmp_path: Path) -> None:
@@ -166,7 +166,9 @@ async def test_permission_hook_allows(tmp_path: Path) -> None:
 
 
 def test_folder_rule_covers_subtree(tmp_path: Path) -> None:
-    policy = Policy.from_dict({"files": {"write": {"allow": ["src"]}}}, cwd=tmp_path)
+    policy = Policy.from_dict(
+        {"default": "ask", "files": {"write": {"allow": ["src"]}}}, cwd=tmp_path
+    )
     assert policy.evaluate(Action(ActionKind.FILE_WRITE, "src/a/b.txt", "write"))[0] is Decision.ALLOW
     assert policy.evaluate(Action(ActionKind.FILE_WRITE, "src", "write"))[0] is Decision.ALLOW
     assert policy.evaluate(Action(ActionKind.FILE_WRITE, "other/b.txt", "write"))[0] is Decision.ASK

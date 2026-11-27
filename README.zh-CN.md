@@ -6,10 +6,10 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/the-machine.svg)](https://pypi.org/project/the-machine/)
 [![CI](https://github.com/beyondalbert/tm/actions/workflows/ci.yml/badge.svg)](https://github.com/beyondalbert/tm/actions/workflows/ci.yml)
 
-一个可以控制你本机、可扩展且带权限审批的本地 AI Agent。
+一个可以控制你本机、可扩展且由策略控制的本地 AI Agent。
 
 TM 是一个用 Python 编写的 Agent 框架，架构借鉴自 [pi](../pi)，并围绕文件系统、
-Shell 与网络访问的**显式权限审批**重新构建。
+Shell 与网络访问的可配置 allow/deny/ask 策略重新构建。
 
 ## 状态
 
@@ -268,9 +268,10 @@ locale 为 `zh_CN.GBK` 时，制表符和中文会让渲染线程报错并冻结
 ## 权限
 
 每一项文件、Shell、网络操作都会依据策略评估。拒绝规则优先，其次允许规则，最后是默认决策。
-**读操作默认放行**（`default_read = "allow"`）；写、Shell、网络默认 `ask`。未决操作会询问
-用户；输入 `a`（always）会记住**作用域**并持久化到 `<config>/approvals.json`，重启后仍有效。
-所有决策写入 `<config>/audit.jsonl`。
+**所有操作默认放行**（`default = "allow"`、`default_read = "allow"`），除非规则另行指定，
+访问不需要用户授权。将 `default = "ask"` 或添加 `ask` 规则可恢复询问；输入 `a`（always）会
+记住**作用域**并持久化到 `<config>/approvals.json`，重启后仍有效。所有决策写入
+`<config>/audit.jsonl`。
 
 会话内想减少弹窗：`/auto on`（TUI 为 `Ctrl+Y`）会对所有未被显式拒绝的操作自动放行，`/auto off`
 恢复询问；`tm --yolo` 则以该模式启动。内置的危险命令清单**始终询问且不记忆**，`elevate` 同样
@@ -280,8 +281,8 @@ locale 为 `zh_CN.GBK` 时，制表符和中文会让渲染线程报错并冻结
 示例：
 
 ```toml
-default = "ask"          # 写、Shell、网络
-default_read = "allow"   # 读（设为 "ask" 则每次询问）
+default = "allow"        # 写、Shell、网络（设为 "ask" 则要求授权）
+default_read = "allow"   # 读（设为 "ask" 则要求授权）
 
 [files.read]
 allow = ["**"]
@@ -312,8 +313,8 @@ allow = ["api.deepseek.com"]
 `.aiagent/SYSTEM.md`）只有在信任该目录后才会加载。首次使用时 TM 会询问，决定保存在
 `<config>/trust.json`，并支持 `--approve`/`--no-approve`、`/trust [off]` 以及
 `default_project_trust`（`ask` | `always` | `never`）。`AGENTS.md` 等上下文文件不受信任门限制。
-非交互模式（`-p`、`--json`、`--mode rpc`）不询问，默认拒绝；请在 `policy.toml` 里放行所需
-操作，或用 `--yolo` 启动。
+非交互模式（`-p`、`--json`、`--mode rpc`）不询问；策略中标记为 `ask` 的操作会被拒绝，
+可用 `deny` 规则限制其可执行的操作。
 
 **变更与撤销。** 会产生变更的工具会向 `<config>/changes/changes.jsonl` 追加记录：文件
 写入/编辑会快照旧内容，包安装与服务启停会记录足以回退的信息，因此 `/undo [n]` 可恢复

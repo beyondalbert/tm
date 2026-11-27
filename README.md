@@ -6,10 +6,11 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/the-machine.svg)](https://pypi.org/project/the-machine/)
 [![CI](https://github.com/beyondalbert/tm/actions/workflows/ci.yml/badge.svg)](https://github.com/beyondalbert/tm/actions/workflows/ci.yml)
 
-A local AI agent that can control your machine, extensible and permission-gated.
+A local AI agent that can control your machine, extensible and policy-controlled.
 
 TM is a Python agent harness inspired by the architecture of [pi](../pi), rebuilt
-around explicit permission approval for filesystem, shell, and network access.
+around a configurable allow/deny/ask policy for filesystem, shell, and network
+access.
 
 ## Status
 
@@ -286,11 +287,12 @@ that the default.
 ## Permissions
 
 Every file, shell, and network action is evaluated against a policy. Deny rules
-win, then allow rules, then the default decision. **Reads are allowed by
-default** (`default_read = "allow"`); writes, shell, and network default to
-`ask`. Undecided actions prompt the user; `a` (always) remembers the scope and
-persists it to `<config>/approvals.json`, so it survives a restart. All decisions
-are appended to `<config>/audit.jsonl`.
+win, then allow rules, then the default decision. **All actions are allowed by
+default** (`default = "allow"`, `default_read = "allow"`), so access does not
+need approval unless a rule says otherwise. Set `default = "ask"` or add `ask`
+rules to require approval; `a` (always) remembers the scope and persists it to
+`<config>/approvals.json`, so it survives a restart. All decisions are appended
+to `<config>/audit.jsonl`.
 
 To reduce prompts during a session, `/auto on` (or `Ctrl+Y` in the TUI) auto
 approves everything that is not explicitly denied for the rest of the session;
@@ -302,8 +304,8 @@ Policy files are merged from `<config>/policy.toml` (global) and
 `<cwd>/.aiagent/policy.toml` (project). Example:
 
 ```toml
-default = "ask"          # writes, shell, network
-default_read = "allow"   # reads (set "ask" to be prompted)
+default = "allow"        # writes, shell, network (set "ask" to require approval)
+default_read = "allow"   # reads (set "ask" to require approval)
 
 [files.read]
 allow = ["**"]
@@ -339,8 +341,8 @@ directory. TM asks on first use, remembers the decision in `<config>/trust.json`
 and honors `--approve`/`--no-approve`, `/trust [off]`, and the
 `default_project_trust` setting (`ask` | `always` | `never`). Context files such
 as `AGENTS.md` are not gated. Non-interactive runs (`-p`, `--json`, `--mode rpc`)
-do not prompt and decline by default, so allowlist what they may do in
-`policy.toml` or start them with `--yolo`.
+do not prompt, so any action the policy leaves as `ask` is declined; add `deny`
+rules to scope what they may do.
 
 **Changes and undo.** Mutating tools append to `<config>/changes/changes.jsonl`.
 File writes/edits snapshot the previous content; package installs and service

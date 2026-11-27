@@ -152,8 +152,8 @@ In the TUI:
 - `/settings` edits configuration interactively
 - `/model` switches models
 - `Esc` stops a turn, `Ctrl+O` expands tool details, `Ctrl+Shift+Q` quits
-- sensitive actions ask for permission; `/auto on` or `tm --yolo` auto-approves
-  (use carefully)
+- actions run by default unless a policy rule marks them `ask`; `/auto on` or
+  `tm --yolo` auto-approves those prompts (use carefully)
 
 ## 6. Common setups
 

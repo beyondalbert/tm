@@ -81,7 +81,8 @@ def _command_candidates(command: str) -> list[str]:
 
 
 class Policy(BaseModel):
-    default: Decision = Decision.ASK
+    #: Unmatched actions are allowed unless a deny/ask rule says otherwise.
+    default: Decision = Decision.ALLOW
     #: Reads are safe, so they are allowed unless a read rule says otherwise.
     default_read: Decision = Decision.ALLOW
     files_read: RuleSet = RuleSet()
@@ -94,7 +95,7 @@ class Policy(BaseModel):
     def from_dict(cls, data: dict, cwd: Path | None = None) -> Policy:
         files = data.get("files", {})
         return cls(
-            default=Decision(str(data.get("default", "ask")).lower()),
+            default=Decision(str(data.get("default", "allow")).lower()),
             default_read=Decision(str(data.get("default_read", "allow")).lower()),
             files_read=RuleSet.model_validate(files.get("read", {})),
             files_write=RuleSet.model_validate(files.get("write", {})),

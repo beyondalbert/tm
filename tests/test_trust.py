@@ -64,7 +64,7 @@ def test_policy_ignores_project_rules_when_untrusted(tmp_path: Path) -> None:
     assert trusted.default.value == "allow"
 
     untrusted = Policy.load(cwd=tmp_path, config_dir=tmp_path / "cfg", include_project=False)
-    assert untrusted.default.value == "ask"
+    assert untrusted.default.value == "allow"
 
 
 def test_resolve_trust_no_resources(tmp_path: Path, monkeypatch) -> None:
