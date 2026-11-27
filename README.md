@@ -253,6 +253,9 @@ Switch to a custom model with `/model my-model` or `tm --model my-model`.
 | `tm --no-mouse` | Let the terminal handle mouse selection/copy |
 | `tm --approve` | Trust project-local files for this run (`-a`) |
 | `tm --no-approve` | Ignore project-local files for this run (`-na`) |
+| `tm serve --stdio` | Serve TM over JSON-RPC so another tool can drive it |
+| `tm mcp-serve` | Expose TM as an MCP server (`tm_run` tool) |
+| `tm acp` | Serve TM over the Agent Client Protocol (editor subset) |
 
 Context files (`AGENTS.md` / `CLAUDE.md`, walking up from cwd, plus the global
 config dir) are appended to the system prompt. Disable with `--no-context-files`.
@@ -283,6 +286,96 @@ copy the nth-from-last reply. If copying does nothing (some terminals intercept
 `Ctrl+Shift+C`), start the TUI with `--no-mouse` and use the terminal's own
 selection (Shift+drag on most terminals). Set `mouse = false` in settings to make
 that the default.
+
+## Embedding (`tm serve`)
+
+Another tool (editor, desktop app, CI script, another agent) can drive TM over
+a process boundary instead of a terminal:
+
+```bash
+tm serve --stdio --mode policy --max-sessions 4
+```
+
+- Transport: JSON-RPC 2.0, one JSON object per line, over stdin/stdout. stdout
+  carries the protocol only; diagnostics go to stderr.
+- Methods: `initialize`, `prompt`, `cancel`, `steer`, `followUp`, `approve`,
+  `session/info`, `session/create`, `session/open`, `session/list`,
+  `session/fork`, `session/set-model`, `session/compact`, `session/undo`,
+  `session/close`, `session/delete`, `providers/list`, `models/list`,
+  `shutdown` (plus `credentials/set|clear` with `--allow-host-credentials`).
+- Notifications: `event` (every `AgentEvent`), `turn/end` (status, final text,
+  stop reason, usage, `changedFiles` with diffs), and `permission/request` /
+  `permission/expired` when the approval bridge is enabled.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"session/create","params":{"cwd":"./pkg","access":"read-only"}}
+{"jsonrpc":"2.0","id":3,"method":"prompt","params":{"content":"fix the failing test"}}
+{"jsonrpc":"2.0","method":"turn/end","params":{"sessionId":"...","turnId":"...","status":"done",
+ "text":"...","changedFiles":[{"path":"pkg/a.py","added":2,"removed":1,"diff":"..."}]}}
+```
+
+Each session has its own cwd, tool allowlist, and access mode (`normal`,
+`read-only`, `dry-run`); `session/undo` reverts its file changes through the
+same journal `/undo` uses. Approval behavior is chosen at startup and never
+widened by the host:
+
+| `--mode` | Actions the policy leaves as `ask` |
+|---|---|
+| `policy` (default) | denied; no notification |
+| `host` | bridged to the host as `permission/request`, timeout denies |
+| `yolo` | allowed, still audited as a host decision |
+
+A host selects the model (`session/create {"model": ...}`, `session/set-model`).
+API keys normally come from the environment when the host spawns TM, from a
+host-owned `TM_CONFIG_DIR` prepared with `tm --login`, or from the user's own
+configuration. A host that learns the key after launch (IDE settings dialog,
+per-tenant vault, rotation) can start with `--allow-host-credentials` and call
+`credentials/set` / `credentials/clear`; that path is memory-only unless
+`persist: true`, returns a masked preview instead of the key, and rebinds open
+sessions immediately. `providers/list` exposes only booleans, and
+`tm serve` starts with `session: null` plus a warning when no usable model is
+configured, so a host can offer a provider-setup flow instead of failing.
+
+Embedders can restrict a run (`--read-only`, `--no-python`, `--no-tools`,
+`--dry-run`) but cannot widen it: the policy in `src/tm/permissions/` stays
+authoritative, and `audit.jsonl` records `host decision` for approvals the host
+gave.
+
+### MCP and ACP
+
+```bash
+tm mcp-serve --mode policy     # MCP host gets one tm_run tool
+tm acp                         # editor-native agent (ACP subset)
+```
+
+`tm mcp-serve` exposes `tm_run {prompt, cwd?, idempotencyKey?}` to MCP hosts; it
+cannot approve anything, so only policy-allowed actions run. `tm acp` covers
+`initialize`, `session/new`, `session/prompt`, `session/cancel`,
+`session/update` streaming, and `session/request_permission`.
+
+### Python SDK
+
+```python
+from tm.sdk import TmClient
+
+async with TmClient.connect(cwd=".") as client:
+    client.on_permission(lambda request: "allow")
+    session = await client.create_session(access="read-only")
+    result = await (await session.prompt("explain src/tm/tools")).wait()
+    print(result.status, result.text, [c.path for c in result.changed_files])
+```
+
+Embedding TM inside another product (white-label: users never configure TM) is
+covered in **[docs/embedding-guide.md](docs/embedding-guide.md#8-white-label-embedding-the-end-user-never-sees-tm)**:
+`--config-dir` per tenant, host-chosen model, host-supplied key, product
+instructions, retention, and error mapping.
+
+Start with **[docs/embedding-guide.md](docs/embedding-guide.md)** for the
+integration walkthrough (JSON-RPC loop, SDK, MCP, ACP, credentials, reconnect
+recipe, checklist). The protocol reference, security model, and the list of what
+is deliberately not implemented live in
+**[docs/design/embedding.md](docs/design/embedding.md)**.
 
 ## Permissions
 
@@ -340,7 +433,7 @@ network boundary.
 directory. TM asks on first use, remembers the decision in `<config>/trust.json`,
 and honors `--approve`/`--no-approve`, `/trust [off]`, and the
 `default_project_trust` setting (`ask` | `always` | `never`). Context files such
-as `AGENTS.md` are not gated. Non-interactive runs (`-p`, `--json`, `--mode rpc`)
+as `AGENTS.md` are not gated. Non-interactive runs (`-p`, `--json`, `tm serve`, `tm mcp-serve`)
 do not prompt, so any action the policy leaves as `ask` is declined; add `deny`
 rules to scope what they may do.
 

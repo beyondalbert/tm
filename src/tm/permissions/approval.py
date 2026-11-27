@@ -16,6 +16,10 @@ from tm.permissions.actions import Action, ActionKind
 class ApprovalOutcome:
     allowed: bool
     remember: bool = False
+    #: Who decided: "user" (terminal/TUI), "host" (embedded RPC host), or
+    #: "host-timeout". Recorded in the audit reason so an automated approval
+    #: cannot be mistaken for a human one.
+    source: str = "user"
 
 
 class Approver(Protocol):
@@ -28,8 +32,17 @@ class AutoDenyApprover:
 
 
 class AutoAllowApprover:
+    """Allow everything that reaches the approver.
+
+    ``source`` is what the audit log records: ``"user"`` when a human started the
+    run with ``--yolo``, ``"host"`` when an embedded host allowed it.
+    """
+
+    def __init__(self, source: str = "user") -> None:
+        self.source = source
+
     async def request(self, action: Action, reason: str) -> ApprovalOutcome:
-        return ApprovalOutcome(allowed=True)
+        return ApprovalOutcome(allowed=True, source=self.source)
 
 
 class SessionApprover:

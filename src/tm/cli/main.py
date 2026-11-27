@@ -217,11 +217,12 @@ def _make_approver(yolo: bool) -> SessionApprover:
     return SessionApprover(inner, auto=yolo)
 
 
-def _make_registry(settings: Settings | None = None) -> Registry:
+def _make_registry(settings: Settings | None = None, output: Console | None = None) -> Registry:
+    sink = output or console
     try:
         presets = load_presets(config_dir())
     except UserModelError as exc:
-        console.print(f"[red]models.toml: {exc}[/red]")
+        sink.print(f"[red]models.toml: {exc}[/red]")
         presets = None
     config = settings if settings is not None else load_settings()
     return Registry(
@@ -253,23 +254,35 @@ def _make_store(enabled: bool) -> Store | None:
     return Store.open(config_dir() / "state.jsonl")
 
 
-def _load_resources(trusted: bool) -> Resources:
-    cwd = Path.cwd()
+def _load_resources(trusted: bool, *, cwd: Path | None = None) -> Resources:
+    base = cwd or Path.cwd()
     return Resources(
-        skills=load_skills(skill_roots(cwd, config_dir(), include_project=trusted)),
-        templates=load_prompt_templates(prompt_roots(cwd, config_dir(), include_project=trusted)),
-        extensions=load_extensions(extension_roots(cwd, config_dir(), include_project=trusted)),
+        skills=load_skills(skill_roots(base, config_dir(), include_project=trusted)),
+        templates=load_prompt_templates(
+            prompt_roots(base, config_dir(), include_project=trusted)
+        ),
+        extensions=load_extensions(
+            extension_roots(base, config_dir(), include_project=trusted)
+        ),
     )
 
 
-def _resolve_trust(settings: Settings, approve: bool, no_approve: bool) -> bool:
+def _resolve_trust(
+    settings: Settings,
+    approve: bool,
+    no_approve: bool,
+    *,
+    prompt: bool = True,
+    cwd: Path | None = None,
+) -> bool:
     """Decide whether project-local resources may load.
 
     Order: CLI override, then a saved decision, then ``default_project_trust``.
-    ``ask`` with no terminal (non-interactive modes) declines, matching pi.
+    ``ask`` declines when there is no terminal (non-interactive modes) or when
+    ``prompt`` is false, as in ``tm serve`` where stdin is the protocol channel.
     """
-    cwd = Path.cwd()
-    resources = project_resources(cwd)
+    base = cwd or Path.cwd()
+    resources = project_resources(base)
     if not resources:
         return True
     if approve:
@@ -277,7 +290,7 @@ def _resolve_trust(settings: Settings, approve: bool, no_approve: bool) -> bool:
     if no_approve:
         return False
     manager = TrustManager(config_dir() / "trust.json")
-    saved = manager.decision(cwd)
+    saved = manager.decision(base)
     if saved is not None:
         return saved
     default = (settings.default_project_trust or "ask").lower()
@@ -287,12 +300,14 @@ def _resolve_trust(settings: Settings, approve: bool, no_approve: bool) -> bool:
         return False
     if not sys.stdin.isatty():
         return False
-    console.print(_t("cli.trust_prompt", cwd=cwd), style="yellow")
+    if not prompt:
+        return False
+    console.print(_t("cli.trust_prompt", cwd=base), style="yellow")
     for path in resources:
         console.print(f"  [dim]{path}[/dim]")
     answer = input(_t("cli.trust_ask")).strip().lower()
     if answer in ("a", "always"):
-        manager.save(cwd, True)
+        manager.save(base, True)
         return True
     return answer in ("y", "yes")
 
@@ -303,17 +318,22 @@ def _system_prompt(
     no_context_files: bool,
     *,
     environment: str | None = None,
+    cwd: Path | None = None,
+    instructions: str | None = None,
 ) -> str:
-    cwd = Path.cwd()
+    base = cwd or Path.cwd()
     extra = settings.system_prompt
     if not no_context_files:
-        section = build_context_section(load_context_files(cwd, config_dir()))
+        section = build_context_section(load_context_files(base, config_dir()))
         if section:
             extra = f"{extra}\n\n{section}" if extra else section
     skills_section = build_skills_section(resources.skills)
     if skills_section:
         extra = f"{extra}\n\n{skills_section}" if extra else skills_section
-    return build_system_prompt(cwd, extra, environment=environment)
+    if instructions:
+        product = f"Product instructions:\n{instructions.strip()}"
+        extra = f"{extra}\n\n{product}" if extra else product
+    return build_system_prompt(base, extra, environment=environment)
 
 
 def _build_agent(
@@ -337,9 +357,11 @@ def _build_agent(
     max_turns: int | None = None,
     max_retries: int | None = None,
     console_ui: bool = True,
+    cwd: Path | None = None,
+    instructions: str | None = None,
 ) -> Agent:
-    cwd = Path.cwd()
-    policy = Policy.load(cwd=cwd, config_dir=config_dir(), include_project=trusted)
+    base = cwd or Path.cwd()
+    policy = Policy.load(cwd=base, config_dir=config_dir(), include_project=trusted)
     checker = PermissionChecker(
         policy,
         approver=approver,
@@ -354,12 +376,17 @@ def _build_agent(
         provider=provider,
         tools=all_tools,
         system_prompt=_system_prompt(
-            settings, resources, no_context_files, environment=environment
+            settings,
+            resources,
+            no_context_files,
+            environment=environment,
+            cwd=base,
+            instructions=instructions,
         ),
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
         thinking=settings.thinking,
-        cwd=cwd,
+        cwd=base,
         session=session,
         auto_compact=settings.auto_compact and not no_auto_compact,
         compact_threshold=limits.threshold,
@@ -377,7 +404,7 @@ def _build_agent(
         journal=journal,
         dry_run=dry_run,
     )
-    agent.before_tool_call = build_permission_hook(checker, cwd)
+    agent.before_tool_call = build_permission_hook(checker, base)
     for listener in resources.extensions.listeners:
         agent.subscribe(listener)
     if json_output:
@@ -1038,6 +1065,24 @@ def run_cli() -> None:
 
         sys.argv = [sys.argv[0], *sys.argv[2:]]
         models_app()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "serve":
+        from tm.cli.serve_cmd import app as serve_app
+
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        serve_app()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp-serve":
+        from tm.cli.mcp_cmd import app as mcp_app
+
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        mcp_app()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "acp":
+        from tm.cli.acp_cmd import app as acp_app
+
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        acp_app()
         return
     app()
 

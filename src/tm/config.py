@@ -359,12 +359,40 @@ def save_credential(provider: str, key: str) -> Path:
     return path
 
 
+def delete_credential(provider: str) -> Path:
+    """Remove a stored API key for ``provider``.
+
+    Returns the credentials path whether or not the key was present, so callers
+    can report where the file lives.
+    """
+    path = credentials_path()
+    if not path.exists():
+        return path
+    try:
+        with path.open("rb") as handle:
+            data = load_toml(handle)
+    except (OSError, TOMLDecodeError):
+        return path
+    providers = data.get("providers")
+    if not isinstance(providers, dict) or provider not in providers:
+        return path
+    del providers[provider]
+    data["providers"] = providers
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        tomli_w.dump(data, handle)
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o600)
+    return path
+
+
 __all__ = [
     "CompactionLimits",
     "Settings",
     "compaction_for",
     "config_dir",
     "credentials_path",
+    "delete_credential",
     "load_credentials",
     "load_settings",
     "read_toml",

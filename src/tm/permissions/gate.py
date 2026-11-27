@@ -143,15 +143,16 @@ class PermissionChecker:
 
     async def _ask(self, actions: list[Action], reason: str) -> bool:
         outcome = await self.approver.request(actions[0], reason)
+        label = f"{outcome.source} decision"
         if outcome.remember and outcome.allowed:
             remembered = [self._remember(a) for a in actions if self._may_remember(a)]
             reason = (
-                f"user decision (remembered {', '.join(remembered)})"
+                f"{label} (remembered {', '.join(remembered)})"
                 if remembered
-                else "user decision"
+                else label
             )
         else:
-            reason = "user decision"
+            reason = label
         for action in actions:
             self._record(action, outcome.allowed, reason)
         return outcome.allowed

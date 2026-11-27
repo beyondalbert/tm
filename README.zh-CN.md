@@ -243,6 +243,9 @@ context_window = 65536
 | `tm --no-mouse` | 让终端接管鼠标选择/复制 |
 | `tm --approve` | 本次运行信任项目本地文件（`-a`） |
 | `tm --no-approve` | 本次运行忽略项目本地文件（`-na`） |
+| `tm serve --stdio` | 以 JSON-RPC 把 TM 暴露给其他工具（可嵌入） |
+| `tm mcp-serve` | 作为 MCP 服务器提供 `tm_run` 工具 |
+| `tm acp` | 以 Agent Client Protocol（编辑器子集）提供服务 |
 
 上下文文件（`AGENTS.md` / `CLAUDE.md`，从当前目录向上查找，外加全局配置目录）会追加到
 系统提示词。用 `--no-context-files` 关闭。
@@ -264,6 +267,61 @@ locale 为 `zh_CN.GBK` 时，制表符和中文会让渲染线程报错并冻结
 会复制最后一条回复；也可用 `/copy [n]` 复制倒数第 n 条回复。如果没有效果（有些终端会拦截
 `Ctrl+Shift+C`），用 `--no-mouse` 启动 TUI，改用终端自带的选择（多数终端为 Shift+拖动）。
 可在 settings 里设 `mouse = false` 使其成为默认。
+
+## 嵌入（`tm serve` / `tm mcp-serve` / `tm acp`）
+
+其他工具（编辑器、桌面应用、CI 脚本、其他 agent）可以通过进程边界驱动 TM，
+而不必接管终端：
+
+```bash
+tm serve --stdio --mode policy --max-sessions 4
+```
+
+- 传输：JSON-RPC 2.0，一行一个 JSON，走 stdin/stdout；stdout 只放协议，诊断走 stderr。
+- 方法：`initialize`、`prompt`、`cancel`、`steer`、`followUp`、`approve`、
+  `session/create|open|list|fork|set-model|compact|undo|close`、`session/info`、
+  `providers/list`、`models/list`、`shutdown`。
+- 通知：`event`（所有 `AgentEvent`）、`turn/end`（状态、最终文本、停止原因、用量、
+  带 diff 的 `changedFiles`）、以及启用审批桥时的 `permission/request`。
+- 每个会话有独立的 cwd、工具白名单和访问模式（`normal` / `read-only` / `dry-run`）；
+  `session/undo` 通过 `/undo` 同一份变更日志回滚。
+- 审批由启动参数决定，宿主只能收窄、不能放宽：`--mode policy`（默认，ask 直接拒绝）、
+  `host`（转给宿主，超时拒绝）、`yolo`（全部放行并记入审计）。审计里会写明
+  `host decision`，不会把自动化审批伪装成人批准。
+
+`tm mcp-serve` 给 MCP 宿主一个 `tm_run {prompt, cwd?, idempotencyKey?}` 工具；
+`tm acp` 提供 ACP 子集（`initialize`、`session/new`、`session/prompt`、
+`session/cancel`、`session/update`、`session/request_permission`）。
+
+Python SDK：
+
+```python
+from tm.sdk import TmClient
+
+async with TmClient.connect(cwd=".") as client:
+    session = await client.create_session(access="read-only")
+    result = await (await session.prompt("解释 src/tm/tools")).wait()
+    print(result.status, result.text, [c.path for c in result.changed_files])
+```
+
+模型可以由宿主选择（`session/create {"model": ...}`、`session/set-model`）。
+密钥默认不走协议：由宿主在启动时通过环境变量注入，或使用宿主自己的
+`TM_CONFIG_DIR`（先用 `tm --login` 写入），或沿用用户已有配置。
+如果宿主是在启动之后才拿到密钥（IDE 设置弹窗、按租户取 vault、轮换），
+用 `tm serve --allow-host-credentials` 启动后调用 `credentials/set` /
+`credentials/clear`：默认只存在内存，`persist: true` 才落盘；返回掩码而回显
+密钥；已在运行的会话会立刻切到新密钥构建的 provider。
+`providers/list` 只返回布尔值；没有可用模型时 `tm serve` 仍会启动
+（`session: null` + `warnings`），宿主可以引导用户配置 provider。
+
+如果 TM 是嵌进别人产品里的（终端用户完全感知不到 TM、也没有地方配置 TM），
+用 `--config-dir` 按租户隔离、由产品侧选模型/注入密钥，并用
+`session/create {"instructions": ...}` 注入产品人设，见指南
+[§8 白标嵌入](docs/embedding-guide.md#8-white-label-embedding-the-end-user-never-sees-tm)。
+
+对接流程（JSON-RPC 循环、SDK、MCP、ACP、密钥设置、重连与检查清单）见
+**[docs/embedding-guide.md](docs/embedding-guide.md)**；完整协议、错误码、
+安全模型与未实现项见 **[docs/design/embedding.md](docs/design/embedding.md)**。
 
 ## 权限
 
@@ -313,7 +371,7 @@ allow = ["api.deepseek.com"]
 `.aiagent/SYSTEM.md`）只有在信任该目录后才会加载。首次使用时 TM 会询问，决定保存在
 `<config>/trust.json`，并支持 `--approve`/`--no-approve`、`/trust [off]` 以及
 `default_project_trust`（`ask` | `always` | `never`）。`AGENTS.md` 等上下文文件不受信任门限制。
-非交互模式（`-p`、`--json`、`--mode rpc`）不询问；策略中标记为 `ask` 的操作会被拒绝，
+非交互模式（`-p`、`--json`、`tm serve`）不询问；策略中标记为 `ask` 的操作会被拒绝，
 可用 `deny` 规则限制其可执行的操作。
 
 **变更与撤销。** 会产生变更的工具会向 `<config>/changes/changes.jsonl` 追加记录：文件

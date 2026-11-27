@@ -55,6 +55,26 @@ class Registry:
         preset = self._presets.get(provider_id)
         return preset is not None and self._api_key(preset) is not None
 
+    def set_api_key(self, provider_id: str, api_key: str) -> Provider | None:
+        """Use ``api_key`` for ``provider_id`` from now on.
+
+        Returns the provider instance that was cached with the old key so the
+        caller can close it; the next ``provider()`` call builds a new one.
+        """
+        preset = self._presets.get(provider_id)
+        if preset is None:
+            raise RegistryError(f"Unknown provider: {provider_id}")
+        self._api_keys[provider_id] = api_key
+        return self._providers.pop(provider_id, None)
+
+    def clear_api_key(self, provider_id: str) -> Provider | None:
+        """Forget an injected key. An environment variable may still provide one."""
+        preset = self._presets.get(provider_id)
+        if preset is None:
+            raise RegistryError(f"Unknown provider: {provider_id}")
+        self._api_keys.pop(provider_id, None)
+        return self._providers.pop(provider_id, None)
+
     def provider(self, provider_id: str) -> Provider:
         if provider_id not in self._providers:
             preset = self._presets.get(provider_id)
